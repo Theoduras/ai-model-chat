@@ -126,6 +126,13 @@
     .mode-opt strong { font-size: 0.88rem; font-weight: 600; }
     .mode-opt span { font-size: 0.77rem; color: var(--text-muted); line-height: 1.45; }
     .mode-opt:hover { border-color: var(--accent-line); }
+    .mode-opt.mode-locked { opacity: .6; cursor: default; }
+    .mode-opt.mode-locked:hover { border-color: var(--border); }
+    .sub-only-tag {
+      display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 999px; vertical-align: middle;
+      font-size: .6rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
+      background: var(--surface-2); color: var(--text-muted);
+    }
     .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 
     /* Feature pickers: a drawing per option, or a chip when there is nothing to draw. */
@@ -859,11 +866,14 @@ function say(text, kind) {
 
 // ── List ────────────────────────────────────────────────────────────────────
 let isAdmin = false;
+let chatbotOn = true;
 async function loadList() {
   el('cards').innerHTML = skelGrid(4);
   try {
     chars = (await api('/api/characters')).characters || [];
-    isAdmin = !!(await PageWizard.me()).isAdmin;
+    const who = await PageWizard.me();
+    isAdmin = !!who.isAdmin;
+    chatbotOn = who.chatbot !== false;
   }
   catch (e) {
     el('cards').innerHTML = `<div class="pg-none"><div class="pg-none-t">Could not load your characters.</div>
@@ -1024,6 +1034,7 @@ async function newCharacter(persona) {
 // ── Editor ──────────────────────────────────────────────────────────────────
 async function openCharacter(id) {
   const [c, m] = await Promise.all([api('/api/characters/' + id), PageWizard.me(), loadPersonas()]);
+  chatbotOn = m.chatbot !== false;
   cur = c.character;
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   el('list-view').hidden = true; el('edit-view').hidden = false;
@@ -2036,6 +2047,10 @@ function renderFinish() {
     ? `<div class="fin-linked">✓ Linked to ${esc(name(cur.persona))}</div>
        <button type="button" class="btn btn-primary" onclick="openPersona()">Open her persona \u2192</button>
        ${others.length ? `<details class="adv"><summary>Link a different persona</summary>${select}</details>` : ''}`
+    : !chatbotOn ? `<div class="mode-pick">
+        <div class="mode-opt mode-locked" aria-disabled="true"><strong>Create her persona <span class="sub-only-tag">Subscribers only</span></strong>
+          <span>Personas, chats and platforms come with a subscription. Her look and photos work on every plan.</span>
+          <a class="btn btn-secondary btn-sm" href="/billing" target="_top">See plans</a></div></div>`
     : `<div class="mode-pick">
         <button type="button" class="mode-opt" onclick="createPersona()"><strong>Create her persona</strong>
           <span>A new persona named after her, ready to set up her voice and chats.</span></button>
@@ -2047,7 +2062,7 @@ function renderFinish() {
 }
 async function createPersona() {
   try {
-    const d = await api(`/api/characters/${cur.id}/studio`, {body: {}});
+    const d = await api(`/api/characters/${cur.id}/studio`, {body: {persona: true}});
     cur.persona = d.slug;
     await loadPersonas();
     openPersona();

@@ -140,7 +140,10 @@ const inp = document.getElementById('input');
 const typingRow = document.getElementById('typing-row');
 let u = null, m = { recentTopics: [], lastTopic: null }, h = [], s = 3.5, l = Date.now(), avatarUrl = null, personaName = '…';
 const params = new URLSearchParams(location.search);
-let persona = params.get('persona') || 'lilly';
+// Opened from her bio page (/c/<handle>): one model, and the list of every
+// other persona is never fetched.
+const FAN = window.__FAN || null;
+let persona = (FAN && FAN.persona) || params.get('persona') || 'lilly';
 // Demo mode (the coming-soon page): always opens on the name screen and keeps
 // nothing, so every visitor gets the same first-run experience. It is fixed to
 // the one demo model — no picker, no switching.
@@ -149,7 +152,7 @@ const DEMO_PERSONA = 'nova';
 if (DEMO) persona = DEMO_PERSONA;
 // The landing page (and a direct shareable link) show one model, so they
 // hide the model picker rail.
-const ONLY = params.get('only') === '1';
+const ONLY = !!FAN || params.get('only') === '1';
 // The dashboard embeds this as the creator's own test chat and wants the
 // picker, which an embed otherwise hides.
 const PICKER = params.get('picker') === '1';
@@ -162,6 +165,7 @@ let PFX = 'persona_' + persona + '_';
 if ((EMBED || window.self !== window.top) && !PICKER) { document.body.classList.add('embed'); }
 if (ONLY) document.body.classList.add('only');
 if (DEMO) document.body.classList.add('demo');
+if (FAN) document.body.classList.add('fan');
 
 function applyPersonaConfig(cfg) {
   avatarUrl = null;
@@ -291,7 +295,7 @@ function renderRail(list) {
 }
 
 function loadPersonaList() {
-  if (DEMO) return Promise.resolve();
+  if (DEMO || FAN) return Promise.resolve();
   return fetch('/api/personas').then(r => r.ok ? r.json() : []).then(list => {
     let items = Array.isArray(list) ? list : [];
     if (ONLY) {   // one model only, unless that slug is missing

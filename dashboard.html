@@ -174,13 +174,13 @@
       </div>
 
       <nav class="sb-nav">
-        <a href="#" class="sb-item" id="sb-nav-personas" data-role-area="personas" data-search="personas" onclick="event.preventDefault();showPersonaBrowser();">
+        <a href="#" class="sb-item" id="sb-nav-personas" data-role-area="personas" data-sub-only data-search="personas" onclick="event.preventDefault();showPersonaBrowser();">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>
           <span>Personas</span>
           <span class="sb-badge" id="persona-count"></span>
         </a>
         <div class="sb-quick" id="sb-quick"></div>
-        <button class="btn-new" data-role-area="personas" onclick="newPersona()">+ New Persona</button>
+        <button class="btn-new" data-role-area="personas" data-sub-only onclick="newPersona()">+ New Persona</button>
 
         <div class="sb-label">Content Creation</div>
         <button type="button" class="sb-item" data-view="/characters" data-role-area="generate" data-search="characters character face body reference look identity" onclick="openEmbedded('/characters', this)">
@@ -201,24 +201,24 @@
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="12" cy="12" r="3"/><path d="M12 4v2M12 18v2" stroke-linecap="round"/></svg>
           <span>Content Vault</span>
         </button>
-        <button type="button" class="sb-item" data-view="/planner" data-search="planner content calendar posts schedule week" onclick="openPlanner(this)">
+        <button type="button" class="sb-item" data-view="/planner" data-sub-only data-search="planner content calendar posts schedule week" onclick="openPlanner(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4" stroke-linecap="round"/></svg>
           <span>Content planner</span>
         </button>
 
         <div class="sb-label">Social Media</div>
-        <button type="button" class="sb-item" data-view="/chat" data-search="chat" onclick="openChat(this)">
+        <button type="button" class="sb-item" data-view="/chat" data-sub-only data-search="chat" onclick="openChat(this)">
           <svg class="sb-ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="16" height="16" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" stroke-linejoin="round"/></svg>
           <span>Chat</span>
         </button>
-        <button type="button" class="sb-item" data-view="/embed-setup" data-search="share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><path d="M8 4 3 12l5 8M16 4l5 8-5 8" stroke-linecap="round" stroke-linejoin="round"/></svg>
-          <span>Share link</span>
+        <button type="button" class="sb-item" data-view="/embed-setup" data-sub-only data-search="link in bio linktree share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          <span>Link in bio</span>
         </button>
 
 
         <div class="sb-group" id="sb-group-platforms" data-role-area="platforms">
-          <button type="button" class="sb-item sb-item-toggle" data-search="platforms fanvue onlyfans fansly" onclick="toggleSbGroup('platforms')">
+          <button type="button" class="sb-item sb-item-toggle" data-sub-only="label" data-search="platforms fanvue onlyfans fansly" onclick="toggleSbGroup('platforms')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><rect x="3" y="4" width="7" height="7" rx="1.3"/><rect x="14" y="4" width="7" height="7" rx="1.3"/><rect x="3" y="14" width="7" height="7" rx="1.3"/><rect x="14" y="14" width="7" height="7" rx="1.3"/></svg>
             <span>Platforms</span>
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -242,7 +242,7 @@
         </div>
 
         <div class="sb-group" id="sb-group-social" data-role-area="platforms">
-          <button type="button" class="sb-item sb-item-toggle" data-search="social media telegram threads x bot reddit instagram tiktok discord" onclick="toggleSbGroup('social')">
+          <button type="button" class="sb-item sb-item-toggle" data-sub-only="label" data-search="social media telegram threads x bot reddit instagram tiktok discord" onclick="toggleSbGroup('social')">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="18" cy="5" r="2.6"/><circle cx="6" cy="12" r="2.6"/><circle cx="18" cy="19" r="2.6"/><path d="M8.4 10.8 15.6 6.4M8.4 13.2l7.2 4.4" stroke-linecap="round"/></svg>
             <span>Social media</span>
             <svg class="sb-chevron" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12" aria-hidden="true"><path d="M9 6l6 6-6 6" stroke-linecap="round" stroke-linejoin="round"/></svg>
@@ -327,7 +327,7 @@
     </div>
 
     <div class="sb-foot">
-      <button type="button" class="btn btn-primary sb-refer" data-view="/referrals" data-search="referrals refer earn commission invite"
+      <button type="button" class="btn btn-primary sb-refer" data-sub-only data-view="/referrals" data-search="referrals refer earn commission invite"
               onclick="openEmbedded('/referrals', this)">Refer a creator &middot; earn 5%</button>
       <span hidden data-view="/account"></span>
     </div>
@@ -646,21 +646,26 @@ function applyEntitlements(me) {
   // can actually use.
   const allowed = caps.platforms;
   const demo = tier === 'demo';
+
+  // Free is content creation only: everything chatbot-related stays visible,
+  // greyed out and labelled, and a click opens the plans instead of the page.
+  if (tier === 'free') {
+    document.querySelectorAll('[data-sub-only], [data-platform]').forEach(el => {
+      const toggle = el.dataset.subOnly === 'label';
+      lockNavItem(el, 'Subscribers only', '/billing');
+      el.classList.add('sub-only');
+      if (toggle) el.onclick = () => toggleSbGroup(el.closest('.sb-group').id.replace('sb-group-', ''));
+      else el.onclick = ev => { if (ev) ev.preventDefault(); navigateWorkspace('/billing'); };
+    });
+    return;
+  }
   (me.hidden_platforms || []).forEach(key => {
     document.querySelectorAll('[data-platform="' + key + '"]').forEach(el => el.remove());
   });
   document.querySelectorAll('[data-platform]').forEach(el => {
     const key = el.dataset.platform;
     if (allowed === null || allowed === undefined || allowed.indexOf(key) !== -1) return;
-    // Free opens every page to look at; the server refuses only the write that
-    // would go live, and that refusal opens the upgrade offer.
-    if (tier === 'free') {
-      const lock = document.createElement('span');
-      lock.className = 'sb-lock';
-      lock.textContent = 'Paid';
-      el.appendChild(lock);
-      return;
-    }
+    if (tier === 'free') return;
     lockNavItem(el, demo ? 'Demo' : 'Pro',
                 demo ? '/demo-ends?from=' + encodeURIComponent(key) : '/pricing');
     el.parentNode.appendChild(el);
@@ -1333,6 +1338,11 @@ function markActiveChar(id) {
 }
 
 function showPersonaBrowser() {
+  // Content-creation accounts have no chatbot to browse: home is the studio.
+  if (window.ME_CAPS && ME_CAPS.chatbot === false) {
+    const studio = document.querySelector('[data-view="/studio"]');
+    if (studio) { openEmbedded('/studio', studio); return false; }
+  }
   currentSlug = null;
   if (window.PlatformSetup && PlatformSetup.running()) PlatformSetup.close();
   if (window.Onboarding) Onboarding.leave();
@@ -3787,7 +3797,7 @@ const TOUR_STEPS = [
   { anchor: '#sb-nav-personas', title: 'Personas',
     body: 'Each persona is an AI version of you that chats with your fans. Create one with <b>+ New Persona</b> and set her voice, her tone and how she sells.' },
   { anchor: '[data-view="/characters"]', span: '[data-view="/studio"]', title: 'Content creation',
-    body: 'Make photos of your persona. <b>Character Creator</b> locks in her look; the <b>Generation Studio</b> turns it into photos. Video is coming soon.' },
+    body: 'Make photos of your characters. <b>Character Creator</b> locks in her look; the <b>Generation Studio</b> turns it into photos. Video is coming soon.' },
   { anchor: '[data-view="/vault"]', title: 'Vault',
     body: 'Photos you keep from the studio land here. Nothing reaches a fan until you have approved it.' },
   { anchor: '#sb-group-platforms', title: 'Platforms',
@@ -3802,7 +3812,9 @@ let tour = null;
 function maybeStartTour() {
   if (CURRENT_UID === 'anon') return;
   if (((window.USER_SETUP || {})[TOUR_KEY] || {}).tour) return;
-  const steps = TOUR_STEPS.filter(st => document.querySelector(st.anchor));
+  const chatbotOff = window.ME_CAPS && ME_CAPS.chatbot === false;
+  const steps = TOUR_STEPS.filter(st => document.querySelector(st.anchor)
+    && !(chatbotOff && (st.anchor === '#sb-nav-personas' || st.anchor === '#sb-group-platforms')));
   if (!steps.length) return;
   tour = { steps, i: 0 };
   document.getElementById('db-tour').classList.add('on');

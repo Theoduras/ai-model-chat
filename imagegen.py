@@ -36,6 +36,9 @@ import base64
 import json
 import logging
 import os
+import subprocess
+import tempfile
+import shutil
 import random
 import re
 import uuid
@@ -95,7 +98,6 @@ RUNWARE_VIDEO_MODELS = {
                                  'prunaai:p-video@replace'),
     # Read off Runware's public model pages, not its live catalogue -- confirm
     # with search_models() before trusting one in production.
-    'p-video-animate': os.getenv('RW_MODEL_VIDEO_ANIMATE', 'prunaai:p-video@animate'),
     'seedance-2-0': os.getenv('RW_MODEL_SEEDANCE_20', 'bytedance:seedance@2.0'),
     'seedance-2-0-fast': os.getenv('RW_MODEL_SEEDANCE_20_FAST',
                                    'bytedance:seedance@2.0-fast'),
@@ -105,14 +107,22 @@ RUNWARE_VIDEO_MODELS = {
     # Kling motion control: her one photo performs the uploaded clip.
     'kling-2-6-mc': os.getenv('RW_MODEL_KLING_26_MC', 'klingai:kling-video@2.6-pro'),
     'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
+    # Video edit: the clip and up to four photos, addressed in the prompt as
+    # @Image1.. Id and fields are from public docs, not the live catalogue.
+    'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@o3-pro'),
 }
 KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
 # The safe-work models that take her photos as `inputs.referenceImages` beside
 # a prompt, so a reel or an animate can carry her character on them.
 REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0')
+# Models whose allow-list has no `negativePrompt`. Sending it costs a refused
+# round trip carrying every reference photo before `_send` strips it.
+NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
 # Models that only work on a clip the creator uploaded.
-CLIP_ONLY_MODELS = ('p-video-replace', 'p-video-animate')
+# p-video-replace stays priced for past jobs but is no longer offered.
+CLIP_ONLY_MODELS = ('p-video-replace', 'kling-3-0-omni')
+DEFAULT_REPLACE_MODEL = 'kling-3-0-omni'
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -144,18 +154,18 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
     'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                        'p-video-replace', 'p-video-animate'), 'needs': (),
+                        'kling-3-0-mc', 'kling-2-6-mc', 'kling-3-0-omni'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
-    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc', 'p-video-replace',
-                        'ml-face-swap', 'wan-2-7'),
+    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc',
+                        'ml-face-swap', 'wan-2-7', 'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
-    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                           'p-video-animate'), 'needs': ('first_frame',),
+    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0'),
+                'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
                 'note': 'An approved still becomes a clip.'},
@@ -263,15 +273,11 @@ MODEL_VIDEO_FIELDS = {
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
-    # Her photo performs the uploaded clip's motion: both go in as references,
-    # and like the replace it runs the clip's own length at a named rung.
-    'p-video-animate': {'shape': 'replace', 'in_source': 'referenceVideos',
-                        'in_refs': 'referenceImages'},
     **{m: {'shape': 'motion', 'in_source': 'referenceVideos',
            'in_refs': 'referenceImages'} for m in ('kling-2-6-mc', 'kling-3-0-mc')},
     **{m: {'shape': 'inputs', 'source': 'inputVideo', 'refs': 'referenceImages'}
        for m in ('seedance-2-0', 'seedance-2-0-fast', 'minimax-h3',
-                 'minimax-h3-fast', 'wan-3-0')},
+                 'minimax-h3-fast', 'wan-3-0', 'kling-3-0-omni')},
 }
 
 # referenceImages takes up to 30 and referenceVideos up to 10, nested.
@@ -285,7 +291,6 @@ MAX_VIDEO_REFERENCES = 30
 # the provider charges for it.
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
-    'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
 }
 
 
@@ -441,7 +446,7 @@ MODEL_VIDEO_SIZES = {
                    (2560, 1440), (1920, 1440), (1440, 1440), (1440, 1920),
                    (1440, 2560)),
     **{m: ((1920, 1080), (1080, 1920), (1440, 1440))
-       for m in ('kling-2-6-mc', 'kling-3-0-mc')},
+       for m in ('kling-2-6-mc', 'kling-3-0-mc', 'kling-3-0-omni')},
     'minimax-h3-fast': ((864, 480), (640, 480), (480, 480), (480, 640), (480, 864)),
 }
 
@@ -477,7 +482,6 @@ MODEL_VIDEO_SECONDS = {
     # The source clip's own length, whatever it is: this model is never told a
     # duration, so nothing here may shorten what it will be billed for.
     'p-video-replace': (1, 60),
-    'p-video-animate': (1, 60),
     'seedance-2-0': (4, 15),
     'seedance-2-0-fast': (4, 15),
     'minimax-h3': (4, 15),
@@ -485,6 +489,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-3-0': (2, 15),
     'kling-2-6-mc': (1, 60),
     'kling-3-0-mc': (1, 60),
+    'kling-3-0-omni': (3, 15),
 }
 
 
@@ -499,15 +504,12 @@ def takes_duration(model_key):
 def wants_face_only(model_key):
     """Whether a model should be sent her face references and nothing else.
 
-    One that replaces the person in a clip takes wardrobe, build and setting
-    from the source, so a body reference adds no information it can use -- and
-    a body shot cropped below the neck, or of anyone else, is a second identity
-    for it to average her face towards. One that regenerates the whole clip
-    needs both.
+    Only the face swap endpoint: it moves a face and nothing else. A model that
+    replaces the person takes her body from the references too now -- a face on
+    a borrowed body is not her -- and is told which image is which, so a body
+    photo is named as her build rather than left to read as a second identity.
     """
-    if model_key == 'ml-face-swap':
-        return True
-    return _video_fields(model_key).get('shape') in ('replace',)
+    return model_key == 'ml-face-swap'
 
 
 def wants_body_only(model_key):
@@ -518,7 +520,18 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
+MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+                 'kling-3-0-omni': 4}
+
+# The studio offers a handful of her views, not thirty, so a model that takes
+# that many is still asked for the few a creator would actually tick.
+PICK_REF_MAX = 6
+
+
+def ref_cap(model_key):
+    """How many of her photos a model is sent, and so how many the picker lets
+    a creator tick for it."""
+    return min(MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES), PICK_REF_MAX)
 
 
 def video_seconds(model_key, seconds):
@@ -633,6 +646,25 @@ SHOT_FRAMING = {
     'nude': 'a full nude boudoir photo',
     'explicit': 'an explicit intimate photo, candid and unposed',
 }
+
+# How far the camera is from her, picked on its own. Where a zoom is chosen the
+# shot's own distance words step aside, so the two never argue.
+ZOOM = {
+    'auto': ('Auto', ''),
+    'close': ('Close', 'framed close, her face and shoulders filling the frame'),
+    'medium': ('Medium', 'framed at a medium distance, from the waist up'),
+    'wide': ('Wide', 'framed wide, her whole body from head to toe with the room around her'),
+    'far': ('Far', 'shot from far away, she is small in the frame and the surroundings dominate'),
+}
+SHOT_FRAMING_NEUTRAL = {
+    'portrait': 'a selfie, looking into the lens',
+    'closeup': ('a photo of her face, facing the lens, her makeup crisp in every detail'),
+    'half': 'a photo',
+    'full': 'a photo',
+}
+
+def zoom_text(key):
+    return (ZOOM.get(key) or ('', ''))[1]
 
 # The one thing a close-up takes from the reference beyond who she is: the
 # face photo is what the creator uploaded to show her makeup, and a face this
@@ -875,6 +907,25 @@ DIRECTIONS_BY_SHOT = {
 }
 
 
+_DOING_STYLE = {'pov-selfie': 'taking a pov selfie', 'mirror-selfie': 'taking a mirror selfie',
+                'candid': 'caught mid-moment', 'photoshoot': 'posing for a photoshoot'}
+_DOING_SHOT = {'portrait': 'looking into the camera', 'closeup': 'looking into the lens',
+               'half': 'posing', 'full': 'standing', 'candid': 'caught mid-moment',
+               'mirror': 'taking a mirror selfie'}
+
+
+def doing_from_choices(shot, scene='', location='', style='', expression='', rng=None):
+    """A short line for what she is doing that says only what the dropdowns
+    already say ("taking a pov selfie in the kitchen, kissy pout"). Anything
+    above safe-for-work keeps the built-in pose text, which is scene-specific."""
+    if SHOT_LEVEL.get(shot, 'sfw') != 'sfw' or SCENES.get(scene, ('sfw',))[0] != 'sfw':
+        return pick_direction(shot, scene, rng)
+    verb = _DOING_STYLE.get(style) or _DOING_SHOT.get(shot) or 'posing'
+    place = SCENES.get(location or scene, ('', ''))[1]
+    mood = (EXPRESSIONS.get(expression) or ('', ''))[0].lower() if expression != 'auto' else ''
+    return ', '.join(b for b in (' '.join(b for b in (verb, place) if b), mood) if b)
+
+
 def camera_text(key):
     return (CAMERAS.get(key) or ('', ''))[1]
 
@@ -973,7 +1024,8 @@ def _sentence(text):
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
                  banned=(), age=None, quality='', clothing='', features='',
-                 expression='', smudges=False, location=''):
+                 expression='', smudges=False, location='', zoom='',
+                 location_ref=''):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -989,10 +1041,17 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     scene_row = SCENES.get(scene, ('sfw', ''))
     intimate = level != 'sfw' or scene_row[0] != 'sfw'
 
+    zoomed = zoom_text(zoom)
     framing = ((clothing and SHOT_FRAMING_BARE.get(shot))
+               or (zoomed and SHOT_FRAMING_NEUTRAL.get(shot))
                or SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait']))
     where = (clothing and SCENES_BARE.get(scene)) or scene_row[1]
     place = SCENES.get(location, ('', ''))[1] if SCENES.get(location, ('',))[0] == 'sfw' else ''
+    if location_ref:
+        # The creator's own photo of the place wins over every dropdown.
+        place = ''
+        where = ('' if scene_row[0] == 'sfw'
+                 else SCENES_ACTION.get(scene) or SCENES_BARE.get(scene) or where)
     if place:
         act = '' if scene in ('', location) else (SCENES_ACTION.get(scene) or where)
         where = ', '.join(b for b in (place, act) if b)
@@ -1009,10 +1068,14 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
 
     body = ' '.join(filter(None, [
         _sentence(((purpose + ': ') if purpose else '')
-                  + ', '.join(b for b in (who, framing, where, styled) if b)),
-        ('The reference images set who she is — not what she wears or where she is.'
-         if has_reference else ''),
+                  + ', '.join(b for b in (who, framing, zoomed, where, styled) if b)),
+        (('The reference images set who she is — not what she wears'
+          + ('.' if location_ref else ' or where she is.')) if has_reference else ''),
         _sentence(f'The photo is taken {place}; the setting must clearly be that place' if place else ''),
+        _sentence(f'The photo is taken in the exact place shown in the {location_ref} '
+                  'reference image — the same room, layout, furniture and light; the '
+                  'setting must clearly match it, with nobody else in it'
+                  if location_ref else ''),
         (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),
@@ -1076,19 +1139,133 @@ def engine_report():
     }
 
 
-def build_swap_prompt(motion='', preserve=False):
+# The second clause a swap cannot be talked out of: who she is, in the detail a
+# model otherwise averages away. Ours, like PRESERVE_CLAUSE, not the creator's.
+IDENTITY_CLAUSE = (
+    'The woman in the reference images is the only person who may appear. '
+    'Reproduce her exactly, not approximately: the same face — bone structure, '
+    'eyes, eyebrows, nose, lips, jaw, skin tone and texture, every beauty mark, '
+    'freckle, scar and piercing — the same hair colour, length and style, and '
+    'the same body — height, proportions, shoulders, waist, hips and legs, with '
+    'every tattoo exactly where and as it appears in the references. Do not '
+    'beautify, slim, smooth, age or restyle her, and do not add, remove or '
+    'alter any feature or body part. Keep the clothing from the video.')
+
+_ROLE_SAID = {'face': 'shows her face', 'body': 'shows her full body',
+              'outfit': 'shows her outfit', 'location': 'shows the location'}
+
+
+def locks_identity(model_key):
+    """Whether a swap on this model carries IDENTITY_CLAUSE. Kling takes who she
+    is from its one photo and uses the prompt only to steer the scene; the face
+    swap endpoint has no prompt to put it in."""
+    return model_key not in KLING_MOTION_MODELS and model_key != EXPLICIT_SWAP_MODEL
+
+
+def uses_at_images(model_key):
+    return model_key == 'kling-3-0-omni'
+
+
+def _roles_sentence(roles, at_images=False):
+    """Which reference image is which, by position: the payload has no other way
+    to tell a model that one photograph is her face and another her body."""
+    if not roles:
+        return ''
+    name = '@Image{n}' if at_images else 'reference image {n}'
+    parts = [name.format(n=n) + ' ' + _ROLE_SAID.get(role, 'is another view of her')
+             for n, role in enumerate(roles, 1)]
+    text = '; '.join(parts)
+    return text[0].upper() + text[1:] + '. All the images of her are the same woman.'
+
+
+_OMNI_ROLE = {'face': 'shows her face (identity)',
+              'body': 'shows her full body (identity)',
+              'outfit': 'is for the outfit only',
+              'location': 'is for the location only'}
+
+
+def _omni_roles(roles):
+    return ' '.join(f'@Image{n} {_OMNI_ROLE.get(r, "shows her (identity)")}.'
+                    for n, r in enumerate(roles, 1))
+
+
+def _omni_swap_prompt(motion, roles, place):
+    """Omni links its inputs only by tag: untagged, it follows the place line
+    and leaves the person in the clip as she was. Each photo is named for what
+    it is, so an outfit or a room is never read as more of her."""
+    tag = {r: f'@Image{n}' for n, r in reversed(list(enumerate(roles, 1)))}
+    her = ' and '.join(f'@Image{n}' for n, r in enumerate(roles, 1)
+                       if r not in ('outfit', 'location')) or '@Image1'
+    place = place.strip().rstrip('.')
+    if 'location' in tag or place:
+        where = (f"the place shown in {tag['location']}" if 'location' in tag
+                 else 'a different place')
+        scene = ('Keep the original motion, timing and camera movement exactly as '
+                 f'they are in @Video1, but set the scene in {where}'
+                 + (f': {place[0].lower() + place[1:]}.' if place else '.'))
+    else:
+        scene = ('Keep the original motion, framing, pacing, lighting and '
+                 'background exactly as they are in @Video1.')
+    if 'location' in tag:
+        scene += (f" Take only the room and background from {tag['location']}; "
+                  f"ignore any person in it — nobody from {tag['location']} "
+                  'appears in the clip.')
+    if 'outfit' in tag:
+        outfit = (f"She wears exactly the outfit shown in {tag['outfit']}, with the "
+                  'same garments, colours, fabric, fit, length and every detail, '
+                  'instead of the clothing in @Video1. Do not add, remove or '
+                  f"restyle any piece of it. Take only the clothing from {tag['outfit']}"
+                  ' — not the person wearing it, her face, hair, body or the '
+                  'background.')
+    else:
+        outfit = 'Keep the clothing from @Video1.'
+    identity = (IDENTITY_CLAUSE
+                .replace('The woman in the reference images', f'The woman in {her}')
+                .replace(' as it appears in the references.', ' as it appears.')
+                .replace(' Keep the clothing from the video.', ''))
+    motion = motion.strip().rstrip('.')
+    if motion and motion[0].islower():
+        motion = 'She ' + motion
+    return ' '.join(part for part in (
+        f'Edit @Video1: replace the woman in @Video1 with the woman shown in {her}, '
+        'keeping her face and body exactly as in those images.',
+        scene, outfit, identity, _omni_roles(roles),
+        motion + '.' if motion else '') if part)
+
+
+def build_swap_prompt(motion='', preserve=False, roles=None, place='',
+                      at_images=False):
     """Instruction text for an edit, not for a still coming to life: the model
     is being told whose face to carry over, and what to leave alone.
 
     `preserve` adds the locked clause, which is ours and not the creator's:
     her own words are appended after it, where they can refine the swap but
-    cannot talk the model out of keeping the clip.
+    cannot talk the model out of keeping the clip. `roles` adds the identity
+    clause: one entry per reference image, in the order they are sent, each
+    `face`, `body` or anything else for another view. An empty list adds the
+    clause without naming the images; None leaves it out.
     """
     base = ('Replace the woman in the reference video with the woman in the '
             'reference images, keeping her face and body consistent with them. '
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
-    if preserve:
+    if at_images:
+        return _omni_swap_prompt(motion, roles or [], place)
+    new_place = bool(place.strip()) or 'location' in (roles or [])
+    if new_place:
+        clip = '@Video1' if at_images else 'the video'
+        base = base.replace(
+            'Keep the original motion, framing, pacing and lighting exactly as '
+            f'they are in {clip}.',
+            'Keep the original motion, timing and camera movement exactly as '
+            f'they are in {"@Video1" if at_images else "the video"}, but set the '
+            'scene in a different place.')
+        if place.strip():
+            base += f' Set in: {place.strip().rstrip(".")}.'
+    if roles is not None:
+        base = ' '.join(part for part in (base, IDENTITY_CLAUSE,
+                                          _roles_sentence(roles, at_images)) if part)
+    if preserve and not new_place:
         base = base + ' ' + PRESERVE_CLAUSE
     return (base + ' ' + motion.strip()) if motion.strip() else base
 
@@ -1159,18 +1336,22 @@ def build_extend_prompt(mode='continue', motion=''):
 
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
-# Provider-side only. There is no ffmpeg in the image, so nothing here can mux
-# an uploaded track onto a clip -- sound either comes out of the generation or
-# it comes out of a second provider task that returns a clip already carrying
-# it. Both are named the way every other model id in this file is: from the
-# environment, because none of this is verified against the live catalogue.
-AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom')
+# Generated sound comes out of the generation or out of a second provider task
+# that returns a clip already carrying it, both named from the environment
+# because none of this is verified against the live catalogue. Keeping,
+# dropping or replacing a clip's own track is ffmpeg on our side (the
+# Dockerfile installs it); without ffmpeg those return the clip unchanged.
+AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom', 'music', 'lipsync')
+
+# Sound a clip gets without a provider pass, so no add-on is charged.
+TRACK_MODES = ('original', 'none', 'upload')
 
 AUDIO_PROMPTS = {
     'ambience': ('natural room tone for this scene — the quiet of the room, '
                  'fabric and movement, nothing musical and no speech'),
     'moaning': ('her breathing and soft moaning, in time with what is on '
                 'screen, no words and no music'),
+    'music': 'background music that fits the mood of the scene, no speech',
 }
 
 # Which route a clip gets its sound by. `native` asks the generation task for
@@ -1189,6 +1370,56 @@ RW_VIDEO_AUDIO_FIELD = os.getenv('RW_VIDEO_AUDIO_FIELD', 'audioPrompt')
 RW_AUDIO_TASK = os.getenv('RW_AUDIO_TASK', 'videoToAudio')
 RW_MODEL_AUDIO = os.getenv('RW_MODEL_AUDIO', 'runware:400@1')
 
+# Lip-sync: a follow-on task that makes her mouth say the line. Unverified
+# like the two above -- check with `search_models('lipsync')` on a live key.
+RW_LIPSYNC_TASK = os.getenv('RW_LIPSYNC_TASK', 'videoInference')
+RW_MODEL_LIPSYNC = os.getenv('RW_MODEL_LIPSYNC', 'sync:lipsync-2@1')
+
+HAS_FFMPEG = bool(shutil.which('ffmpeg'))
+
+
+def _ffmpeg(video, args, audio=None):
+    """Run ffmpeg over a clip held in memory; the clip unchanged on failure,
+    because it is already paid for and already good."""
+    if not HAS_FFMPEG:
+        return video
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'out.mp4')
+        with open(src, 'wb') as f:
+            f.write(video)
+        cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-i', src]
+        if audio is not None:
+            snd = os.path.join(d, 'track')
+            with open(snd, 'wb') as f:
+                f.write(audio)
+            cmd += ['-i', snd]
+        try:
+            subprocess.run(cmd + args + [out], check=True, timeout=120,
+                           capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('ffmpeg failed: %s', str(e)[:200])
+            return video
+
+
+def strip_audio(video):
+    return _ffmpeg(video, ['-an', '-c:v', 'copy', '-movflags', '+faststart'])
+
+
+def copy_audio(video, source):
+    """The source clip's own track on a clip regenerated from it."""
+    return _ffmpeg(video, ['-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'copy',
+                           '-c:a', 'aac', '-shortest', '-movflags', '+faststart'],
+                   audio=source)
+
+
+def mux_audio(video, audio):
+    """Her uploaded track in place of the clip's own, cut to the clip."""
+    return _ffmpeg(video, ['-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
+                           '-c:a', 'aac', '-shortest', '-movflags', '+faststart'],
+                   audio=audio)
+
 
 def audio_prompt(audio, voice=''):
     """What to ask for, from the preset the creator picked.
@@ -1204,6 +1435,10 @@ def audio_prompt(audio, voice=''):
     text = (audio.get('prompt') or '').strip()
     if mode == 'custom':
         return text
+    if mode == 'music':
+        return AUDIO_PROMPTS['music'] + (f'. Mood: {text}' if text else '')
+    if mode == 'lipsync':
+        mode = 'speech'
     if mode == 'speech':
         if not text:
             return ''
@@ -1367,6 +1602,9 @@ def _strip_param(tasks, key):
     for task in tasks:
         if task.pop(key, None) is not None:
             gone = True
+        for provider in (task.get('providerSettings') or {}).values():
+            if isinstance(provider, dict) and provider.pop(key, None) is not None:
+                gone = True
         inputs = task.get('inputs')
         if not isinstance(inputs, dict):
             continue
@@ -1521,9 +1759,10 @@ class RunwareProvider(Provider):
             # the scene. A duration, a size or a negative prompt is refused.
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
-            kling = {'characterOrientation': spec.get('orientation') or 'video'}
-            if model_key == 'kling-2-6-mc':
-                kling['keepOriginalSound'] = spec.get('keep_sound', True) is not False
+            kling = {'characterOrientation': spec.get('orientation') or 'video',
+                     'keepOriginalSound': spec.get('keep_sound', True) is not False}
+            # Kling takes no background parameter; a new place rides in the
+            # prompt, which build_swap_prompt writes from `place`.
             task['providerSettings'] = {'klingai': kling}
         elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
@@ -1536,7 +1775,8 @@ class RunwareProvider(Provider):
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
         else:
-            task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
+            if model_key not in NO_NEGATIVE_MODELS:
+                task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
             task['width'] = width
             task['height'] = height
             task['duration'] = video_seconds(model_key, spec.get('seconds') or 5)
@@ -1681,9 +1921,10 @@ class RunwareProvider(Provider):
         if not prompt:
             raise GenerationError('no audio was asked for', fatal=True)
         task_uuid = str(uuid.uuid4())
-        task = {'taskType': RW_AUDIO_TASK,
+        lipsync = (spec.get('audio') or {}).get('mode') == 'lipsync'
+        task = {'taskType': RW_LIPSYNC_TASK if lipsync else RW_AUDIO_TASK,
                 'taskUUID': task_uuid,
-                'model': RW_MODEL_AUDIO,
+                'model': RW_MODEL_LIPSYNC if lipsync else RW_MODEL_AUDIO,
                 _RW['prompt']: prompt[:600],
                 'inputs': {'video': video_url},
                 _RW['output']: 'URL',

@@ -27,7 +27,8 @@
         .catch(function () { return {}; })
         .then(function (d) {
           setup = d.setup || {};
-          return { isAdmin: !!d.is_admin, setup: setup };
+          return { isAdmin: !!d.is_admin, setup: setup,
+                   chatbot: (d.capabilities || {}).chatbot !== false };
         });
     }
     return mePromise;

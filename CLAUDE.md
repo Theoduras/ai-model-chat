@@ -115,6 +115,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `POST /api/admin/push/subscribe` | JSON | Register this browser for support push alerts |
 | `GET /{tool-slug}` | — | Free tools (`free_tools.TOOLS`); each CTA goes through its own `/signup-tool-…` link |
 | `POST /api/tools/generate` | JSON | Public PPV-caption / DM-opener generator (whitelisted input, rate-limited per IP) |
+| `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL; `/c/{handle}` is her chat without site nav or support bubble |
+| `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`) |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---
@@ -217,6 +219,22 @@ Stay completely in character. Never mention being an AI.
   either host. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
   they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+- **Free is the content-creation plan: characters, the studio and token
+  top-ups, nothing chatbot.** Its `chatbot` capability is False (True on every
+  other plan, admins and grandfathered accounts included) and `personas` is 0.
+  `_require_entitlement` refuses chatbot work for it — persona writes, the
+  planner, share link and the Discord/Instagram/TikTok/Reddit/growth surfaces in
+  `_CHATBOT_PREFIXES` — with a 402 carrying `free: true` (the upgrade offer) or,
+  for a page, a redirect to `/pricing`. The dashboard shows those rows greyed
+  with a "Subscribers only" label and opens the studio as home. It keeps its 15
+  one-time tokens and can buy packs.
+- **Characters are unlimited on every plan; personas are what a plan limits.**
+  A character's own persona is a hidden `studio_only` home (`_CHAR_HOME`),
+  skipped by `_persona_count` and the persona lists (except `?studio=1`), so it
+  never uses a persona slot. `/api/characters/<id>/studio` with `{persona: true}`
+  turns it into a real persona and is the step `_persona_cap_blocked` guards;
+  `/link` moves the content onto an existing persona and drops the home.
+  `_char_json` reports `persona` as '' while a character has only its home.
 - **Generation and characters are open to every active plan; video is not.**
   `/studio`, `/characters` and the `/api/generate/*` and `/api/characters*`
   routes go through `_require_active` (404 for an inactive account). Only
@@ -277,9 +295,9 @@ Stay completely in character. Never mention being an AI.
   the creator picks her identity from the character build (safe-work views
   only) or the vault references, and it then runs on a model in
   `imagegen.REFERENCE_VIDEO_MODELS`. An uploaded video makes it a replace —
-  `p-video-replace` by default, `p-video-animate` to regenerate her in its
-  motion. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and P-Video-Animate
-  were added from Runware's public docs, prices included, **not** its live
+  Kling 3.0 Omni edit by default (`p-video-replace` is no longer offered) (P-Video-Animate was removed: its safety check
+  crashes the provider worker). Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and
+  Kling 3.0 Omni were added from Runware's public docs, prices included, **not** its live
   catalogue: confirm them with `imagegen.search_models` once a key is reachable.
   A safe-work **Swap** defaults to Kling motion control (2.6 Pro, 3.0 Pro
   selectable, same docs-only caveat): her one full-body photo performs the
@@ -303,7 +321,9 @@ Stay completely in character. Never mention being an AI.
   stitching. The frame it continues from is captured **client-side** — a canvas
   seek in `studio.html` — for the same reason: there is nothing on the server
   that can decode a video.
-- **Audio is provider-side only**, for the same missing ffmpeg: either the
+- **Generated audio is provider-side.** The image now has ffmpeg, used only to keep,
+  drop or replace a finished clip's own track (`imagegen.mux_audio`/`strip_audio`,
+  free; lip-sync is a priced follow-on task, `RW_MODEL_LIPSYNC`, unverified). Either the
   generation task emits it (`RW_VIDEO_AUDIO_FLAG`/`RW_VIDEO_AUDIO_FIELD`) or a
   follow-on video-to-audio task returns a muxed clip (`RW_AUDIO_ROUTE=task`).
   A model that does not know the audio fields has them dropped by `_send`'s
@@ -366,6 +386,11 @@ Stay completely in character. Never mention being an AI.
   lives in app settings (or `VAPID_PRIVATE_KEY`); replacing it orphans every
   subscription. Presence ("Online now") is the support bubble's poll, stamped at
   most once a minute into `users.last_seen_at`.
+- **Bio pages live on a neutral domain** (`BIO_DOMAINS`, default `velvt.online`,
+  links `velvt.online/<handle>`) so a fan cannot trace a creator back to the
+  platform. `_bio_domain_gate` runs before every other hook and serves only her
+  page, `/c/<handle>` and what those load; everything else 404s there. Never add
+  platform branding to `bio.html`, `js/bio-render.js` or the `/c/` chat.
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an

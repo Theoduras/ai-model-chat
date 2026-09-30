@@ -7,6 +7,7 @@ import platform_pages
 import free_tools
 import copy
 import json
+import html as html_mod
 import re
 import logging
 import hashlib
@@ -1416,16 +1417,18 @@ def _monthly_tokens_line(key):
 
 _BASE_TIERS = {
     FREE_TIER_KEY: {'name': 'Free', 'price': 0,
-                    'blurb': 'Try it with one persona, no card needed. '
-                             f'{CR.FREE_CREDITS} tokens on us.',
-                    'features': ['1 × AI Persona', '1 × Character Creator',
+                    'blurb': 'Content creation only: unlimited characters, generated '
+                             f'with tokens. {CR.FREE_CREDITS} tokens on us.',
+                    'features': ['Unlimited Character Creator',
                                  'Generation Studio access',
                                  _tokens_line(f'{CR.FREE_CREDITS} generation tokens '
                                               'to get started (one-time)',
                                               CR.FREE_CREDITS),
+                                 'Buy more tokens any time',
                                  'Community support'],
                     'capabilities': {
-                        'personas': 1,
+                        'personas': 0,
+                        'chatbot': False,
                         'seats': 1,
                         'platforms': [],
                         'phases_max': 10,
@@ -1446,6 +1449,7 @@ _BASE_TIERS = {
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
+                        'chatbot': True,
                         'seats': 1,
                         'platforms': [],
                         'phases_max': 10,
@@ -1457,7 +1461,7 @@ _BASE_TIERS = {
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on every platform, fully monetised.',
-                'features': ['1 × AI Persona', '1 × Character Creator',
+                'features': ['1 × AI Persona', 'Unlimited Character Creator',
                              'Every social media platform integration',
                              'Generation Studio access',
                              'Social media funnel to paid pages',
@@ -1470,6 +1474,7 @@ _BASE_TIERS = {
                              'Email support'],
                 'capabilities': {
                     'personas': 1,
+                    'chatbot': True,
                     'seats': 1,
                     'platforms': None,
                     'phases_max': 3,
@@ -1482,7 +1487,7 @@ _BASE_TIERS = {
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
             'features': ['Everything in Starter, plus:',
-                         '5 × AI Persona', '5 × Character Creator',
+                         '5 × AI Persona', 'Unlimited Character Creator',
                          '2 team seats',
                          'Media tagging',
                          'Up to 10 funnel phases with photo rates',
@@ -1491,6 +1496,7 @@ _BASE_TIERS = {
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
+                'chatbot': True,
                 'seats': 2,
                 'platforms': None,
                 'phases_max': 10,
@@ -1503,7 +1509,7 @@ _BASE_TIERS = {
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
                'features': ['Everything in Pro, plus:',
-                            '15 × AI Persona', '15 × Character Creator',
+                            '15 × AI Persona', 'Unlimited Character Creator',
                             '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
@@ -1511,6 +1517,7 @@ _BASE_TIERS = {
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
+                   'chatbot': True,
                    'seats': 6,
                    'platforms': None,
                    'phases_max': 10,
@@ -1563,7 +1570,7 @@ G3 = 'Team & support'
 
 # Custom is quote-only, so it has no capabilities of its own to enforce; these
 # exist only so the feature matrix can describe it beside the plans that do.
-CUSTOM_CAPS = {'personas': None, 'seats': None, 'platforms': None,
+CUSTOM_CAPS = {'personas': None, 'chatbot': True, 'seats': None, 'platforms': None,
                'phases_max': None, 'outfit_lock': True,
                'scheduled_followups': True, 'analytics': True,
                'ppv_reconcile': True, 'tokens_month': None}
@@ -1575,18 +1582,20 @@ def _paid(c):
 
 FEATURE_ROWS = [
     (G1, 'AI personas',
-     lambda c: ('Unlimited AI Personas' if c['personas'] is None
-                else f"{c['personas']} × AI Persona"),
-     'Every persona is her own character, with her own voice, photos, funnel and '
-     'connected account. Your plan sets how many you can run at once.'),
+     lambda c: (False, 'Starter and up') if not c['chatbot'] else (
+         'Unlimited AI Personas' if c['personas'] is None
+         else f"{c['personas']} × AI Persona"),
+     'A persona is a character you connect a chatbot and your accounts to, with '
+     'her own voice, funnel and connected account. Your plan sets how many you '
+     'can run at once; the characters you build are not limited.'),
     (G1, 'Character Creator',
-     lambda c: ('Unlimited Character Creator' if c['personas'] is None
-                else f"{c['personas']} × Character Creator"),
+     lambda c: 'Unlimited Character Creator',
      'Build her look once — face, body, style — and approve it. Every '
      'photo and clip is generated from that approved character, so she looks '
-     'the same in every set.'),
+     'the same in every set. Build as many characters as you like on every plan.'),
     (G1, 'AI persona builder',
-     lambda c: 'Visual builder, or generate backstory, voice and triggers',
+     lambda c: 'Visual builder, or generate backstory, voice and triggers'
+     if c['chatbot'] else (False, 'Starter and up'),
      'Fill in a form — name, age, backstory, archetype, warmth, escalation '
      'pace — and the system prompt behind every reply is written for you. '
      'Stuck? Generate the backstory, speech style and triggers, then edit what '
@@ -1604,16 +1613,18 @@ FEATURE_ROWS = [
     (G1, 'Content Vault',
      lambda c: ('Unlimited uploads, SFW and NSFW sets'
                 + ('' if c['_key'] == 'starter' else ', media tagging'))
-     if _paid(c) else (False, 'Starter and up'),
+     if _paid(c) else 'Everything you generate, kept in one place',
      'Upload your own sets and mark them SFW or NSFW. From Pro, tag every photo '
      'and clip so the funnel picks the right one for the moment and never '
      'sends a fan the same photo twice.'),
     (G1, 'Live chat engine',
-     lambda c: 'Memory of the fan, in-character replies, tone matching',
+     lambda c: 'Memory of the fan, in-character replies, tone matching'
+     if c['chatbot'] else (False, 'Starter and up'),
      'She remembers what a fan told her, answers in character and matches his '
      'tone, so the conversation reads like a person rather than a bot.'),
     (G1, 'Test chat + shareable landing page',
-     lambda c: 'Talk to her yourself and send fans a hosted landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page'
+     if c['chatbot'] else (False, 'Starter and up'),
      'Talk to her yourself before any fan does, and send fans a hosted page '
      'where they can start chatting straight away.'),
     (G2, 'Social media funnel',
@@ -1708,6 +1719,7 @@ def _feature_matrix():
                     'cta': ('Coming soon' if tier.get('coming_soon') else
                             'Start free' if key == FREE_TIER_KEY else 'Get started'),
                     'highlights': [
+                        {'value': '∞', 'label': 'Characters'},
                         {'value': ('∞' if caps['personas'] is None
                                    else str(caps['personas'])),
                          'label': 'Personas'},
@@ -2024,7 +2036,7 @@ def _activate_plan(session_db, user_row, tier_key, days=None):
     return user_row.expires_at
 
 
-DENIED_CAPS = {'personas': 0, 'seats': 0, 'platforms': [], 'phases_max': 0,
+DENIED_CAPS = {'personas': 0, 'chatbot': False, 'seats': 0, 'platforms': [], 'phases_max': 0,
                'outfit_lock': False, 'scheduled_followups': False,
                'analytics': False, 'ppv_reconcile': False,
                'tokens_month': 0}
@@ -2217,7 +2229,8 @@ def _cap_denied(name, user, extra=None):
 
 def _persona_count(user):
     return len([p for p in db_list_personas(owner_id=_workspace_id(user))
-                if not p.get('config', {}).get('content_vault')])
+                if not p.get('config', {}).get('content_vault')
+                and not p.get('config', {}).get('studio_only')])
 
 
 def _persona_cap_blocked(user):
@@ -2229,7 +2242,10 @@ def _persona_cap_blocked(user):
     used = _persona_count(user)
     if used < int(limit):
         return None
-    return _cap_denied('personas', user, {'used': used, 'limit': int(limit)})
+    extra = {'used': used, 'limit': int(limit)}
+    if (user or {}).get('tier') == FREE_TIER_KEY:
+        extra['free'] = True
+    return _cap_denied('personas', user, extra)
 
 
 def _usage_period():
@@ -2320,6 +2336,30 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
              '/api/fanvue', '/api/onlyfans', '/api/platforms', '/api/visitors',
              '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
+# The chatbot side of the product, for plans without the `chatbot` capability
+# (Free is content creation only). These are not in _PAID_* because Demo, which
+# has the capability, must keep reaching them as it always has.
+_CHATBOT_PREFIXES = ('/planner', '/embed-setup', '/api/bio', '/api/growth', '/discord',
+                     '/instagram', '/tiktok', '/reddit', '/api/discord',
+                     '/api/instagram', '/api/tiktok', '/api/reddit')
+_PERSONA_SUB_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)(?:/|$)')
+
+
+def _chatbot_gated(path, method):
+    """True when this request is chatbot work. A persona write is chatbot work
+    unless the persona is a character's own hidden home or the "Your Content"
+    vault, which the studio and the character builder write to."""
+    if path.startswith(_CHATBOT_PREFIXES):
+        return True
+    if method in ('GET', 'HEAD', 'OPTIONS'):
+        return False
+    m = _PERSONA_SUB_RE.match(path)
+    if not m or m.group(1) == 'copy':
+        return bool(m)
+    saved = db_get_persona(m.group(1))
+    return not (saved and (saved.get('config') or {}).get('studio_only'))
+
+
 # Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
@@ -2521,6 +2561,8 @@ def _path_needs_plan(path, method):
         return False
     if path.startswith(_PAID_PAGES) or path.startswith(_PAID_API):
         return True
+    if path.startswith(_CHATBOT_PREFIXES):
+        return True
     # chat.html reads personas to render the fan chat, so only writes are gated.
     if path.startswith('/api/personas') and method not in ('GET', 'HEAD', 'OPTIONS'):
         return True
@@ -2579,12 +2621,10 @@ def _require_entitlement(path, method, user, wants_json):
                     if method not in ('GET', 'HEAD', 'OPTIONS') else None)
         if platform is None:
             platform = _PLATFORM_PAGES.get(path)
-            # Free is sold on seeing everything: its pages open read-only and
-            # only the write that would put something live is refused.
-            if platform and user.get('tier') == FREE_TIER_KEY:
-                platform = None
         if platform and platform not in allowed:
             if user.get('tier') == FREE_TIER_KEY:
+                if not wants_json:
+                    return redirect('/pricing')
                 return _cap_denied('platform', user,
                                    {'platform': platform, 'free': True})
             if _is_demo(user):
@@ -2597,6 +2637,12 @@ def _require_entitlement(path, method, user, wants_json):
             if not wants_json:
                 return redirect('/pricing')
             return _cap_denied('platform', user, {'platform': platform})
+
+    if not caps.get('chatbot') and _chatbot_gated(path, method):
+        if not wants_json:
+            return redirect('/pricing')
+        return _cap_denied('chatbot', user,
+                           {'free': user.get('tier') == FREE_TIER_KEY})
 
     cap = _longest_prefix(_CAP_PATHS, path)
     if cap and not caps.get(cap):
@@ -7460,6 +7506,429 @@ def register_link_click(code):
     return redirect('/register')
 
 
+# ── Link in bio: /link-<handle> ─────────────────────────────────────────────
+# One public page per persona for a social bio. The handle is the creator's to
+# change; the page is one JSON blob rendered client-side by js/bio-render.js,
+# which the editor's live preview shares so the two never drift.
+
+_BIO_HANDLE_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$')
+_BIO_RESERVED = {'admin', 'support', 'velvetfunneler', 'velvetfunnel', 'help',
+                 'login', 'register', 'api', 'www', 'official'}
+_BIO_IMG_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
+# Username platforms build the link from a template, so what a creator types
+# can only ever become a profile on that platform. The editor's copy of this
+# table is window.BIO_NETS in js/bio-render.js.
+_BIO_SOCIALS = {
+    'instagram': 'https://instagram.com/{u}', 'tiktok': 'https://tiktok.com/@{u}',
+    'x': 'https://x.com/{u}', 'onlyfans': 'https://onlyfans.com/{u}',
+    'fanvue': 'https://fanvue.com/{u}', 'fansly': 'https://fansly.com/{u}',
+    'telegram': 'https://t.me/{u}', 'snapchat': 'https://snapchat.com/add/{u}',
+    'reddit': 'https://reddit.com/user/{u}', 'threads': 'https://threads.net/@{u}',
+    'youtube': 'https://youtube.com/@{u}', 'twitch': 'https://twitch.tv/{u}',
+    'kick': 'https://kick.com/{u}', 'facebook': 'https://facebook.com/{u}',
+    'pinterest': 'https://pinterest.com/{u}', 'bluesky': 'https://bsky.app/profile/{u}',
+    'patreon': 'https://patreon.com/{u}', 'throne': 'https://throne.com/{u}',
+    'discord': 'https://discord.gg/{u}', 'whatsapp': 'https://wa.me/{u}',
+    'email': 'mailto:{u}', 'spotify': '', 'amazon': '', 'website': '',
+}
+_BIO_USER_RE = re.compile(r'^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,60}$')
+
+
+def _bio_social(so):
+    """{net, user} or a legacy {net, url} → {net, user, url}, or None."""
+    net = so.get('net')
+    if net not in _BIO_SOCIALS:
+        return None
+    tpl = _BIO_SOCIALS[net]
+    user = str(so.get('user') or '').strip()[:200]
+    if not tpl:
+        url = _bio_url(user or so.get('url'))
+        return {'net': net, 'user': url, 'url': url} if url else None
+    if not user and so.get('url'):
+        user = str(so['url'])
+    if net == 'email':
+        user = user.removeprefix('mailto:')
+        ok = re.match(r'^[^@\s/]+@[^@\s/]+\.[a-z]{2,}$', user, re.I)
+    else:
+        # A pasted profile link or "@name" still means the name.
+        user = re.sub(r'^https?://', '', user, flags=re.I).rstrip('/').split('?')[0]
+        user = user.rsplit('/', 1)[-1].lstrip('@')
+        if net == 'whatsapp':
+            user = re.sub(r'[^0-9]', '', user)
+        ok = _BIO_USER_RE.match(user)
+    if not ok:
+        return None
+    return {'net': net, 'user': user, 'url': tpl.replace('{u}', urllib.parse.quote(user, safe='@.'))}
+_BIO_CHOICES = {
+    'bg_type': ('solid', 'gradient', 'image'),
+    'btn_style': ('fill', 'glass', 'outline', 'shadow'),
+    'radius': ('square', 'round', 'pill'),
+    'avatar_shape': ('circle', 'rounded', 'cover'),
+    'socials_pos': ('top', 'bottom'),
+    'icon_color': ('text', 'brand'),
+    'gate': ('off', 'button', 'page'),
+    'font_title': ('Caveat', 'Fraunces', 'Syne', 'DM Sans', 'Playfair Display',
+                   'Bebas Neue', 'Pacifico', 'Space Mono'),
+    'font_body': ('DM Sans', 'Inter', 'Lora', 'Space Mono', 'Nunito'),
+}
+_BIO_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+_BIO_DEFAULT_THEME = {
+    'preset': 'peach', 'bg_type': 'gradient', 'bg1': '#ffe9dd', 'bg2': '#f2c7e3',
+    'bg_image': None, 'text': '#4a2733', 'btn_bg': '#fff9f6', 'btn_text': '#4a2733',
+    'accent': '#8d3f5c', 'btn_style': 'fill', 'radius': 'round',
+    'avatar_shape': 'rounded', 'font_title': 'Caveat', 'font_body': 'DM Sans',
+    'socials_pos': 'top', 'icon_color': 'text',
+}
+
+
+def _bio_handle_error(handle, slug):
+    if not _BIO_HANDLE_RE.match(handle or ''):
+        return 'Use 3 to 30 letters, numbers, - or _.'
+    if handle in _BIO_RESERVED:
+        return 'That name is reserved.'
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == handle).first()
+        if row and row.slug != slug:
+            return 'Already taken.'
+    finally:
+        s.close()
+    return ''
+
+
+def _bio_sfw_vault(slug):
+    """Her approved safe-work stills: the only vault media a public page may show."""
+    from db import list_persona_media
+    s = _db_session()
+    try:
+        return [r.id for r in _approved_only(list_persona_media(s, slug))
+                if (r.kind or 'image') == 'image' and (r.rating or '') == 'sfw']
+    except Exception:
+        return []
+    finally:
+        s.close()
+
+
+def _bio_url(u):
+    u = (u or '').strip()[:1000]
+    if u and not re.match(r'^(https?://|mailto:)', u, re.I):
+        u = 'https://' + u
+    p = urllib.parse.urlparse(u)
+    if p.scheme.lower() == 'mailto':
+        return u if '@' in u else ''
+    return u if p.scheme.lower() in ('http', 'https') and '.' in p.netloc else ''
+
+
+def _bio_image(img, vault):
+    """{src: upload|vault, ...} → the same shape, or None. Uploads arrive
+    resized by the editor; vault picks must be her own safe-work stills."""
+    if not isinstance(img, dict):
+        return None
+    if img.get('src') == 'upload':
+        data = img.get('data') or ''
+        if len(data) <= 900_000 and _BIO_IMG_RE.match(data):
+            return {'src': 'upload', 'data': data}
+    elif img.get('src') == 'vault' and img.get('id') in vault:
+        return {'src': 'vault', 'id': img['id']}
+    return None
+
+
+def _bio_clean(cfg, slug):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    vault = set(_bio_sfw_vault(slug))
+    s = lambda v, n: str(v or '').strip()[:n]
+    out = {'name': s(cfg.get('name'), 60), 'bio': s(cfg.get('bio'), 300),
+           'avatar': _bio_image(cfg.get('avatar'), vault),
+           'gate': cfg.get('gate') if cfg.get('gate') in _BIO_CHOICES['gate'] else 'off'}
+    socials = []
+    for so in (cfg.get('socials') or [])[:24]:
+        clean = _bio_social(so) if isinstance(so, dict) else None
+        if clean:
+            socials.append(clean)
+    out['socials'] = socials
+    blocks, seen = [], set()
+    for b in (cfg.get('blocks') or [])[:60]:
+        if not isinstance(b, dict) or b.get('type') not in ('chat', 'link', 'header', 'text'):
+            continue
+        bid = re.sub(r'[^a-z0-9]', '', str(b.get('id') or '').lower())[:12] or secrets.token_hex(4)
+        if bid in seen:
+            bid = secrets.token_hex(4)
+        seen.add(bid)
+        nb = {'id': bid, 'type': b['type'], 'hidden': bool(b.get('hidden'))}
+        if b['type'] == 'text':
+            nb['text'] = s(b.get('text'), 500)
+        else:
+            nb['title'] = s(b.get('title'), 80)
+        if b['type'] in ('chat', 'link'):
+            nb['spotlight'] = bool(b.get('spotlight'))
+            nb['adult'] = bool(b.get('adult'))
+            nb['thumb'] = _bio_image(b.get('thumb'), vault)
+        if b['type'] == 'link':
+            nb['url'] = _bio_url(b.get('url'))
+        blocks.append(nb)
+    out['blocks'] = blocks
+    theme = dict(_BIO_DEFAULT_THEME)
+    t = cfg.get('theme') if isinstance(cfg.get('theme'), dict) else {}
+    theme['preset'] = s(t.get('preset'), 20)
+    for k in ('bg1', 'bg2', 'text', 'btn_bg', 'btn_text', 'accent'):
+        if _BIO_COLOR_RE.match(str(t.get(k) or '')):
+            theme[k] = t[k]
+    for k, opts in _BIO_CHOICES.items():
+        if k != 'gate' and t.get(k) in opts:
+            theme[k] = t[k]
+    theme['bg_image'] = _bio_image(t.get('bg_image'), vault)
+    out['theme'] = theme
+    return out
+
+
+def _bio_default(slug):
+    pc = load_persona_config(slug)
+    return {'name': pc.get('name') or slug, 'bio': '', 'avatar': None, 'gate': 'off',
+            'socials': [], 'theme': dict(_BIO_DEFAULT_THEME),
+            'blocks': [{'id': 'chat', 'type': 'chat', 'title': 'Talk to me privately',
+                        'spotlight': True, 'adult': False, 'thumb': None, 'hidden': False}]}
+
+
+def _bio_row(s, slug, create=False):
+    from db import BioPage
+    row = s.query(BioPage).filter(BioPage.slug == slug).first()
+    if row or not create:
+        return row
+    base = re.sub(r'[^a-z0-9_-]', '', (load_persona_config(slug).get('name') or slug).lower().replace(' ', '-'))[:24].strip('-_') or slug[:24].strip('-_')
+    base = base if len(base) >= 3 else (base + 'xxx')[:3]
+    handle, n = base, 1
+    while _bio_handle_error(handle, slug):
+        n += 1
+        handle = f'{base}{n}'
+    row = BioPage(slug=slug, handle=handle, config_json=json.dumps(_bio_default(slug)))
+    s.add(row)
+    s.commit()
+    return row
+
+
+def _bio_public(row):
+    """What the public page gets: the config with hidden blocks dropped and
+    every image resolved to a URL."""
+    cfg = json.loads(row.config_json or '{}')
+    def img(i):
+        if not i:
+            return None
+        return i['data'] if i['src'] == 'upload' else f'/api/personas/{row.slug}/media/{i["id"]}/image'
+    cfg['avatar_url'] = img(cfg.get('avatar')) or f'/api/personas/{row.slug}/avatar'
+    cfg['theme']['bg_image_url'] = img(cfg['theme'].get('bg_image'))
+    blocks = []
+    for b in cfg.get('blocks', []):
+        if b.get('hidden') or (b['type'] == 'link' and not b.get('url')):
+            continue
+        b['thumb_url'] = img(b.get('thumb'))
+        b['href'] = f'/link-{row.handle}/go/{b["id"]}' if b['type'] in ('chat', 'link') else ''
+        blocks.append(b)
+    cfg['blocks'] = blocks
+    return cfg
+
+
+@app.route('/link-<handle>')
+def bio_page(handle):
+    from db import BioPage
+    handle = (handle or '').lower()
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == handle).first()
+        if not row:
+            return ('Not found', 404)
+        row.views = (row.views or 0) + 1
+        s.commit()
+        data = _bio_public(row)
+    finally:
+        s.close()
+    with open(os.path.join(BASE_DIR, 'bio.html'), encoding='utf-8') as f:
+        html = f.read()
+    blob = json.dumps(data).replace('<', '\\u003c')
+    attr = lambda v: html_mod.escape(v or '', quote=True)
+    return (html.replace('__BIO_TITLE__', attr(data.get('name') or 'Links'))
+            .replace('__BIO_DESC__', attr(data.get('bio')))
+            .replace('__BIO_ICON__', attr(f'/link-{handle}/pic'))
+            .replace('/*__BIO_DATA__*/null', blob))
+
+
+# Fans must not be able to trace her page back to this platform, so on the bio
+# domain nothing but her page, her chat and what those two load is served; the
+# root and every marketing or app page 404.
+BIO_DOMAINS = {d.strip().lower() for d in
+               os.environ.get('BIO_DOMAINS', 'velvt.online').split(',') if d.strip()}
+_BIO_ASSETS = ('/js/bio-render.js', '/css/style.css', '/css/lazy.css',
+               '/js/skeleton.js', '/js/theme.js')
+_BIO_API_RE = re.compile(r'^/api/personas/[a-z0-9_-]+(/avatar|/images|/media/[A-Za-z0-9_-]+/image)?$')
+
+
+def _on_bio_domain():
+    host = (request.host or '').split(':')[0].lower()
+    return host in BIO_DOMAINS or host.removeprefix('www.') in BIO_DOMAINS
+
+
+def _bio_link_base():
+    return f'https://{sorted(BIO_DOMAINS)[0]}/' if BIO_DOMAINS else _callback_origin() + '/link-'
+
+
+def _bio_domain_gate():
+    if not _on_bio_domain():
+        return None
+    path, method = request.path or '/', request.method
+    m = re.match(r'^/([a-z0-9][a-z0-9_-]{1,28}[a-z0-9])$', path)
+    if m and method in ('GET', 'HEAD') and path != '/chat' and not path.startswith('/link-'):
+        return bio_page(m.group(1))
+    if (path.startswith(('/link-', '/c/')) or path in _BIO_ASSETS
+            or (_BIO_API_RE.match(path) and method in ('GET', 'HEAD'))
+            or (path == '/chat' and method in ('POST', 'HEAD'))):
+        return None
+    return ('Not found', 404)
+
+
+# First in line, ahead of the sign-in gates: their redirect to /login would
+# otherwise answer on the bio domain before this could 404 it.
+app.before_request_funcs.setdefault(None, []).insert(0, _bio_domain_gate)
+
+
+@app.route('/link-<handle>/pic')
+def bio_pic(handle):
+    """Her picture at a plain URL, for the tab icon and link previews, so an
+    uploaded photo is not inlined three times over."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        url = _bio_public(row)['avatar_url']
+    finally:
+        s.close()
+    if url.startswith('data:'):
+        import base64
+        mime, b64 = url[5:].split(';base64,', 1)
+        resp = Response(base64.b64decode(b64), mimetype=mime)
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+    return redirect(url)
+
+
+@app.route('/c/<handle>')
+def bio_chat(handle):
+    """Her chat as the bio page opens it: one model, no site navigation, no
+    support bubble, her name and picture in the tab."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        data = _bio_public(row)
+        slug, row_handle = row.slug, row.handle
+    finally:
+        s.close()
+    with open(os.path.join(BASE_DIR, 'chat.html'), encoding='utf-8') as f:
+        html = f.read()
+    for tag in ('<link rel="stylesheet" href="/css/site-nav.css">',
+                '<script src="/js/site-nav.js" defer></script>',
+                '<script src="/js/devnav.js" defer></script>',
+                '<nav data-site-nav="inline" class="sn-links sn-inline"></nav>'):
+        html = html.replace(tag, '')
+    html = re.sub(r'<link rel="icon"[^>]*>\s*', '', html)
+    name = html_mod.escape(data.get('name') or '', quote=True)
+    head = (f'<link rel="icon" href="/link-{html_mod.escape(row_handle, quote=True)}/pic">'
+            f'<script>window.__FAN = {json.dumps({"persona": slug})};</script>')
+    html = html.replace('<title>Chat</title>', f'<title>{name}</title>{head}', 1)
+    return html
+
+
+@app.route('/link-<handle>/go/<bid>')
+def bio_click(handle, bid):
+    """Counts the click and forwards to the stored URL, never to one from the
+    request, so this cannot be used as an open redirect."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        block = next((b for b in json.loads(row.config_json or '{}').get('blocks', [])
+                      if b.get('id') == bid and not b.get('hidden')), None)
+        if not block or block['type'] not in ('chat', 'link'):
+            return redirect(f'/link-{row.handle}')
+        clicks = json.loads(row.clicks_json or '{}')
+        clicks[bid] = clicks.get(bid, 0) + 1
+        row.clicks_json = json.dumps(clicks)
+        s.commit()
+        if block['type'] == 'chat':
+            return redirect(f'/c/{row.handle}')
+        return redirect(block.get('url') or f'/link-{row.handle}')
+    finally:
+        s.close()
+
+
+def _bio_access(slug):
+    user = _current_user()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or not _can_edit_persona(slug, user) \
+            or slug not in _all_persona_slugs():
+        return jsonify({'error': 'Persona not found'}), 404
+    return None
+
+
+@app.route('/api/bio/<slug>', methods=['GET'])
+def api_bio_get(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    s = _db_session()
+    try:
+        row = _bio_row(s, slug, create=True)
+        return jsonify({'handle': row.handle, 'config': json.loads(row.config_json or '{}'),
+                        'views': row.views or 0, 'clicks': json.loads(row.clicks_json or '{}'),
+                        'origin': _callback_origin(), 'link_base': _bio_link_base(),
+                        'vault': [{'id': i, 'thumb': f'/api/personas/{slug}/media/{i}/image'}
+                                  for i in _bio_sfw_vault(slug)]})
+    finally:
+        s.close()
+
+
+@app.route('/api/bio/<slug>', methods=['POST'])
+def api_bio_save(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    handle = str(body.get('handle') or '').strip().lower()
+    err = _bio_handle_error(handle, slug)
+    if err:
+        return jsonify({'error': err, 'field': 'handle'}), 400
+    cfg = _bio_clean(body.get('config'), slug)
+    blob = json.dumps(cfg)
+    if len(blob) > 4_000_000:
+        return jsonify({'error': 'Images are too large. Use fewer or smaller photos.'}), 413
+    s = _db_session()
+    try:
+        row = _bio_row(s, slug, create=True)
+        row.handle = handle
+        row.config_json = blob
+        s.commit()
+    except Exception:
+        s.rollback()
+        return jsonify({'error': 'Already taken.', 'field': 'handle'}), 409
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'handle': handle, 'config': cfg})
+
+
+@app.route('/api/bio/<slug>/handle')
+def api_bio_handle(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    handle = (request.args.get('h') or '').strip().lower()
+    err = _bio_handle_error(handle, slug)
+    return jsonify({'ok': not err, 'error': err})
+
+
 @app.route('/trial/<code>')
 def trial_invite(code):
     """Redeem a trial link. Signing up first is fine — the code waits in the
@@ -9266,7 +9735,7 @@ def api_personas():
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
-            if config.get('content_vault') and not studio:
+            if (config.get('content_vault') or config.get('studio_only')) and not studio:
                 continue
             has_img = _persona_has_photo(sp['slug'], config)
             own.append({
@@ -9328,7 +9797,7 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
-        if config.get('content_vault') and not studio:
+        if (config.get('content_vault') or config.get('studio_only')) and not studio:
             continue
         has_img = _persona_has_photo(sp['slug'], config)
         personas.append({
@@ -12865,7 +13334,9 @@ def api_persona_media_list(slug):
                                       for k, v in imagegen.QUALITY.items()],
                         'lighting': sorted(imagegen.LIGHTING),
                         'expressions': [{'key': k, 'label': v[0]}
-                                        for k, v in imagegen.EXPRESSIONS.items()]})
+                                        for k, v in imagegen.EXPRESSIONS.items()],
+                        'zooms': [{'key': k, 'label': v[0]}
+                                  for k, v in imagegen.ZOOM.items()]})
     finally:
         s.close()
 
@@ -30519,9 +30990,10 @@ def _gen_frame(raw):
     return b64, mime
 
 
-def _gen_identity(slug, body, spec):
+def _gen_identity(slug, body, spec, cap=3):
     """Where her identity comes from, as the creator picks: the character's
-    approved views or the vault's reference photos."""
+    approved views or the vault's reference photos, as many as the model that
+    will run takes (`cap`)."""
     char = _character_snapshot(slug)
     identity = (body.get('identity') or '').strip().lower()
     if identity not in ('character', 'vault'):
@@ -30535,13 +31007,12 @@ def _gen_identity(slug, body, spec):
         keys = [str(k) for k in (body.get('character_views') or [])]
         spec['character_views'] = [
             k for k in keys if k in char['views']
-            and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:3]
-    else:
-        # Picked per job from kept vault photos; none picked falls back to the
-        # model's saved reference slots.
-        ids = [str(i) for i in (body.get('identity_media') or []) if i][:3]
-        spec['identity_media'] = [i for i in ids
-                                  if (_media_row(slug, i) or {}).get('approved')]
+            and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:cap]
+    # Picked per job from kept vault photos, beside the character's views when
+    # she has them; none picked falls back to the model's saved reference slots.
+    ids = [str(i) for i in (body.get('identity_media') or []) if i]
+    spec['identity_media'] = [i for i in ids
+                              if (_media_row(slug, i) or {}).get('approved')][:cap]
     return identity
 
 
@@ -30592,9 +31063,13 @@ def _gen_audio(body, cfg):
     mode = str(audio.get('mode') or '').strip().lower()
     if not mode or mode == 'none':
         return None
+    if mode in imagegen.TRACK_MODES:
+        return {'mode': mode, 'audio_id': str(audio.get('audio_id') or '').strip()[:40]}
     if mode not in imagegen.AUDIO_MODES:
         raise imagegen.GenerationError('Unknown audio preset.')
     text = str(audio.get('prompt') or '').strip()[:300]
+    if mode == 'lipsync' and not text:
+        raise imagegen.GenerationError('Write the line she says.')
     if mode in ('speech', 'custom') and not text:
         raise imagegen.GenerationError(
             'Write the line she says.' if mode == 'speech'
@@ -30635,6 +31110,162 @@ def _gen_media_urls(slug, media_ids):
     return out
 
 
+# A still's prompt is a few words unless the studio writes the whole text
+# (`prompt_mode == 'full'`); a clip's is a script, so it gets the long limit.
+GEN_PROMPT_MAX = 600
+GEN_VIDEO_PROMPT_MAX = 2000
+
+
+def _clip_views(char, picked, model):
+    """The character views a clip replace sends, as (keys, roles): face first,
+    then body, then the rest, up to what the model takes. Kling takes one photo,
+    and it has to be the full body."""
+    keys = [k for k in (picked or CH.reel_views(char)) if k in char['views']]
+
+    def role(k):
+        if ((CH.view(k, char['body_type']) or {}).get('group')) == 'face':
+            return 'face'
+        return 'body' if k.startswith('body_') else 'other'
+
+    if imagegen.wants_body_only(model):
+        keys = ([k for k in keys if role(k) == 'body']
+                or [k for k in CH.reel_views(char) if role(k) == 'body'] or keys)[:1]
+    keys.sort(key=lambda k: ('face', 'body', 'other').index(role(k)))
+    keys = keys[:imagegen.ref_cap(model)]
+    return keys, [role(k) for k in keys]
+
+
+def _clip_refs(slug, spec, job_id=''):
+    """The photos a clip on an uploaded video is sent with, and what each one
+    is, in payload order. The job and the Advanced preview both read this, so
+    the prompt names exactly the images that go out."""
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    roles = None
+    # Face only for a model that replaces the person in a
+    # clip: it takes her build and wardrobe from the source, so
+    # a body reference is a second identity rather than more
+    # information about this one.
+    role = ('face' if imagegen.wants_face_only(spec.get('model'))
+            else 'body' if imagegen.wants_body_only(spec.get('model'))
+            else None)
+    # The swap models carry no reference set of their own, so
+    # they borrow the photo model's -- deliberately, and said
+    # out loud in the log rather than left as a fallback.
+    ref_model = spec.get('model')
+    refs = _gen_reference_urls(slug, ref_model, role=role)
+    if not refs:
+        ref_model = imagegen.EXPLICIT_MODEL
+        refs = _gen_reference_urls(slug, ref_model, role=role)
+    if not refs and role == 'body':
+        refs = _gen_reference_urls(slug, ref_model)
+    if job == 'reel' and (spec.get('character')
+                          or spec.get('identity_media')):
+        char = spec.get('character')
+        keys, roles = (_clip_views(char, spec.get('character_views'),
+                                   spec.get('model')) if char else ([], []))
+        refs = [u for u in (_char_path_url(char['views'][k]['path'],
+                                           char['views'][k]['mime'])
+                            for k in keys) if u] + _gen_media_urls(
+            slug, spec.get('identity_media'))
+    elif (spec.get('identity_media')
+          and spec.get('identity') != 'character'):
+        refs = _gen_media_urls(slug, spec['identity_media'])
+        ref_model = 'picked'
+    elif (spec.get('identity') == 'character' and role != 'face'):
+        char = spec['character']
+        keys, roles = _clip_views(
+            char, spec.get('character_views'), spec.get('model'))
+        refs = [u for u in (_char_path_url(char['views'][k]['path'],
+                                           char['views'][k]['mime'])
+                            for k in keys) if u]
+        refs += _gen_media_urls(slug, spec.get('identity_media'))
+        ref_model = 'character'
+    elif spec.get('identity') == 'character':
+        refs = _character_urls(spec['character'], None, None,
+                               face_only=True)
+        ref_model = 'character'
+    elif spec.get('character'):
+        refs = (_character_urls(spec['character'], None, None,
+                                face_only=bool(role))
+                + refs)[:imagegen.MAX_REFERENCES]
+    logger.info('swap job=%s refs=%d role=%s from=%s',
+                job_id, len(refs), role or 'face+body', ref_model)
+    if refs and imagegen.wants_body_only(spec.get('model')):
+        refs = [imagegen.fit_reference(refs[0])]
+    cap = imagegen.ref_cap(spec.get('model'))
+    roles = (roles or [])[:len(refs)]
+    roles = roles + ['other'] * (len(refs) - len(roles))
+    extras = []
+    if cap > 1 and not imagegen.wants_body_only(spec.get('model')):
+        for kind_, row_ in (
+                ('outfit', _studio_outfit(slug, spec.get('outfit_ref'))),
+                ('location', _studio_location(slug, spec.get('location_ref')))):
+            url_ = row_ and _char_path_url(row_.gcs_path, 'image/jpeg')
+            if url_:
+                extras.append((kind_, url_))
+    # One list of (url, role) pairs, so the prompt can never
+    # name an image that is not in the payload.
+    pairs, seen = [], set()
+    for url_, role_ in list(zip(refs, roles)) + [
+            (u, k) for k, u in extras]:
+        if url_ and url_ not in seen:
+            seen.add(url_)
+            pairs.append((url_, role_))
+    own = [p for p in pairs if p[1] not in ('outfit', 'location')]
+    tail = [p for p in pairs if p[1] in ('outfit', 'location')]
+    pairs = (own[:max(1, cap - len(tail))] + tail)[:cap]
+    refs = [p[0] for p in pairs]
+    roles = [p[1] for p in pairs]
+    logger.info('clip job=%s sends %d refs: %s',
+                job_id, len(refs), ','.join(roles))
+    return refs, roles
+
+
+def _gen_video_prompt(slug, spec):
+    """The words a clip job would be sent with, built the way the submit path
+    builds them, for the studio's Advanced panel. The images it names come
+    from `_clip_refs`, the same list the job sends."""
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    model = spec.get('model')
+    motion = spec.get('motion', '') or spec.get('prompt_extra', '')
+    char = spec.get('character')
+    picked = spec.get('identity_media') or []
+    if job == 'swap' or (job == 'reel' and spec.get('source_path')):
+        text = motion if job == 'swap' else (spec.get('prompt_extra') or motion)
+        if not imagegen.locks_identity(model):
+            return imagegen.build_swap_prompt(
+                text, preserve=imagegen.preserves_source('swap', model),
+                place=spec.get('place') or '')
+        roles = _clip_refs(slug, spec)[1]
+        return imagegen.build_swap_prompt(
+            text, preserve=imagegen.preserves_source('swap', model), roles=roles,
+            place=spec.get('place') or '', at_images=imagegen.uses_at_images(model))
+    if job == 'reel':
+        return imagegen.build_reel_prompt(
+            spec.get('prompt_extra') or motion,
+            has_photo=bool(spec.get('reference_media')), character=bool(char or picked))
+    if job == 'extend':
+        return imagegen.build_extend_prompt(spec.get('extend_mode'), motion)
+    if job == 'multiref':
+        return imagegen.build_multiref_prompt(
+            spec.get('prompt_extra') or motion, len(spec.get('scene_media') or []))
+    return imagegen.build_video_prompt(motion)
+
+
+def _gen_own_video_prompt(spec):
+    """The creator's edited clip prompt, with the preserve clause put back if
+    she took it out: that clause is ours, never hers to remove."""
+    text = spec['video_prompt']
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    keeps = imagegen.preserves_source(
+        'swap' if job in ('swap', 'reel') else job, spec.get('model'))
+    if (keeps and (job == 'swap' or spec.get('source_path'))
+            and not (spec.get('place') or spec.get('location_ref'))
+            and imagegen.PRESERVE_CLAUSE not in text):
+        text = imagegen.PRESERVE_CLAUSE + ' ' + text
+    return text
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
@@ -30662,7 +31293,8 @@ def _gen_spec(slug, body, user):
     level = 'sfw' if (body.get('rating') or '').strip().lower() == 'sfw' else 'explicit'
     spec = {'kind': kind, 'slug': slug, 'job': job,
             'reference_media': (body.get('reference_media') or '').strip(),
-            'prompt_extra': (body.get('prompt') or '').strip()[:600],
+            'prompt_extra': (body.get('prompt') or '').strip()[
+                :GEN_PROMPT_MAX if kind == 'image' else GEN_VIDEO_PROMPT_MAX],
             'negative_extra': (body.get('negative') or '').strip()[:600],
             'addons': []}
 
@@ -30689,6 +31321,14 @@ def _gen_spec(slug, body, user):
         'expression': (body.get('expression') or '').strip().lower(),
         'smudges': bool(body.get('smudges')),
         'outfit_ref': _studio_outfit(slug, body.get('outfit_ref')) and str(body['outfit_ref']),
+        'place': (body.get('place') or '').strip()[:200],
+        # Only an edited clip prompt comes through here; an untouched one is
+        # rebuilt by the job from the choices, exactly as the preview was.
+        'video_prompt': (body.get('video_prompt') or '').strip()[:2000]
+                        if kind != 'image' else '',
+        'location_ref': (_studio_location(slug, body.get('location_ref'))
+                         and str(body['location_ref'])),
+        'zoom': (body.get('zoom') or '').strip().lower(),
     })
 
     if kind == 'image':
@@ -30749,18 +31389,26 @@ def _gen_spec(slug, body, user):
         raise imagegen.GenerationError('Unknown frame shape.')
     model = _gen_video_model(job, level, body.get('model'))
     audio = _gen_audio(body, cfg)
-    if audio:
+    if audio and audio['mode'] in imagegen.TRACK_MODES:
+        spec['sound'] = audio['mode']
+        if audio['mode'] == 'upload':
+            track = _video_source_row(slug, audio['audio_id'])
+            if not track or not track['mime'].startswith('audio/'):
+                raise imagegen.GenerationError('Upload the audio first.')
+            spec['audio_path'] = track['path']
+    elif audio:
         spec['audio'] = audio
         spec['voice'] = audio.get('voice') or ''
-        spec['addons'].append('audio')
+        spec['addons'].append('lipsync' if audio['mode'] == 'lipsync' else 'audio')
 
     if job == 'swap':
-        _gen_identity(slug, body, spec)
+        _gen_identity(slug, body, spec, imagegen.ref_cap(model))
         orientation = (body.get('orientation') or 'video').strip().lower()
         if orientation not in ('video', 'image'):
             raise imagegen.GenerationError('Unknown facing option.')
         spec['orientation'] = orientation
-        spec['keep_sound'] = body.get('keep_sound') is not False
+        spec['keep_sound'] = (body.get('keep_sound') is not False
+                              and spec.get('sound') not in ('none', 'upload'))
         source_id = str(body.get('source') or body.get('source_media')
                         or body.get('id') or '').strip()
         src = _video_source_row(slug, source_id)
@@ -30792,13 +31440,14 @@ def _gen_spec(slug, body, user):
         # The one video path that may run from a prompt alone, and therefore
         # the one that claims to be nobody. It still lands unapproved in
         # staging, so nothing here can reach a fan unreviewed.
-        if not spec['reference_media'] and not spec['prompt_extra']:
+        if (not spec['reference_media'] and not spec['prompt_extra']
+                and not body.get('source')):
             raise imagegen.GenerationError(
                 'A reel needs a prompt, a photo, or both.')
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
             raise imagegen.GenerationError('That photo is not in this vault.')
         # A model is moved before the quote, like a rating, never after it.
-        identity = _gen_identity(slug, body, spec)
+        identity = _gen_identity(slug, body, spec, imagegen.ref_cap(model))
         drive_id = str(body.get('source') or '').strip()
         if drive_id:
             src = _video_source_row(slug, drive_id)
@@ -30807,16 +31456,18 @@ def _gen_spec(slug, body, user):
                     'That clip is no longer there. Upload it again.')
             # A true replace by default: the clip keeps its motion, camera and
             # background and only the person changes.
-            if model not in imagegen.CLIP_ONLY_MODELS + (CR.VIDEO_EDIT_MODEL,):
-                model = 'p-video-replace'
+            if model not in (imagegen.CLIP_ONLY_MODELS
+                             + imagegen.KLING_MOTION_MODELS
+                             + (CR.VIDEO_EDIT_MODEL,)):
+                model = imagegen.DEFAULT_REPLACE_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
             spec['source_height'] = src['height']
             seconds = imagegen.video_seconds(model, src['seconds'])
-        elif model in imagegen.CLIP_ONLY_MODELS:
+        elif model in imagegen.CLIP_ONLY_MODELS + imagegen.KLING_MOTION_MODELS:
             raise imagegen.GenerationError(
-                'That model replaces the person in a clip — upload one first.')
+                'That model puts her into a clip — upload one first.')
         elif ((identity == 'character' or spec.get('identity_media'))
               and model not in imagegen.REFERENCE_VIDEO_MODELS):
             model = CR.VIDEO_EDIT_MODEL
@@ -30872,11 +31523,10 @@ def _gen_spec(slug, body, user):
             if not src:
                 raise imagegen.GenerationError(
                     'That motion clip is no longer there. Upload it again.')
-            # Wan 2.7 and P-Video-Animate take a reference video as motion
-            # guidance while still conditioning on her photo, which is what
-            # this job needs -- a true replace takes no motion guidance.
-            if model != 'p-video-animate':
-                model = CR.VIDEO_EDIT_MODEL
+            # Wan 2.7 takes a reference video as motion guidance while still
+            # conditioning on her photo, which is what this job needs -- a
+            # true replace takes no motion guidance.
+            model = CR.VIDEO_EDIT_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
@@ -30914,10 +31564,9 @@ def _gen_spec(slug, body, user):
                  'motion': (body.get('motion') or '')[:300]})
     return spec
 
-# Under staging/ deliberately: that is the one prefix both the GCS
-# lifecycle rule and the Blob purge already sweep, so an uploaded clip
-# expires in three days without a second cleanup path to forget.
-VIDEO_SOURCE_PREFIX = 'staging/video-source'
+# Under kept/, outside the three-day staging sweep: an uploaded clip is listed
+# in the studio for reuse and goes only when its creator deletes it.
+VIDEO_SOURCE_PREFIX = 'kept/video-source'
 VIDEO_SOURCE_MAX_BYTES = 200 * 1024 * 1024
 
 
@@ -31084,8 +31733,8 @@ def api_persona_video_source(slug):
     never a path or a URL: the job API takes the id and reads the duration it
     prices from the row, so nothing a caller sends can decide what a swap costs.
 
-    The bytes go to staging so the existing three-day sweep clears them. An
-    uploaded clip is working material, not vault media.
+    The bytes go under kept/ and stay until deleted (see the list route), so a
+    clip can be reused. It is working material, not vault media.
     """
     blocked = _require_admin()
     if blocked:
@@ -31193,6 +31842,101 @@ def api_persona_video_source(slug):
                     'url': storage.signed_url(path) or '',
                     'poster_url': (storage.signed_url(poster_path) or '')
                                   if poster_path else ''})
+
+
+@app.route('/api/personas/<slug>/video-sources', methods=['GET'])
+def api_persona_video_sources(slug):
+    """The clips this persona has uploaded, newest first, for reuse."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or (mine is not None and slug not in mine):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        rows = (s.query(VideoSource).filter_by(slug=slug)
+                .order_by(VideoSource.created_at.desc()).limit(60).all())
+        out = []
+        audio = request.args.get('kind') == 'audio'
+        for r in rows:
+            if (r.mime or '').startswith('audio/') != audio:
+                continue
+            try:
+                url = storage.signed_url(r.gcs_path) or ''
+                poster = (storage.signed_url(r.poster_gcs_path) or '') if r.poster_gcs_path else ''
+            except Exception:
+                url = poster = ''
+            out.append({'id': r.id, 'source': r.id, 'seconds': int(r.seconds or 0),
+                        'width': int(r.width or 0), 'height': int(r.height or 0),
+                        'resolution': _video_rung(int(r.height or 0), int(r.width or 0)),
+                        'url': url, 'poster_url': poster})
+        return jsonify({'ok': True, 'sources': out})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/video-sources/<source_id>', methods=['DELETE'])
+def api_persona_video_source_delete(slug, source_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or (mine is not None and slug not in mine):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = s.query(VideoSource).filter_by(id=source_id, slug=slug).first()
+        if not row:
+            return jsonify({'ok': False, 'error': 'Not found'}), 404
+        for path in (row.gcs_path, row.poster_gcs_path):
+            if path:
+                try:
+                    storage.delete(path)
+                except Exception:
+                    logger.warning('video source object not deleted: %s', path)
+        s.delete(row)
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+AUDIO_SOURCE_MIMES = ('audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav',
+                      'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg')
+AUDIO_SOURCE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@app.route('/api/personas/<slug>/audio-source', methods=['POST'])
+def api_persona_audio_source(slug):
+    """A track to lay over a clip, kept beside her clips (a VideoSource row
+    with an audio mime) so it can be picked again."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _studio_outfit_slug(slug)
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    f = request.files.get('file')
+    mime = (f and f.mimetype or '').lower()
+    if not f or mime not in AUDIO_SOURCE_MIMES:
+        return jsonify({'ok': False, 'error': 'Use an MP3, WAV, M4A or OGG file.'}), 400
+    data = f.read(AUDIO_SOURCE_MAX_BYTES + 1)
+    if len(data) > AUDIO_SOURCE_MAX_BYTES:
+        return jsonify({'ok': False, 'error': 'That audio is over 25 MB.'}), 413
+    path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = VideoSource(slug=slug, gcs_path=path, mime=mime, seconds=0,
+                          width=0, height=0)
+        s.add(row)
+        s.commit()
+        return jsonify({'ok': True, 'id': row.id, 'name': f.filename or 'audio'})
+    finally:
+        s.close()
 
 
 def _video_source_row(slug, source_id):
@@ -31499,12 +32243,23 @@ def _char_img_json(img):
             'expires_at': img.expires_at.isoformat() if img.expires_at else ''}
 
 
+def _char_linked_persona(slug):
+    """The persona a character is linked to, or '' while it only has its own
+    hidden home (see _CHAR_HOME): that is not a chatbot persona to show."""
+    if not slug:
+        return ''
+    saved = db_get_persona(slug)
+    if saved and (saved.get('config') or {}).get('studio_only'):
+        return ''
+    return slug
+
+
 def _char_json(s, row, full=False):
     canon = _char_canonicals(s, row.id)
     required = CH.required_views(row.nsfw_level, row.body_type)
     out = {'id': row.id, 'name': row.name, 'age': row.age,
            'nsfw_level': row.nsfw_level, 'body_type': row.body_type,
-           'persona': row.slug or '', 'status': row.status,
+           'persona': _char_linked_persona(row.slug), 'status': row.status,
            'version': row.version or 0,
            'required': len(required),
            'approved_required': len([k for k in required if k in canon]),
@@ -31546,12 +32301,15 @@ def _char_persona_ok(slug):
 
 
 _CHAR_GENDER = {'female': 'Female', 'male': 'Male'}
+# A character's own home for its vault and generations: hidden from the persona
+# lists and not counted against the plan, so characters are unlimited. Linking
+# it to a real persona moves the content and drops this one.
+_CHAR_HOME = {'from_character': True, 'studio_only': True}
 
 
 def _char_to_persona(row, owner_id=None, extra=None):
     """Write the character's name, age, level and gender onto its persona."""
     config = dict(_persona_config(row.slug))
-    config.pop('studio_only', None)
     config.update(extra or {})
     config.update({'name': row.name, 'age': max(int(row.age or 18), 18),
                    'gender': _CHAR_GENDER.get(row.body_type, config.get('gender') or 'Female'),
@@ -31603,7 +32361,7 @@ def _persona_char_fields(config):
 
 _CHAR_CONTENT_TABLES = ('PersonaMedia', 'GenerationJob', 'MediaOutfitLink',
                         'ModelReferenceSet', 'VideoSource', 'AudioReference',
-                        'StudioOutfit')
+                        'StudioOutfit', 'StudioLocation')
 
 
 def _char_move_content(s, old, new):
@@ -31824,6 +32582,9 @@ def _gen_image_prompt(slug, spec, has_reference):
             _prop_from_config(cfg, spec.get('style', ''), spec.get('camera', ''))))),
         features=clause, quality=spec.get('quality', ''), clothing=clothing,
         expression=spec.get('expression', ''), smudges=spec.get('smudges', False),
+        zoom=spec.get('zoom', ''),
+        location_ref=(('second-to-last' if spec.get('outfit_ref') else 'last')
+                      if spec.get('location_ref') else ''),
         banned=banned, age=age)
 
 
@@ -32026,24 +32787,12 @@ def api_characters():
             return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
         persona = (body.get('persona') or '').strip().lower()
-        if not persona:
-            # A plan at its persona limit would otherwise be refused outright,
-            # though it may own a persona that still has no character.
-            owned = [p['slug'] for p in db_list_personas(owner_id=_workspace_id(user))]
-            if owned:
-                taken = {r[0] for r in s.query(Character.slug)
-                         .filter(Character.slug.in_(owned)).all()}
-                persona = next((p for p in owned if p not in taken), '')
         if persona:
             if not _char_persona_ok(persona):
                 return jsonify({'ok': False, 'error': 'Not your persona'}), 403
             if s.query(Character).filter(Character.slug == persona).first():
                 return jsonify({'ok': False, 'error': 'That persona already has a character.'}), 409
             body = dict(_persona_char_fields(_persona_config(persona)), **body)
-        else:
-            capped = _persona_cap_blocked(user)
-            if capped:
-                return capped
         try:
             clean, warnings = CH.validate(dict(
                 {'name': 'Untitled draft', 'age': 24, 'nsfw_level': 'sfw'}, **body))
@@ -32056,7 +32805,7 @@ def api_characters():
                         nsfw_level=clean['nsfw_level'], notes=clean['notes'],
                         sheet_json=json.dumps(clean['sheet']))
         _char_to_persona(row, _workspace_id(user),
-                         None if persona else {'from_character': True})
+                         None if persona else _CHAR_HOME)
         s.add(row)
         s.commit()
         return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
@@ -32213,7 +32962,7 @@ def _transfer_character(s, char_id, ws, mode):
         for old, fresh in ids.items():
             snap = snap.replace(old, fresh)
         s.add(CharacterVersion(character_id=new.id, number=v.number, snapshot_json=snap))
-    _char_to_persona(new, ws.id, {'from_character': True})
+    _char_to_persona(new, ws.id, _CHAR_HOME)
     s.commit()
     return jsonify({'ok': True, 'id': new.id})
 
@@ -32246,13 +32995,23 @@ def api_character_studio(char_id):
         row = _char_row(s, user, char_id)
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
-        if not row.slug:
+        # A character's home is hidden and free. Asking for a persona turns it
+        # into a real one, which is the step the plan's persona limit applies to.
+        promote = bool((request.get_json(silent=True) or {}).get('persona'))
+        if promote and _char_linked_persona(row.slug) == row.slug and row.slug:
+            return jsonify({'ok': True, 'slug': row.slug})
+        if promote:
             capped = _persona_cap_blocked(user)
             if capped:
                 return capped
+        if not row.slug:
             row.slug = unique_copy_slug(row.name or 'Character')
-            _char_to_persona(row, _workspace_id(user), {'from_character': True})
+            _char_to_persona(row, _workspace_id(user),
+                             {'from_character': True} if promote else _CHAR_HOME)
             s.commit()
+        elif promote:
+            _char_to_persona(row, _workspace_id(user),
+                             {'from_character': True, 'studio_only': False})
         return jsonify({'ok': True, 'slug': row.slug})
     finally:
         s.close()
@@ -32926,6 +33685,27 @@ def api_generate_prompt():
     return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
 
 
+@app.route('/api/generate/video-prompt', methods=['POST'])
+def api_generate_video_prompt():
+    """The prompt a clip would be sent with, for the Advanced panel. Validated
+    through `_gen_spec` like the job itself, so nothing refused there shows."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = dict(request.get_json(silent=True) or {})
+    body.pop('video_prompt', None)
+    slug = _studio_outfit_slug(body.get('persona'))
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    try:
+        spec = _gen_spec(slug, body, _current_user())
+        if spec.get('identity') == 'character' and not spec.get('character'):
+            spec['character'] = _character_snapshot(slug)
+        return jsonify({'ok': True, 'prompt': _gen_video_prompt(slug, spec)})
+    except (imagegen.GenerationError, CR.PricingError) as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+
+
 @app.route('/api/generate/direction', methods=['POST'])
 def api_generate_direction():
     """One line of direction for the next still — pose, expression, what she
@@ -32951,6 +33731,11 @@ def api_generate_direction():
     if scene not in imagegen.SCENES:
         scene = ''
     spicy = CH.job_level(shot, scene) != 'sfw'
+    expression = str(body.get('expression') or '').strip().lower()
+    if body.get('mode') == 'auto':
+        return jsonify({'ok': True, 'source': 'auto', 'direction': imagegen.doing_from_choices(
+            shot, scene, str(body.get('location') or '').strip().lower(),
+            str(body.get('style') or '').strip().lower(), expression)})
     cfg = _persona_config(slug) or {}
     clothing = str(body.get('clothing') or '').strip()[:200]
     place = imagegen.SCENES.get(str(body.get('location') or '').strip().lower(), ('', ''))
@@ -32959,20 +33744,19 @@ def api_generate_direction():
         '' if spicy else imagegen.SHOT_FRAMING.get(shot, ''),
         '' if spicy else imagegen.SCENES.get(scene, ('', ''))[1],
         imagegen.STYLES.get(str(body.get('style') or ''), ''),
+        imagegen.expression_text(expression),
         f'wearing {clothing}' if clothing else '')))
     system = (
         "You are a content creator planning your next social media photo. "
-        "Write ONE direction for it: your pose, expression, what you are doing "
-        "and any prop, in 25 words or fewer, as a plain comma-separated phrase. "
-        "Make it feel natural and personal, like something you would actually post. "
+        "Write ONE short line for what you are doing in it, in 10 words or fewer, "
+        "as a plain phrase. It must fit the photo described and add nothing new: "
+        "no new place, outfit, camera or expression. Keep it simple and natural, "
+        "like something you would actually post. "
         + ("It is for your paid page, so make it flirty and sensual — a teasing, "
            "intimate pose — but never graphic or explicit. " if spicy else "") +
-        "Be surprising: never the obvious pose for this kind of photo. "
         "Do not mention clothing" + (" beyond what is given" if clothing else "") + ", "
         "camera, lighting, photo quality, age or body. No quotes, no hashtags, no emoji.")
-    mood = random.choice(('playful', 'lazy', 'confident', 'shy', 'mischievous', 'dreamy',
-                          'bold', 'cosy', 'candid', 'sultry', 'goofy', 'focused'))
-    ask = f"The photo: {what or ('a private, intimate photo' if spicy else 'a casual photo')}. Mood: {mood}."
+    ask = f"The photo: {what or ('a private, intimate photo' if spicy else 'a casual photo')}."
     interests = str(cfg.get('interests') or '').strip()
     if interests:
         ask += f" Things you are into: {interests[:200]}."
@@ -32981,15 +33765,16 @@ def api_generate_direction():
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': ask}]}],
             config=types.GenerateContentConfig(system_instruction=system,
-                                               temperature=1.3),
+                                               temperature=0.9),
         )
         line = re.sub(r'\s+', ' ', _gemini_text(resp)).strip().strip('"\'').rstrip('.')
         if line:
             return jsonify({'ok': True, 'direction': line[:300], 'source': 'gemini'})
     except Exception as e:
         logger.warning('direction suggestion failed: %s', str(e)[:200])
-    return jsonify({'ok': True, 'direction': imagegen.pick_direction(shot, scene),
-                    'source': 'built-in'})
+    return jsonify({'ok': True, 'source': 'built-in', 'direction': imagegen.doing_from_choices(
+        shot, scene, str(body.get('location') or '').strip().lower(),
+        str(body.get('style') or '').strip().lower(), expression)})
 
 
 @app.route('/api/generate/job', methods=['POST'])
@@ -33110,19 +33895,25 @@ def _gen_start(job_id, slug, spec, workspace):
                 refs = refs[:imagegen.MAX_REFERENCES]
                 outfit = _studio_outfit(slug, spec.get('outfit_ref'))
                 outfit_url = outfit and _char_path_url(outfit.gcs_path, outfit.mime)
-                if outfit_url:
-                    # The prompt names "the last reference image", so it goes
-                    # last and is never the one trimmed.
-                    refs = refs[:imagegen.MAX_REFERENCES - 1] + [outfit_url]
+                place = _studio_location(slug, spec.get('location_ref'))
+                place_url = place and _char_path_url(place.gcs_path, place.mime)
+                # The prompt names them by position: the place is the last
+                # reference (second-to-last beside an outfit) and the outfit is
+                # always last, so neither is ever the one trimmed.
+                tail = [u for u in (place_url, outfit_url) if u]
+                has_identity = bool(ref_b64 or refs)
+                if tail:
+                    refs = refs[:imagegen.MAX_REFERENCES - len(tail)] + tail
                 if refs:
                     call['reference_urls'] = refs
-                call['prompt'] = _gen_image_prompt(slug, spec, bool(ref_b64 or refs))
+                call['prompt'] = _gen_image_prompt(slug, spec, has_identity)
                 call['async_delivery'] = True
                 provider_job, result = provider.submit_image(call)
             else:
                 job = spec.get('job') or (
                     'swap' if spec['kind'] == 'swap' else 'animate')
                 motion = spec.get('motion', '') or spec.get('prompt_extra', '')
+                roles = None
                 if job == 'swap':
                     call['prompt'] = imagegen.build_swap_prompt(
                         motion,
@@ -33131,12 +33922,16 @@ def _gen_start(job_id, slug, spec, workspace):
                     char = spec.get('character')
                     picked = spec.get('identity_media')
                     if char or picked:
-                        call['reference_urls'] = [
+                        keys = (spec.get('character_views') or CH.reel_views(char)
+                                if char else [])
+                        if char and spec.get('source_path'):
+                            keys, roles = _clip_views(
+                                char, spec.get('character_views'), spec.get('model'))
+                        call['reference_urls'] = ([
                             u for u in (_char_path_url(char['views'][k]['path'],
                                                        char['views'][k]['mime'])
-                                        for k in (spec.get('character_views')
-                                                  or CH.reel_views(char))) if u
-                        ] if char else _gen_media_urls(slug, picked)
+                                        for k in keys) if u
+                        ] if char else []) + _gen_media_urls(slug, picked)
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
                                 "Her reference photos could not be read.")
@@ -33198,54 +33993,20 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'That uploaded clip is no longer there. Upload it again.')
                     call['source_url'] = url
-                    # Face only for a model that replaces the person in a
-                    # clip: it takes her build and wardrobe from the source, so
-                    # a body reference is a second identity rather than more
-                    # information about this one.
-                    role = ('face' if imagegen.wants_face_only(spec.get('model'))
-                            else 'body' if imagegen.wants_body_only(spec.get('model'))
-                            else None)
-                    # The swap models carry no reference set of their own, so
-                    # they borrow the photo model's -- deliberately, and said
-                    # out loud in the log rather than left as a fallback.
-                    ref_model = spec.get('model')
-                    refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if not refs:
-                        ref_model = imagegen.EXPLICIT_MODEL
-                        refs = _gen_reference_urls(slug, ref_model, role=role)
-                    if not refs and role == 'body':
-                        refs = _gen_reference_urls(slug, ref_model)
-                    if job == 'reel' and (spec.get('character')
-                                          or spec.get('identity_media')):
-                        refs = call['reference_urls']
-                    elif spec.get('identity_media'):
-                        refs = _gen_media_urls(slug, spec['identity_media'])
-                        ref_model = 'picked'
-                    elif spec.get('identity') == 'character' and spec.get('character_views'):
-                        char = spec['character']
-                        refs = [u for u in (_char_path_url(char['views'][k]['path'],
-                                                           char['views'][k]['mime'])
-                                            for k in spec['character_views']) if u]
-                        ref_model = 'character'
-                    elif spec.get('identity') == 'character' and role == 'body':
-                        body_view = spec['character']['views'].get('body_front')
-                        refs = [u for u in [body_view and _char_path_url(
-                            body_view['path'], body_view['mime'])] if u]
-                        ref_model = 'character'
-                    elif spec.get('identity') == 'character':
-                        refs = _character_urls(spec['character'], None, None,
-                                               face_only=role == 'face')
-                        ref_model = 'character'
-                    elif spec.get('character'):
-                        refs = (_character_urls(spec['character'], None, None,
-                                                face_only=bool(role))
-                                + refs)[:imagegen.MAX_REFERENCES]
-                    logger.info('swap job=%s refs=%d role=%s from=%s',
-                                job_id, len(refs), role or 'face+body', ref_model)
-                    if refs and imagegen.wants_body_only(spec.get('model')):
-                        refs = [imagegen.fit_reference(refs[0])]
+                    refs, roles = _clip_refs(slug, spec, job_id)
+                    call['prompt'] = imagegen.build_swap_prompt(
+                        motion if job == 'swap'
+                        else (spec.get('prompt_extra') or motion),
+                        preserve=imagegen.preserves_source(
+                            'swap', spec.get('model')),
+                        roles=roles if imagegen.locks_identity(
+                            spec.get('model')) else None,
+                        place=spec.get('place') or '',
+                        at_images=imagegen.uses_at_images(spec.get('model')))
                     if refs:
                         call['reference_urls'] = refs
+                if spec.get('video_prompt'):
+                    call['prompt'] = _gen_own_video_prompt(spec)
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
@@ -33362,7 +34123,8 @@ def _gen_audio_urls(job_id, spec, urls):
     silent clip. Any failure returns the original url for the same reason --
     the clip is already paid for and already good.
     """
-    if not spec.get('audio') or imagegen.AUDIO_ROUTE != 'task':
+    if not spec.get('audio') or (imagegen.AUDIO_ROUTE != 'task'
+                                 and spec['audio']['mode'] != 'lipsync'):
         return urls
     if not GEN_HAS_WORKER:
         logger.info('generation job=%s: no worker, so the clip stays silent',
@@ -33412,6 +34174,21 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
         _gen_refund_short_clip(job_id, workspace, spec, data, mime)
+        if (mime or '').startswith('video/'):
+            if (spec.get('source_path') and spec.get('sound') in (None, 'original')
+                    and not spec.get('audio')
+                    and spec.get('model') not in imagegen.KLING_MOTION_MODELS):
+                # A model that regenerates the clip loses its sound; the
+                # uploaded clip still has it.
+                source = storage.get(spec['source_path'])
+                if source:
+                    data = imagegen.copy_audio(data, source)
+            if spec.get('audio_path'):
+                track = storage.get(spec['audio_path'])
+                if track:
+                    data = imagegen.mux_audio(data, track)
+            elif spec.get('sound') == 'none':
+                data = imagegen.strip_audio(data)
         raw, raw_mime = data, mime
         data, mime = imagegen.phone_look(data, mime, spec.get('phone_look'))
         try:
@@ -33726,10 +34503,13 @@ def _job_json(job, session_db):
             'expires_at': row.expires_at.isoformat() if row.expires_at else '',
         })
     try:
-        job_name = (json.loads(job.spec_json or '{}') or {}).get('job') or ''
+        spec = json.loads(job.spec_json or '{}') or {}
     except ValueError:
-        job_name = ''
+        spec = {}
+    job_name = spec.get('job') or ''
+    model = str(spec.get('model') or '')
     return {'id': job.id, 'kind': job.kind, 'job': job_name, 'status': job.status,
+            'model': model, 'engine': CR.MODEL_LABELS.get(model, model),
             'tokens': job.tokens, 'error': job.error or '',
             'persona': job.slug, 'media': media,
             'created_at': job.created_at.isoformat() if job.created_at else ''}
@@ -33793,18 +34573,31 @@ def api_generate_keep():
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
 
 
-def _studio_outfit(slug, outfit_id):
-    from db import StudioOutfit
-    if not outfit_id:
+def _studio_photo_model(kind):
+    import db as D
+    return D.StudioLocation if kind == 'locations' else D.StudioOutfit
+
+
+def _studio_photo(kind, slug, photo_id):
+    if not photo_id:
         return None
     s = _db_session()
     try:
-        row = s.query(StudioOutfit).filter_by(id=str(outfit_id), slug=slug).first()
+        row = (s.query(_studio_photo_model(kind))
+               .filter_by(id=str(photo_id), slug=slug).first())
         if row:
             s.expunge(row)
         return row
     finally:
         s.close()
+
+
+def _studio_outfit(slug, outfit_id):
+    return _studio_photo('outfits', slug, outfit_id)
+
+
+def _studio_location(slug, location_id):
+    return _studio_photo('locations', slug, location_id)
 
 
 def _studio_outfit_slug(slug):
@@ -33815,13 +34608,15 @@ def _studio_outfit_slug(slug):
     return slug
 
 
-@app.route('/api/generate/outfits', methods=['GET', 'POST'])
-def api_generate_outfits():
-    """The persona's saved outfit photos, and uploading a new one."""
+_STUDIO_PHOTO_MAX_CHARS = 16_000_000
+
+
+def _studio_photos(kind):
+    """A persona's saved outfit or location photos, and uploading a new one."""
     blocked = _require_active()
     if blocked:
         return blocked
-    from db import StudioOutfit
+    model = _studio_photo_model(kind)
     body = request.get_json(silent=True) or {}
     slug = _studio_outfit_slug(request.args.get('persona') or body.get('persona'))
     if not slug:
@@ -33830,40 +34625,60 @@ def api_generate_outfits():
         import base64
         import io
         from PIL import Image
-        raw = str(body.get('image') or '')
+        media_id = str(body.get('media_id') or '').strip()[:40]
+        if media_id:
+            blob, _ = _draft_media_bytes(slug, media_id)
+            if not blob:
+                return jsonify({'ok': False, 'error': 'That photo is not in her vault'}), 404
+        else:
+            raw = str(body.get('image') or '')
+            if len(raw) > _STUDIO_PHOTO_MAX_CHARS:
+                return jsonify({'ok': False, 'error': 'That photo is too large (12 MB at most)'}), 413
+            try:
+                blob = base64.b64decode(raw.split(',', 1)[-1])
+            except Exception:
+                return jsonify({'ok': False, 'error': 'That is not an image'}), 400
         try:
-            img = Image.open(io.BytesIO(base64.b64decode(raw.split(',', 1)[-1])))
+            img = Image.open(io.BytesIO(blob))
             img = img.convert('RGB')
             img.thumbnail((1536, 1536), Image.LANCZOS)
             out = io.BytesIO()
             img.save(out, 'JPEG', quality=88)
         except Exception:
             return jsonify({'ok': False, 'error': 'That is not an image'}), 400
-        path = storage.put(slug, out.getvalue(), 'image/jpeg', prefix='outfits')
+        path = storage.put(slug, out.getvalue(), 'image/jpeg', prefix=kind)
         s = _db_session()
         try:
-            s.add(StudioOutfit(slug=slug, gcs_path=path))
+            s.add(model(slug=slug, gcs_path=path))
+            # A new upload also lands in her vault, so one photo can be
+            # picked again anywhere; one taken from the vault is already there.
+            if not media_id:
+                from db import PersonaMedia
+                s.add(PersonaMedia(
+                    slug=slug, kind='image', mime='image/jpeg', approved=True,
+                    purpose=kind[:-1],
+                    image_data='data:image/jpeg;base64,'
+                               + base64.b64encode(out.getvalue()).decode()))
             s.commit()
         finally:
             s.close()
     s = _db_session()
     try:
-        rows = (s.query(StudioOutfit).filter_by(slug=slug)
-                .order_by(StudioOutfit.created_at.desc()).all())
-        return jsonify({'ok': True, 'outfits': [
-            {'id': r.id, 'url': f'/api/generate/outfits/{r.id}/image?persona={slug}'}
+        rows = (s.query(model).filter_by(slug=slug)
+                .order_by(model.created_at.desc()).all())
+        return jsonify({'ok': True, kind: [
+            {'id': r.id, 'url': f'/api/generate/{kind}/{r.id}/image?persona={slug}'}
             for r in rows]})
     finally:
         s.close()
 
 
-@app.route('/api/generate/outfits/<outfit_id>/image')
-def api_generate_outfit_image(outfit_id):
+def _studio_photo_image(kind, photo_id):
     blocked = _require_active()
     if blocked:
         return blocked
     slug = _studio_outfit_slug(request.args.get('persona'))
-    row = slug and _studio_outfit(slug, outfit_id)
+    row = slug and _studio_photo(kind, slug, photo_id)
     if not row:
         return ('', 404)
     try:
@@ -33876,24 +34691,87 @@ def api_generate_outfit_image(outfit_id):
     return Response(data, mimetype=row.mime) if data else ('', 404)
 
 
-@app.route('/api/generate/outfits/<outfit_id>', methods=['DELETE'])
-def api_generate_outfit_delete(outfit_id):
+def _studio_photo_delete(kind, photo_id):
     blocked = _require_active()
     if blocked:
         return blocked
-    from db import StudioOutfit
+    model = _studio_photo_model(kind)
     slug = _studio_outfit_slug(request.args.get('persona'))
-    row = slug and _studio_outfit(slug, outfit_id)
+    row = slug and _studio_photo(kind, slug, photo_id)
     if not row:
-        return jsonify({'ok': False, 'error': 'Unknown outfit'}), 404
+        return jsonify({'ok': False, 'error': 'Unknown photo'}), 404
     s = _db_session()
     try:
-        s.query(StudioOutfit).filter_by(id=row.id).delete()
+        s.query(model).filter_by(id=row.id).delete()
         s.commit()
     finally:
         s.close()
     storage.delete(row.gcs_path)
     return jsonify({'ok': True})
+
+
+@app.route('/api/generate/outfits', methods=['GET', 'POST'])
+def api_generate_outfits():
+    return _studio_photos('outfits')
+
+
+@app.route('/api/generate/locations', methods=['GET', 'POST'])
+def api_generate_locations():
+    return _studio_photos('locations')
+
+
+@app.route('/api/generate/outfits/<outfit_id>/image')
+def api_generate_outfit_image(outfit_id):
+    return _studio_photo_image('outfits', outfit_id)
+
+
+@app.route('/api/generate/locations/<location_id>/image')
+def api_generate_location_image(location_id):
+    return _studio_photo_image('locations', location_id)
+
+
+@app.route('/api/generate/outfits/<outfit_id>', methods=['DELETE'])
+def api_generate_outfit_delete(outfit_id):
+    return _studio_photo_delete('outfits', outfit_id)
+
+
+@app.route('/api/generate/locations/<location_id>', methods=['DELETE'])
+def api_generate_location_delete(location_id):
+    return _studio_photo_delete('locations', location_id)
+
+
+@app.route('/api/generate/describe-place', methods=['POST'])
+def api_generate_describe_place():
+    """One line saying where a location photo was taken, for a clip's "Change
+    the place". A place photo carries no one explicit, so it may go to Google."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = _studio_outfit_slug(body.get('persona'))
+    row = slug and _studio_location(slug, body.get('location_id'))
+    if not row:
+        return jsonify({'ok': False, 'error': 'Unknown place photo'}), 404
+    if not client:
+        return jsonify({'ok': False, 'error': 'Describing photos is not set up'}), 503
+    import base64
+    try:
+        data = storage.get(row.gcs_path)
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [
+                {'text': 'Describe only the place in this photo as one short scene '
+                         'line for a video prompt, under 20 words: the setting, '
+                         'time of day, light and mood. Ignore any people in it. '
+                         'No preamble, no quotes.'},
+                {'inline_data': {'mime_type': 'image/jpeg',
+                                 'data': base64.b64encode(data).decode()}}]}],
+            config=_no_thinking(types.GenerateContentConfig(temperature=0.3)))
+        line = (_gemini_text(resp) or '').strip().strip('"').splitlines()[0][:200]
+    except Exception as e:
+        logger.warning('describe place failed: %s', str(e)[:200])
+        return jsonify({'ok': False, 'error': 'Could not read that photo. Type the place instead.'}), 502
+    return jsonify({'ok': True, 'place': line})
 
 
 @app.route('/api/generate/look', methods=['POST'])

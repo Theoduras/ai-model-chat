@@ -142,6 +142,13 @@
     .gen-sheet .modal-footer { margin: 0; padding: 14px 22px; border-top: 1px solid var(--border-soft); }
     .gen-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
     .gen-pick .gen-ref-t { width: 100%; }
+    .gen-outfit, .anim-pick { position: relative; }
+    .gen-zoom-btn {
+      position: absolute; right: 3px; bottom: 3px; width: 20px; height: 20px; border-radius: 6px;
+      display: grid; place-items: center; font-size: 12px; line-height: 1; cursor: zoom-in;
+      background: rgba(0,0,0,.6); color: #fff; opacity: .85;
+    }
+    .gen-zoom-btn:hover { opacity: 1; }
     .gen-lightbox {
       position: fixed; inset: 0; z-index: 1000; display: flex; align-items: center;
       justify-content: center; padding: 32px; background: rgba(0,0,0,.88); cursor: zoom-out;
@@ -223,6 +230,14 @@
       position: absolute; top: 4px; left: 4px; padding: 1px 6px; border-radius: 999px;
       background: rgba(0,0,0,.62); color: #fff; font-size: 0.62rem;
     }
+    .gen-uploaded { font-size: 0.78rem; color: var(--ok, #3ecf8e); }
+    .gen-uploaded.busy { color: var(--text-muted); }
+    .gen-engine {
+      position: absolute; bottom: 34px; left: 4px; max-width: calc(100% - 8px); padding: 1px 6px;
+      border-radius: 999px; background: rgba(0,0,0,.62); color: #fff; font-size: 0.6rem;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .gen-pending .gen-engine, .gen-failed .gen-engine { position: static; bottom: auto; }
     .gen-pending, .gen-failed {
       display: flex; flex-direction: column; gap: 8px; align-items: center; justify-content: center; text-align: center;
       color: var(--text-muted); font-size: 0.68rem; padding: 8px; cursor: default;
@@ -264,6 +279,8 @@
     .gen-job[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
     .gen-job[disabled] { cursor: not-allowed; }
     .gen-job[disabled] b, .gen-job[disabled] small { opacity: .55; }
+    .gen-soon.gen-sub-only { position: static; display: inline-block; white-space: nowrap; }
+    .gen-soon.gen-sub-only[hidden] { display: none; }
     .gen-soon {
       position: absolute; top: 9px; right: 9px; font-size: 0.6rem; font-weight: 700; letter-spacing: .04em;
       text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2);
@@ -361,14 +378,21 @@
               <select id="gen-style"></select></label>
             <label class="gen-f"><span>Expression</span>
               <select id="gen-expression"></select></label>
+            <label class="gen-f"><span>Zoom</span>
+              <select id="gen-zoom"></select></label>
+          </div>
+          <div class="gen-f"><span>Or use a photo of the place</span>
+            <div id="gen-locations" class="gen-outfits"></div>
+            <input type="file" id="gen-location-file" accept="image/*" hidden onchange="uploadLocation(this)">
+            <span class="hint" id="gen-location-note">A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.</span>
           </div>
           <div class="gen-f"><span>What she's doing</span>
             <div class="gen-go" style="flex-wrap:nowrap;">
               <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
-                     placeholder="looking back over her shoulder, phone in one hand">
+                     placeholder="taking a pov selfie in the kitchen">
               <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
             </div>
-            <span class="hint" id="gen-direction-note">Click Suggest for a fresh idea — or type your own.</span>
+            <span class="hint" id="gen-direction-note">Follows your choices above — click Suggest for a different idea, or type your own.</span>
           </div>
         </section>
 
@@ -432,27 +456,42 @@
                  placeholder="she turns towards the camera and smiles"></label>
       </div>
       <div id="gen-swap-form" class="gen-stackform" style="display:none">
-        <label class="gen-f"><span>Her identity from</span>
+        <label class="gen-f"><span class="gen-id-lbl">Who she is in the clip</span>
           <select id="gen-swap-identity" class="gen-identity" onchange="this.dataset.touched = 1; renderGenForm()">
-            <option value="vault">Vault reference photos</option>
-            <option value="character">Character build</option>
-          </select></label>
-        <div class="gen-f" id="gen-swap-cvpick-row"><span>Character view (up to 3)</span>
+            <option value="character">Her character build</option>
+            <option value="vault">Her own photos (vault)</option>
+          </select>
+          <span class="hint gen-id-hint"></span></label>
+        <div class="gen-f" id="gen-swap-cvpick-row"><span class="gen-refcap-lbl gen-cv-lbl">Her look (up to 3)</span>
           <div class="anim-strip" id="gen-swap-cvpick"></div>
-          <span class="hint">Kling uses only the first. A clothed view
+          <span class="hint gen-cv-hint"></span>
+          <span class="hint gen-kling-hint">Kling uses only the first one. A clothed look
             passes its moderation more often.</span></div>
-        <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span>Pick her photos (up to 3)</span>
-          <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
-        <div class="gen-f"><span>Upload</span>
-          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
+        <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span class="gen-refcap-lbl gen-ip-lbl">Photos of her face and body (up to 3)</span>
+          <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div>
+          <span class="hint gen-ip-hint"></span></div>
+        <div class="gen-f"><span>Your clips</span>
+          <div class="gen-outfits gen-cliplib" data-into="swap"></div>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;"><span class="gen-upl-txt">Upload a clip</span>
           <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime"
-                 onchange="uploadSwapSource(this.files[0])"></label></div>
+                 onchange="uploadSwapSource(this.files[0])"></label>
+          <span class="gen-uploaded" id="gen-swap-upl"></span></div>
         <div id="gen-swap-have" class="gen-stackform" style="display:none">
           <video id="gen-swap-player" controls muted playsinline
                  class="gen-clip"></video>
           <span class="hint" id="gen-swap-meta"></span>
         </div>
-        <label class="gen-f"><span id="gen-swap-motion-label">Motion</span>
+        <div class="gen-clip-extras" style="display:none">
+          <label class="gen-f"><span>Change the place (optional)</span>
+            <input type="text" class="gen-clip-place" maxlength="200" oninput="delete this.dataset.auto; queueVideoPrompt()"
+                   placeholder="a rooftop bar at night, neon on wet concrete"></label>
+          <div class="gen-f gen-clip-photos"><span>Outfit photo</span>
+            <div class="gen-outfits gen-clip-outfits"></div></div>
+          <div class="gen-f gen-clip-place-photo"><span>Or take the place from a photo</span>
+            <div class="gen-outfits gen-clip-locations"></div>
+            <span class="hint gen-place-note"></span></div>
+        </div>
+        <label class="gen-f" id="gen-swap-motion-row"><span id="gen-swap-motion-label">Motion</span>
           <input type="text" id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
         <div id="gen-swap-kling" class="gen-stackform" style="display:none">
           <label class="gen-f"><span>Facing</span>
@@ -469,25 +508,29 @@
       </div>
 
       <div id="gen-reel-form" class="gen-stackform" style="display:none">
-        <label class="gen-f"><span>What happens in it</span>
-          <textarea id="gen-reel-prompt" rows="4"
+        <label class="gen-f" id="gen-reel-prompt-row"><span>What happens in it</span>
+          <textarea id="gen-reel-prompt" rows="4" maxlength="2000"
             placeholder="she walks through a night market, neon signs behind her, looking back once"></textarea></label>
-        <div class="gen-f"><span>Start from a photo (optional)</span>
+        <div class="gen-f" id="gen-reel-photo-row"><span>Start from a photo (optional)</span>
           <div class="anim-strip" id="gen-reel-photo"></div>
           <span class="hint">A reel may run from the words alone.
             With her photos it shows her, and a photo is the person she
             replaces. It still lands unapproved in staging.</span></div>
-        <label class="gen-f"><span>Her identity from</span>
+        <label class="gen-f"><span class="gen-id-lbl">Who she is in the clip</span>
           <select id="gen-reel-identity" class="gen-identity" onchange="this.dataset.touched = 1; renderGenForm()">
-            <option value="vault">Vault reference photos</option>
-            <option value="character">Character build</option>
-          </select></label>
-        <div class="gen-f" id="gen-reel-cvpick-row"><span>Character view (up to 3)</span>
+            <option value="character">Her character build</option>
+            <option value="vault">Her own photos (vault)</option>
+          </select>
+          <span class="hint gen-id-hint"></span></label>
+        <div class="gen-f" id="gen-reel-cvpick-row"><span class="gen-refcap-lbl gen-cv-lbl">Her look (up to 3)</span>
           <div class="anim-strip" id="gen-reel-cvpick"></div>
-          <span class="hint">Kling uses only the first. A clothed view
+          <span class="hint gen-cv-hint"></span>
+          <span class="hint gen-kling-hint">Kling uses only the first one. A clothed look
             passes its moderation more often.</span></div>
-        <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span>Pick her photos (up to 3)</span>
-          <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
+        <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span class="gen-refcap-lbl gen-ip-lbl">Photos of her face and body (up to 3)</span>
+          <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div>
+          <span class="hint gen-ip-hint"></span></div>
+        <input type="file" id="gen-vault-file" accept="image/*" style="display:none" onchange="uploadVaultPhoto(this)">
       </div>
 
       <div id="gen-extend-form" class="gen-stackform" style="display:none">
@@ -516,13 +559,40 @@
 
       <div id="gen-video-drive" class="gen-stackform" style="display:none">
         <div class="gen-f"><span id="gen-drive-label">Motion clip (optional)</span>
-          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
+          <div class="gen-outfits gen-cliplib" data-into="drive"></div>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;"><span class="gen-upl-txt">Upload a clip</span>
           <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
-                 onchange="uploadSwapSource(this.files[0], 'drive')"></label></div>
+                 onchange="uploadSwapSource(this.files[0], 'drive')"></label>
+          <span class="gen-uploaded" id="gen-drive-upl"></span></div>
+        <video id="gen-drive-player" controls muted playsinline class="gen-clip" style="display:none"></video>
+        <div class="gen-clip-extras" style="display:none">
+          <label class="gen-f"><span>Change the place (optional)</span>
+            <input type="text" class="gen-clip-place" maxlength="200" oninput="delete this.dataset.auto; queueVideoPrompt()"
+                   placeholder="a rooftop bar at night, neon on wet concrete"></label>
+          <div class="gen-f gen-clip-photos"><span>Outfit photo</span>
+            <div class="gen-outfits gen-clip-outfits"></div></div>
+          <div class="gen-f gen-clip-place-photo"><span>Or take the place from a photo</span>
+            <div class="gen-outfits gen-clip-locations"></div>
+            <span class="hint gen-place-note"></span></div>
+        </div>
+
         <span class="hint" id="gen-drive-note">Upload a clip and
           her photo performs its motion instead of being animated freely. The clip
           only supplies movement — it is never shown to a fan.</span>
       </div>
+
+      <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none">
+        <summary><h3>Advanced — see or edit the prompt</h3></summary>
+        <div class="gen-go">
+          <button type="button" class="btn-ai btn-ai-secondary" onclick="autoWriteVideoPrompt(true)">
+            Write the prompt</button>
+          <span class="hint" id="gen-vwrite-note"></span>
+        </div>
+        <label class="gen-f"><span>Prompt</span>
+          <textarea id="gen-vprompt" rows="6" maxlength="2000" oninput="checkVideoPromptStale()"
+                    placeholder="Built from your choices above"></textarea></label>
+        <span class="hint">Edit it and it stays as you wrote it. The clause that keeps her clip untouched is always added back.</span>
+      </details>
 
       <div class="note-box" id="gen-video-note" style="display:none">
         A clip always starts from a photo that is already kept, so its first frame
@@ -566,11 +636,16 @@
           <div class="gen-chips" id="gen-aspects"></div>
           <span class="hint" id="gen-aspect-note"></span>
         </div>
-        <div class="gen-f"><span>Sound</span>
+        <div class="gen-f" id="gen-audio-row"><span>Sound</span>
           <div class="gen-chips" id="gen-audio-modes"></div>
           <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
                  oninput="genQuote()"
                  placeholder="what you want to hear">
+          <div id="gen-audio-upload" class="gen-stackform" style="display:none">
+            <div class="gen-chips" id="gen-audio-lib"></div>
+            <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Upload audio
+              <input type="file" accept="audio/*" onchange="uploadAudio(this)"></label>
+          </div>
           <span class="hint" id="gen-audio-note"></span>
         </div>
       </div>
@@ -603,6 +678,7 @@
       <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(true)">Select all</button>
       <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(false)">Clear</button>
       <button type="button" class="btn btn-primary btn-sm" id="fv-open-btn" onclick="openFanvueUpload()" disabled>Upload to Fanvue</button>
+      <span class="gen-soon gen-sub-only" id="fv-sub-only" hidden>Subscribers only</span>
     </div>
     <div class="vault-grid" id="vault-grid"></div>
     <span class="hint">Everything here is approved: uploads plus whatever was kept from a
@@ -687,7 +763,7 @@ let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
-let genStyles = [], genCameras = [], genLighting = [], genQualities = [], genExpressions = [];
+let genStyles = [], genCameras = [], genLighting = [], genQualities = [], genExpressions = [], genZooms = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
@@ -721,11 +797,17 @@ const GEN_SHOT_LABELS = {
 };
 const GEN_RES_LABELS = { '2k': '2K', '4k': '4K' };
 
+let chatbotOff = false;
 async function init() {
+  try {
+    const me = await (await fetch('/api/me')).json();
+    chatbotOff = (me.capabilities || {}).chatbot === false;
+    el('fv-sub-only').hidden = !chatbotOff;
+  } catch (e) {}
   try {
     const list = await (await fetch('/api/personas?studio=1')).json();
     const rows = (Array.isArray(list) ? list : (list.personas || []))
-      .filter(p => !(p.config || {}).content_vault);
+      .filter(p => !(p.config || {}).content_vault && !(p.config || {}).studio_only);
     let chars = [];
     try {
       chars = ((await (await fetch('/api/characters')).json()).characters || [])
@@ -817,6 +899,7 @@ function setIdentitySrc(v) {
   renderIdentitySrc();
   renderRefs();
   checkPromptStale();
+  queueAutoPrompt();
 }
 
 function renderIdentitySrc() {
@@ -851,7 +934,9 @@ function renderOutfits() {
       <button type="button" class="x" aria-label="Remove outfit"
         onclick="event.stopPropagation(); deleteOutfit('${o.id}')">&times;</button>
     </span>`).join('') +
-    `<button type="button" class="gen-outfit-add" onclick="el('gen-outfit-file').click()">+ Upload</button>`;
+    `<button type="button" class="gen-outfit-add" onclick="el('gen-outfit-file').click()">+ Upload</button>` +
+    `<button type="button" class="gen-outfit-add" onclick="openVaultPick('outfits')">From vault</button>`;
+  document.querySelectorAll('.gen-clip-outfits').forEach(b => { b.innerHTML = el('gen-outfits').innerHTML; });
 }
 
 function renderPhoneSeg() {
@@ -880,6 +965,7 @@ function pickOutfit(id) {
   genOutfit = genOutfit === id ? '' : id;
   renderOutfits();
   checkPromptStale();
+  queueAutoPrompt();
 }
 
 function uploadOutfit(input) {
@@ -893,12 +979,7 @@ function uploadOutfit(input) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: slug(), image: reader.result }),
       });
-      const d = await res.json();
-      if (!d.ok) throw new Error(d.error || 'Upload failed');
-      genOutfits = d.outfits || [];
-      genOutfit = (genOutfits[0] || {}).id || '';
-      renderOutfits();
-      checkPromptStale();
+      studioPhotoSaved('outfits', await res.json());
     } catch (e) { setGenStatus('✗ ' + e.message, false); }
   };
   reader.readAsDataURL(file);
@@ -909,9 +990,241 @@ async function deleteOutfit(id) {
   await loadOutfits();
 }
 
+// A photo of the place she is shot in. It wins over the "Where is she" pick,
+// which is greyed while a photo is chosen.
+let genLocations = [], genLocation = '';
+
+function renderLocations() {
+  el('gen-locations').innerHTML = genLocations.map(o => `
+    <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${o.id === genLocation}"
+          title="Shoot here" onclick="pickLocation('${o.id}')">
+      <img src="${esc(o.url)}" alt="Location">
+      <button type="button" class="x" aria-label="Remove location"
+        onclick="event.stopPropagation(); deleteLocation('${o.id}')">&times;</button>
+    </span>`).join('') +
+    `<button type="button" class="gen-outfit-add" onclick="el('gen-location-file').click()">+ Upload</button>` +
+    `<button type="button" class="gen-outfit-add" onclick="openVaultPick('locations')">From vault</button>`;
+  document.querySelectorAll('.gen-clip-locations').forEach(b => { b.innerHTML = el('gen-locations').innerHTML; });
+  el('gen-scene').disabled = !!genLocation;
+  el('gen-location-note').textContent = genLocation
+    ? 'Using your photo of the place — “Where is she” is off while it is picked.'
+    : 'A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.';
+}
+
+async function loadLocations() {
+  try {
+    const d = await (await fetch('/api/generate/locations?persona=' + encodeURIComponent(slug()))).json();
+    genLocations = d.locations || [];
+  } catch (e) { genLocations = []; }
+  if (!genLocations.some(o => o.id === genLocation)) genLocation = '';
+  renderLocations();
+}
+
+function pickLocation(id) {
+  genLocation = genLocation === id ? '' : id;
+  renderLocations();
+  refreshShot();
+  describePlace();
+}
+
+function uploadLocation(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch('/api/generate/locations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: slug(), image: reader.result }),
+      });
+      studioPhotoSaved('locations', await res.json());
+    } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  };
+  reader.readAsDataURL(file);
+}
+
+// A new outfit or place photo is the newest in its list, and picked.
+function studioPhotoSaved(kind, d) {
+  if (!d.ok) throw new Error(d.error || 'Upload failed');
+  if (kind === 'outfits') {
+    genOutfits = d.outfits || [];
+    genOutfit = (genOutfits[0] || {}).id || '';
+    renderOutfits();
+    checkPromptStale();
+    queueAutoPrompt();
+  } else {
+    genLocations = d.locations || [];
+    genLocation = (genLocations[0] || {}).id || '';
+    renderLocations();
+    refreshShot();
+    describePlace();
+  }
+  fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')
+    .then(r => r.json()).then(v => { mediaVault = v.vault || mediaVault; }).catch(() => {});
+}
+
+// A place photo also writes the clip's "Change the place" line, unless she
+// has typed her own there.
+async function describePlace() {
+  const boxes = [...document.querySelectorAll('.gen-clip-place')];
+  if (!genLocation || boxes.some(b => b.value.trim() && !b.dataset.auto)) return;
+  boxes.forEach(b => { b.placeholder = 'Reading the photo…'; });
+  try {
+    const d = await (await fetch('/api/generate/describe-place', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), location_id: genLocation }),
+    })).json();
+    if (!d.ok) throw new Error(d.error);
+    boxes.forEach(b => { b.value = d.place; b.dataset.auto = 1; });
+    queueVideoPrompt();
+  } catch (e) { setGenStatus('✗ ' + (e.message || 'Could not read that photo'), false); }
+  finally { boxes.forEach(b => { b.placeholder = 'a rooftop bar at night, neon on wet concrete'; }); }
+}
+
+async function deleteLocation(id) {
+  await fetch('/api/generate/locations/' + id + '?persona=' + encodeURIComponent(slug()), { method: 'DELETE' });
+  await loadLocations();
+  refreshShot();
+}
+
+
+// Clips she has uploaded, kept for reuse, and the photos that go with them.
+let genClips = [];
+
+async function loadClips() {
+  if (!slug()) return;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources')).json();
+    genClips = d.sources || [];
+  } catch (e) { genClips = []; }
+  renderClipLib();
+}
+
+function renderClipLib() {
+  document.querySelectorAll('.gen-cliplib').forEach(box => {
+    const into = box.dataset.into;
+    const cur = (into === 'drive' ? genDrive : genSwap) || {};
+    box.innerHTML = genClips.map(c => `
+      <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${c.id === cur.id}"
+            title="${c.seconds}s, ${c.resolution}" onclick="pickClip('${c.id}', '${into}')">
+        ${c.poster_url ? `<img src="${esc(c.poster_url)}" alt="Clip">`
+          : `<video src="${esc(c.url)}#t=0.5" preload="metadata" muted playsinline
+                    style="width:100%;height:100%;object-fit:cover;border-radius:inherit;pointer-events:none"></video>`}
+        <b style="position:absolute;left:3px;bottom:3px;font-size:11px;background:#000a;padding:0 4px;border-radius:4px">${c.seconds}s</b>
+        <button type="button" class="x" aria-label="Delete clip"
+          onclick="event.stopPropagation(); deleteClip('${c.id}')">&times;</button>
+      </span>`).join('') || '<span class="hint">No clips yet.</span>';
+  });
+}
+
+function pickClip(id, into) {
+  const c = genClips.find(x => x.id === id);
+  if (!c) return;
+  const on = ((into === 'drive' ? genDrive : genSwap) || {}).id === id;
+  if (into === 'drive') genDrive = on ? null : c; else genSwap = on ? null : c;
+  renderGenForm();
+}
+
+async function deleteClip(id) {
+  await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources/' + id, { method: 'DELETE' });
+  if ((genDrive || {}).id === id) genDrive = null;
+  if ((genSwap || {}).id === id) genSwap = null;
+  await loadClips();
+  renderGenForm();
+}
+
+// Extra photos and a place only where the running model can use them.
+
+// What each engine actually reads, so a form never shows a field that changes
+// nothing. Kling motion control takes movement from the clip and builds its own
+// prompt from what is picked; a replace works on a clip it was handed.
+function engineUses(field, m) {
+  const kling = KLING_MC.includes(m);
+  const clipModel = CLIP_MODELS.includes(m);
+  const haveClip = genJob === 'swap' ? !!genSwap : !!genDrive;
+  switch (field) {
+    case 'prompt': return !kling;
+    case 'photo': return !kling && !clipModel && !genDrive;
+    case 'place': return m !== 'ml-face-swap' && (clipModel || haveClip);
+    case 'photos': return m !== 'ml-face-swap' && !kling && refCap() > 1 && (clipModel || haveClip);
+  }
+  return true;
+}
+
+let genUploadInto = '';
+function pickVaultUpload(into) { genUploadInto = into; el('gen-vault-file').click(); }
+
+function uploadVaultPhoto(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !slug()) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: reader.result, mime: file.type, purpose: 'reference' }),
+      });
+      const d = await res.json();
+      if (!d.id) throw new Error(d.error || 'Upload failed');
+      const list = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
+      mediaVault = list.vault || [];
+      if (genUploadInto === 'photo') genReelPick = d.id;
+      else genIdPick = genIdPick.concat(d.id).slice(-refCap());
+      renderGenForm();
+    } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  };
+  reader.readAsDataURL(file);
+}
+
+function syncClipExtras() {
+  const swap = genJob === 'swap';
+  const m = engineModel();
+  const place = engineUses('place', m);
+  const photos = engineUses('photos', m);
+  document.querySelectorAll('.gen-clip-extras').forEach(box => {
+    const mine = box.closest('#gen-swap-form') ? swap : !swap;
+    box.style.display = place && mine ? '' : 'none';
+    box.querySelectorAll('.gen-clip-photos').forEach(r => { r.style.display = photos ? '' : 'none'; });
+    box.querySelectorAll('.gen-place-note').forEach(n => {
+      n.textContent = (photos ? 'The photo is read into the line above and also sent as the background.'
+        : 'The photo is read into the line above; this engine only takes the words.')
+        + ' Use a photo of the room without people in it — a person in it can end up in the clip.';
+    });
+  });
+  document.querySelectorAll('.gen-kling-hint').forEach(h => { h.style.display = KLING_MC.includes(m) ? '' : 'none'; });
+  const startRow = el('gen-reel-photo-row');
+  if (startRow) startRow.style.display = engineUses('photo', m) ? '' : 'none';
+  const promptRow = el('gen-reel-prompt-row');
+  if (promptRow) promptRow.style.display = engineUses('prompt', m) ? '' : 'none';
+  const motionRow = el('gen-swap-motion-row');
+  if (motionRow) motionRow.style.display = KLING_MC.includes(m) ? 'none' : '';
+  const pl = el('gen-drive-player');
+  if (pl) {
+    pl.style.display = genDrive && genJob !== 'swap' ? '' : 'none';
+    if (genDrive && pl.src !== genDrive.url) pl.src = genDrive.url || '';
+  }
+  renderClipLib();
+  renderClipLines();
+}
+
+function clipExtrasPayload() {
+  const swap = genJob === 'swap';
+  const box = document.querySelector(swap ? '#gen-swap-form .gen-clip-extras' : '#gen-video-drive .gen-clip-extras');
+  const shown = box && box.style.display !== 'none';
+  const photos = shown && engineUses('photos', engineModel());
+  return {
+    place: shown ? (box.querySelector('.gen-clip-place').value || '').trim() : '',
+    outfit_ref: photos ? genOutfit : '', location_ref: photos ? genLocation : '',
+  };
+}
+
 async function loadPersona() {
   if (!slug()) return;
   loadOutfits();
+  loadLocations();
+  loadClips();
   genIdentityTouched = false;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
@@ -922,6 +1235,7 @@ async function loadPersona() {
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
     genExpressions = d.expressions || [];
+    genZooms = d.zooms || [];
     genQualities = d.qualities || [];
     el('persona-hint').textContent =
       'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
@@ -933,6 +1247,7 @@ async function loadPersona() {
   pollGenJobs();
   await Promise.all([loadCharacterBadge(), loadReferences()]);
   if (window.StudioWizard) StudioWizard.refresh();
+  refreshShot();
 }
 
 // Photos is a job like the rest of them here: the tile row is the one place a
@@ -1242,7 +1557,30 @@ function renderRefs() {
 
 let vaultRole = 'face';
 
+// Picking an outfit or place photo out of the vault instead of uploading it.
+let vaultPick = '';
+function openVaultPick(kind) {
+  vaultPick = kind;
+  el('gen-vault').hidden = false;
+  setVaultStatus('');
+  renderVaultPicker();
+}
+
+async function useVaultPhoto(id) {
+  const kind = vaultPick;
+  setVaultStatus('Adding…');
+  try {
+    const res = await fetch('/api/generate/' + kind, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), media_id: id }),
+    });
+    studioPhotoSaved(kind, await res.json());
+    closeVault();
+  } catch (e) { setVaultStatus('✗ ' + e.message, true); }
+}
+
 function openVault(role) {
+  vaultPick = '';
   vaultRole = role;
   el('gen-vault').hidden = false;
   setVaultStatus('');
@@ -1259,6 +1597,14 @@ function setVaultStatus(msg, bad) {
 
 function renderVaultPicker() {
   const photos = mediaVault.filter(v => v.kind !== 'video');
+  if (vaultPick) {
+    el('gen-vault-title').textContent = vaultPick === 'outfits' ? 'Pick an outfit photo' : 'Pick a place photo';
+    el('gen-vault-grid').innerHTML = photos.map(v =>
+      `<button type="button" class="gen-ref-t" onclick="useVaultPhoto('${v.id}')" title="${esc(v.purpose || 'Vault photo')}">
+         <img loading="lazy" decoding="async" src="${v.thumb}" alt="">${v.purpose ? `<em>${esc(v.purpose)}</em>` : ''}</button>`).join('')
+      || '<span class="hint">Nothing in the vault yet — upload a photo below.</span>';
+    return;
+  }
   const chosen = genRefs[vaultRole] || [];
   el('gen-vault-title').textContent =
     `${vaultRole === 'face' ? 'Her face' : 'Her body'} — ${chosen.length} of ${genRefs.cap}`;
@@ -1274,6 +1620,12 @@ function renderVaultPicker() {
 async function uploadRefs(files) {
   const list = [...(files || [])];
   if (!list.length || !slug()) return;
+  if (vaultPick) {
+    (vaultPick === 'outfits' ? uploadOutfit : uploadLocation)({ files: list });
+    el('gen-upload').value = '';
+    closeVault();
+    return;
+  }
   setVaultStatus(`Uploading ${list.length} photo${list.length === 1 ? '' : 's'}…`);
   let failed = 0;
   for (const file of list) {
@@ -1336,6 +1688,29 @@ async function lightboxKeep(keep) {
   await keepGenerated(id, keep);
 }
 
+// Thumbnails that select on click (outfits, places, pickers) get a corner
+// button that opens the lightbox on that strip's images instead.
+function openZoom(btn, ev) {
+  ev.stopPropagation(); ev.preventDefault();
+  const item = btn.parentElement, strip = item.parentElement;
+  const imgs = [...strip.children].map(c => c.querySelector('img')).filter(Boolean);
+  lbItems = imgs.map(i => ({ dataset: { lb: i.currentSrc || i.src } }));
+  lbIdx = Math.max(0, imgs.indexOf(item.querySelector('img')));
+  showLightbox();
+}
+function addZoomButtons() {
+  document.querySelectorAll('.gen-outfit, .anim-pick').forEach(it => {
+    if (it.querySelector(':scope > .gen-zoom-btn') || !it.querySelector('img')) return;
+    const b = document.createElement('span');
+    b.className = 'gen-zoom-btn'; b.setAttribute('role', 'button');
+    b.title = 'View full size'; b.textContent = '\u2922';
+    b.onclick = e => openZoom(b, e);
+    it.appendChild(b);
+  });
+}
+new MutationObserver(addZoomButtons).observe(document.body, { childList: true, subtree: true });
+document.addEventListener('DOMContentLoaded', addZoomButtons);
+
 function stepLightbox(d) {
   if (lbItems.length < 2) return;
   lbIdx = (lbIdx + d + lbItems.length) % lbItems.length;
@@ -1390,8 +1765,11 @@ function renderGenForm() {
   el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
   el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
+  el('gen-vadvanced').style.display = genMake === 'image' ? 'none' : '';
+  queueVideoPrompt();
   syncIdentity();
   syncSwapKling();
+  syncClipExtras();
   el('gen-drive-label').textContent = genJob === 'reel'
     ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
@@ -1463,6 +1841,7 @@ function renderGenForm() {
   fillVocab('gen-camera', genCameras);
   fillVocab('gen-lighting', genLighting);
   fillVocab('gen-expression', genExpressions);
+  fillVocab('gen-zoom', genZooms);
   fillVocab('gen-quality', genQualities);
 
   renderImageRes();
@@ -1485,7 +1864,13 @@ function renderImageRes() {
 // in front of one of those is a control that changes nothing, which reads as a
 // promise the clip will not keep.
 function aspectModel() {
-  return genMake === 'swap' ? swapModel() : videoModel();
+  return genMake === 'swap' ? swapModel()
+    : genJob === 'reel' ? videoModelNow() : videoModel();
+}
+
+// The model this form will actually run, after the server's own moves.
+function engineModel() {
+  return genJob === 'swap' ? swapModel() : genJob === 'reel' ? videoModelNow() : videoModel();
 }
 
 function aspectOffered() {
@@ -1556,44 +1941,111 @@ function pickImageAspect(a) {
 }
 
 const AUDIO_LABELS = {
+  original: "Clip's own sound", none: 'No sound', upload: 'Upload my audio',
+  lipsync: 'New dialogue (lip-synced)', music: 'Music',
   ambience: 'Room tone', moaning: 'Breathing & moaning',
-  speech: 'She says a line', custom: 'Describe it',
+  speech: 'She says a line', custom: 'Describe the sound',
 };
 const AUDIO_PLACEHOLDERS = {
   speech: 'the line she says, in her own voice',
+  lipsync: 'the line she says — her mouth moves to it',
+  music: 'the mood, e.g. slow lo-fi, late night',
   custom: 'rain on the window, a television two rooms away',
 };
+const AUDIO_NOTES = {
+  original: 'Keeps the sound of the clip you uploaded. Free.',
+  none: 'The clip comes back silent. Free.',
+  upload: 'Your track replaces the clip’s sound, cut to its length. Free.',
+};
+let genAudioLib = [];
+
+function hasSourceClip() {
+  return genJob === 'swap' ? !!genSwap : !!genDrive;
+}
+
+function audioModes() {
+  const gen = soundOffered() ? (genPrices.audio_modes || []).filter(m => m !== 'speech'
+    && (m !== 'moaning' || genRating !== 'sfw')) : ['lipsync'];
+  return (hasSourceClip() ? ['original'] : []).concat(['none', 'upload'], gen);
+}
 
 function renderAudioModes() {
   const box = el('gen-audio-modes');
   const note = el('gen-audio-note');
   const field = el('gen-audio-prompt');
   if (!box || !genPrices) return;
-  const modes = genPrices.audio_modes || [];
-  box.innerHTML = [''].concat(modes).map(m =>
-    `<button type="button" class="gen-chip" aria-pressed="${m === (genAudio.mode || '')}"
-       onclick="pickAudio('${m}')">${esc(m ? (AUDIO_LABELS[m] || m) : 'Silent')}</button>`).join('');
-  const typed = genAudio.mode === 'speech' || genAudio.mode === 'custom';
+  const rowA = el('gen-audio-row');
+  if (rowA) rowA.style.display = genMake === 'image' ? 'none' : '';
+  const modes = audioModes();
+  if (!modes.includes(genAudio.mode)) genAudio = { mode: modes[0] };
+  box.innerHTML = modes.map(m =>
+    `<button type="button" class="gen-chip" aria-pressed="${m === genAudio.mode}"
+       onclick="pickAudio('${m}')">${esc(AUDIO_LABELS[m] || m)}</button>`).join('');
+  const typed = ['speech', 'custom', 'lipsync', 'music'].includes(genAudio.mode);
   field.style.display = typed ? '' : 'none';
   if (typed) field.placeholder = AUDIO_PLACEHOLDERS[genAudio.mode] || '';
+  el('gen-audio-upload').style.display = genAudio.mode === 'upload' ? '' : 'none';
+  if (genAudio.mode === 'upload') {
+    el('gen-audio-lib').innerHTML = genAudioLib.map(a =>
+      `<button type="button" class="gen-chip" aria-pressed="${a.id === genAudio.audio_id}"
+         onclick="genAudio.audio_id='${a.id}'; renderGenForm()">${esc(a.name || 'Track')}</button>`).join('')
+      || '<span class="hint">No audio uploaded yet.</span>';
+  }
   if (note) {
-    const cost = (genPrices.addons || {}).audio;
-    note.textContent = !genAudio.mode
-      ? 'No sound. Nothing is added to the price.'
-      : genAudio.mode === 'speech'
-        ? `Her voice comes from her persona, not from here. ${cost || 0} tokens a clip.`
-        : `${cost || 0} tokens a clip, whatever its length. A model that cannot make sound still returns the clip.`;
+    const cost = (genPrices.addons || {})[genAudio.mode === 'lipsync' ? 'lipsync' : 'audio'];
+    note.textContent = AUDIO_NOTES[genAudio.mode]
+      || (genAudio.mode === 'lipsync'
+        ? `Her voice comes from her persona and her lips follow the line. ${cost || 0} tokens a clip.`
+        : `${cost || 0} tokens a clip, whatever its length. A model that cannot make sound still returns the clip.`);
   }
 }
 
 function pickAudio(mode) {
-  genAudio = { mode: mode };
+  genAudio = { mode: mode, audio_id: genAudio.audio_id };
+  if (mode === 'upload') loadAudioLib();
   renderGenForm();
 }
 
+async function loadAudioLib() {
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources?kind=audio')).json();
+    genAudioLib = (d.sources || []).map((a, i) => Object.assign(
+      { name: (genAudioLib.find(x => x.id === a.id) || {}).name || `Track ${i + 1}` }, a));
+  } catch (e) {}
+  renderAudioModes();
+}
+
+async function uploadAudio(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !slug()) return;
+  el('gen-audio-note').textContent = `Uploading ${file.name}…`;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/audio-source',
+                                 { method: 'POST', body: form })).json();
+    if (!d.ok) throw new Error(d.error || 'Upload failed');
+    genAudioLib = [{ id: d.id, name: file.name }].concat(genAudioLib);
+    genAudio.audio_id = d.id;
+    await loadAudioLib();
+    el('gen-audio-note').textContent = `✓ Uploaded: ${file.name}`;
+  } catch (e) { el('gen-audio-note').textContent = '✗ ' + e.message; }
+}
+
+// A model that replaces the person in a clip, or moves her by it, cannot make
+// sound itself; it keeps, drops or swaps the clip's track, or lip-syncs after.
+function soundOffered() {
+  const m = engineModel();
+  if (m === 'kling-3-0-omni') return true;
+  return !CLIP_MODELS.includes(m) && !(genDrive && genJob === 'reel');
+}
+
 function audioPayload() {
-  if (!genAudio.mode) return null;
-  return { mode: genAudio.mode, prompt: (el('gen-audio-prompt') || {}).value || '' };
+  const mode = genAudio.mode;
+  if (!mode || mode === 'original') return null;
+  return { mode: mode, prompt: (el('gen-audio-prompt') || {}).value || '',
+           audio_id: genAudio.audio_id || '' };
 }
 
 const EXTEND_LABELS = {
@@ -1689,7 +2141,7 @@ function providerCost() {
     ((genCosts.measured[kind] || {})[model] || []).includes(key);
   // Sound is a second call to the provider, so it is a second cost. Reading
   // only the per-second rate under-reported every clip that carries one.
-  const audioUsd = genAudio.mode ? ((genCosts.addons || {}).audio || 0) : 0;
+  const audioUsd = (genCosts.addons || {})[audioAddon()] || 0;
   if (genMake === 'swap') {
     if (!genSwap) return null;
     const per = (genCosts.video_per_second[swapModel()] || {})[swapResolution()];
@@ -1738,6 +2190,8 @@ const SWAP_NOTES = {
     'camera, lighting and background — and changes only who is in it.',
   'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
     'motion. A new video that resembles yours, not your video with her in it.',
+  'kling-3-0-mc': 'Her one full-body photo performs your clip. Carries her build, not only her face, but takes a single photo.',
+  'kling-2-6-mc': 'Like Kling 3.0 at a lower price; one full-body photo.',
   'ml-face-swap': 'Same as the replace above — keeps your clip, swaps only ' +
     'who is in it — on the one provider that will also run this explicit.',
 };
@@ -1764,7 +2218,7 @@ function swapModel() {
 function syncSwapKling() {
   const kling = genJob === 'swap' && swapModel().startsWith('kling-');
   el('gen-swap-kling').style.display = kling ? 'flex' : 'none';
-  el('gen-swap-sound-row').style.display = swapModel() === 'kling-2-6-mc' ? 'flex' : 'none';
+  el('gen-swap-sound-row').style.display = 'none';
   el('gen-swap-motion-label').textContent = kling ? 'Scene and look (optional)' : 'Motion';
   el('gen-swap-motion').placeholder = kling
     ? 'same room, soft daylight, she smiles at the end'
@@ -1777,8 +2231,15 @@ function swapMaxSeconds() {
 
 // A swap is priced per second at its own rung, both of which the server
 // measured off the file. Nothing the panel sends can change either.
+// Keeping, dropping or swapping the clip's own track is free; only a
+// provider pass is an add-on.
+function audioAddon() {
+  const m = genAudio.mode;
+  return !m || ['original', 'none', 'upload'].includes(m) ? '' : m === 'lipsync' ? 'lipsync' : 'audio';
+}
+
 function audioTokens() {
-  return genAudio.mode ? (((genPrices && genPrices.addons) || {}).audio || 0) : 0;
+  return audioAddon() ? (((genPrices && genPrices.addons) || {})[audioAddon()] || 0) : 0;
 }
 
 function swapPrice() {
@@ -1888,7 +2349,14 @@ function swapTakesDuration() {
 // a reel onto one of these before quoting, so the price shown follows it.
 const REF_VIDEO_MODELS = ['wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
-const CLIP_MODELS = ['p-video-replace', 'p-video-animate'];
+const KLING_MC = ['kling-3-0-mc', 'kling-2-6-mc'];
+const CLIP_MODELS = ['p-video-replace', 'kling-3-0-omni'].concat(KLING_MC);
+
+// How many of her photos the running model takes (imagegen.ref_cap).
+function refCap() {
+  const m = genJob === 'swap' ? swapModel() : videoModelNow();
+  return ((((genPrices || {}).swap_model_caps || {})[m] || {}).refs) || 3;
+}
 
 function identityOf(job) {
   return genCharacter && genCharacter.has_approved
@@ -1906,11 +2374,17 @@ let genCvPick = [];
 // None picked sends the default views: full body for Kling, face and body for a reel.
 function pickCharView(key) {
   genCvPick = genCvPick.includes(key) ? genCvPick.filter(x => x !== key)
-            : genCvPick.concat(key).slice(-3);
+            : genCvPick.concat(key).slice(-refCap());
   renderGenForm();
 }
 
 function syncIdentity() {
+  const cap = refCap();
+  genCvPick = genCvPick.slice(-cap);
+  genIdPick = genIdPick.slice(-cap);
+  document.querySelectorAll('.gen-refcap-lbl').forEach(l => {
+    l.textContent = l.textContent.replace(/up to \d+/, 'up to ' + cap);
+  });
   const has = !!(genCharacter && genCharacter.has_approved);
   document.querySelectorAll('.gen-identity').forEach(sel => {
     sel.querySelector('option[value="character"]').disabled = !has;
@@ -1919,6 +2393,20 @@ function syncIdentity() {
   });
   ['swap', 'reel'].forEach(job => {
     const vault = identityOf(job) === 'vault';
+    const clip = job === 'swap' || !!genDrive;
+    const form = el('gen-' + job + '-form');
+    const say = (cls, text) => { const n = form.querySelector(cls); if (n) n.textContent = text; };
+    say('.gen-id-lbl', clip ? 'Who replaces the person in your clip' : 'Who she is in the reel');
+    say('.gen-id-hint', vault
+      ? 'Her photos from the vault are who she is. No character build needed.'
+      : 'The looks you approved in her character build are who she is.');
+    say('.gen-cv-lbl', `${clip ? 'Look she swaps in with' : 'Look she has'} (up to ${cap})`);
+    say('.gen-cv-hint', (clip ? 'The person in your clip becomes her, in this look.'
+      : 'The reel shows her in this look.') + ' None picked: her face and full body.');
+    say('.gen-ip-lbl', `${vault ? 'Photos of her' : 'Extra photos of her (optional)'} (up to ${cap})`);
+    say('.gen-ip-hint', vault
+      ? 'These are who she is. None picked: the face and body photos from step 2.'
+      : 'Sent along with her look so her face stays sharp.');
     el('gen-' + job + '-cvpick-row').style.display = vault ? 'none' : '';
     if (!vault) {
       const views = (genCharacter && genCharacter.sfw_views) || [];
@@ -1927,32 +2415,31 @@ function syncIdentity() {
                 title="${esc(v.label)}" onclick="pickCharView('${v.key}')">
           <img loading="lazy" decoding="async" src="${v.url}" alt="${esc(v.label)}" draggable="false"></button>`).join('');
     }
-    el('gen-' + job + '-idpick-row').style.display = vault ? '' : 'none';
-    if (!vault) return;
+    el('gen-' + job + '-idpick-row').style.display = '';
     const photos = animPhotos();
     el('gen-' + job + '-idpick').innerHTML = photos.length ? photos.map(v => `
       <button type="button" class="anim-pick" aria-pressed="${genIdPick.includes(v.id)}"
               title="${esc(v.purpose || 'kept photo')}" onclick="pickIdPhoto('${v.id}')">
         <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-      : '<span class="hint">No kept photos in the vault yet.</span>';
+      + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('ids')">+ Upload</button>`
+      : `<span class="hint">No kept photos in the vault yet.</span><button type="button" class="gen-outfit-add" onclick="pickVaultUpload('ids')">+ Upload</button>`;
   });
 }
 
 // None picked falls back to the photos saved against the model in panel 2.
 function pickIdPhoto(id) {
   genIdPick = genIdPick.includes(id) ? genIdPick.filter(x => x !== id)
-            : genIdPick.concat(id).slice(-3);
+            : genIdPick.concat(id).slice(-refCap());
   renderGenForm();
 }
 
 function videoModelNow() {
   if (genJob === 'reel') {
     const m = videoModel();
-    if (genDrive) return CLIP_MODELS.includes(m) || m === 'wan-2-7' ? m : 'p-video-replace';
+    if (genDrive) return CLIP_MODELS.includes(m) || m === 'wan-2-7' ? m : 'kling-3-0-omni';
     if (reelChar() && !REF_VIDEO_MODELS.includes(m)) return 'wan-2-7';
     return m;
   }
-  if (genJob === 'animate' && genDrive && videoModel() === 'p-video-animate') return 'p-video-animate';
   return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
                   : videoModel();
 }
@@ -1984,7 +2471,7 @@ function renderSwapForm() {
   el('gen-swap-limits').textContent =
     `Up to ${SWAP_LIMITS.mb} MB and ${swapMaxSeconds()} seconds, as MP4 or MOV. ` +
     'Her face comes from the reference slots above, so there is nothing to pick here. ' +
-    'The clip you upload is working material: it is swept after three days and never reaches a fan.';
+    'Uploaded clips are kept for reuse until you delete them, and never reach a fan.';
   const have = el('gen-swap-have');
   have.style.display = genSwap ? 'flex' : 'none';
   if (!genSwap) return;
@@ -2030,6 +2517,9 @@ async function uploadSwapSource(file, into) {
     return;
   }
   setGenStatus('Uploading…', null);
+  const line = el(into === 'drive' ? 'gen-drive-upl' : 'gen-swap-upl');
+  line.className = 'gen-uploaded busy';
+  line.textContent = `Uploading ${file.name}…`;
   try {
     const form = new FormData();
     form.append('file', file);
@@ -2045,6 +2535,8 @@ async function uploadSwapSource(file, into) {
         : `The upload failed (${res.status}).`);
     }
     if (!d.ok) throw new Error(d.error || 'Upload failed');
+    d.name = file.name;
+    d.mb = file.size / 1e6;
     if (into === 'drive') {
       genDrive = d;
       el('gen-drive-note').textContent = genJob === 'reel'
@@ -2054,8 +2546,28 @@ async function uploadSwapSource(file, into) {
       genSwap = d;
     }
     setGenStatus('Clip uploaded.', true);
-  } catch (e) { genSwap = null; setGenStatus('✗ ' + e.message, false); }
+    await loadClips();
+  } catch (e) {
+    line.className = 'gen-uploaded';
+    line.textContent = '';
+    if (into === 'drive') genDrive = null; else genSwap = null;
+    setGenStatus('✗ ' + e.message, false);
+  }
   renderGenForm();
+}
+
+// The chosen clip, said in words next to the button, so an upload never
+// leaves her guessing whether it landed.
+function renderClipLines() {
+  [['drive', genDrive], ['swap', genSwap]].forEach(([into, c]) => {
+    const line = el('gen-' + into + '-upl');
+    if (!line || line.classList.contains('busy') && !c) return;
+    line.className = 'gen-uploaded';
+    line.textContent = c ? `✓ ${c.name ? 'Uploaded: ' + c.name : 'Clip chosen'} · ${c.seconds}s`
+      + (c.mb ? ` · ${c.mb.toFixed(1)} MB` : '') : '';
+    const btn = line.parentNode.querySelector('.gen-upl-txt');
+    if (btn) btn.textContent = c ? 'Replace clip' : 'Upload a clip';
+  });
 }
 
 // Writes the prompt the job would build from these choices and her character,
@@ -2070,10 +2582,12 @@ function promptChoices() {
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
+    zoom: el('gen-zoom').value,
     smudges: el('gen-smudges').checked,
     quality: el('gen-quality').value,
     clothing: el('gen-clothing').value.trim(),
     outfit_ref: genOutfit,
+    location_ref: genLocation,
     direction: el('gen-direction').value.trim(),
     aspect: currentImageAspect(),
     reference_media: el('gen-ref').value || '',
@@ -2084,7 +2598,7 @@ function promptChoices() {
 async function writePrompt() {
   const note = el('gen-write-note');
   const btn = el('gen-write-btn');
-  if (!el('gen-direction').value.trim()) await suggestDirection();
+  if (!el('gen-direction').value.trim()) await autoDirection();
   const choices = promptChoices();
   btn.disabled = true;
   note.textContent = 'Writing…';
@@ -2103,6 +2617,104 @@ async function writePrompt() {
   finally { btn.disabled = false; }
 }
 
+// The prompt follows the dropdowns while it is still the one we wrote. The
+// moment she edits it, it is hers: a change then only says the choices moved
+// on, and "Write the prompt" is what rewrites it.
+let genPromptSeq = 0, genPromptTimer = null;
+
+async function autoWritePrompt() {
+  const ta = el('gen-prompt');
+  if (!ta || !slug() || genMake !== 'image') return;
+  const pristine = !ta.value.trim() || (genWritten && ta.value === genWritten.prompt);
+  if (!pristine) { checkPromptStale(); return; }
+  const seq = ++genPromptSeq;
+  const choices = promptChoices();
+  try {
+    const res = await fetch('/api/generate/prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(choices),
+    });
+    const d = await res.json();
+    if (!d.ok || seq !== genPromptSeq) return;
+    if (ta.value.trim() && !(genWritten && ta.value === genWritten.prompt)) return;
+    ta.value = d.prompt;
+    genWritten = { choices: JSON.stringify(choices), prompt: d.prompt };
+    el('gen-write-note').textContent = 'Follows your choices — edit it and it stays as you wrote it.';
+  } catch (e) {}
+}
+
+// The clip's prompt, shown the way the job builds it. Same rule as a still's:
+// it follows the choices until she edits it, then it is hers.
+let genVWritten = null, genVPromptSeq = 0, genVPromptTimer = null;
+
+function videoPromptEdited() {
+  const ta = el('gen-vprompt');
+  return !!(ta && ta.value.trim() && !(genVWritten && ta.value === genVWritten.prompt));
+}
+
+async function autoWriteVideoPrompt(force) {
+  const ta = el('gen-vprompt');
+  if (!ta || !slug() || genMake === 'image') return;
+  if (!force && videoPromptEdited()) { checkVideoPromptStale(); return; }
+  const seq = ++genVPromptSeq;
+  const note = el('gen-vwrite-note');
+  let payload;
+  try { payload = await videoPromptChoices(); } catch (e) { return; }
+  try {
+    const d = await (await fetch('/api/generate/video-prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+    if (seq !== genVPromptSeq) return;
+    if (!d.ok) { if (force) note.textContent = '✗ ' + (d.error || 'could not write it'); return; }
+    if (!force && videoPromptEdited()) return;
+    ta.value = d.prompt;
+    genVWritten = { choices: JSON.stringify(payload), prompt: d.prompt };
+    note.textContent = 'Follows your choices. Edit it and it stays as you wrote it.';
+  } catch (e) {}
+}
+
+// The payload without the heavy parts: the preview needs no frame grab.
+async function videoPromptChoices() {
+  if (genJob === 'extend') {
+    return { persona: slug(), job: 'extend', rating: genRating, model: videoModel(),
+             extend_mode: genExtendMode, motion: (el('gen-extend-motion').value || '').trim(),
+             parent_media: genExtendClip };
+  }
+  const p = await jobPayload();
+  delete p.audio;
+  return p;
+}
+
+function checkVideoPromptStale() {
+  if (!videoPromptEdited()) return;
+  el('gen-vwrite-note').textContent = 'Your own prompt is used as written. “Write the prompt” rebuilds it from your choices.';
+}
+
+function queueVideoPrompt() {
+  clearTimeout(genVPromptTimer);
+  genVPromptTimer = setTimeout(() => autoWriteVideoPrompt(false), 500);
+}
+
+document.addEventListener('input', e => {
+  if (e.target.id !== 'gen-vprompt' && e.target.closest
+      && e.target.closest('#gen-reel-form, #gen-swap-form, #gen-video-form, #gen-extend-form, #gen-multiref-form')) {
+    queueVideoPrompt();
+  }
+});
+
+function queueAutoPrompt() {
+  clearTimeout(genPromptTimer);
+  genPromptTimer = setTimeout(autoWritePrompt, 400);
+}
+
+// A choice moved: refresh the "doing" line if it is still ours, then the prompt.
+async function refreshShot() {
+  const input = el('gen-direction');
+  if (input && (!input.value.trim() || input.dataset.auto)) await autoDirection();
+  queueAutoPrompt();
+}
+
 function checkPromptStale() {
   if (!genWritten || !el('gen-prompt').value.trim()) return;
   if (JSON.stringify(promptChoices()) !== genWritten.choices) {
@@ -2112,14 +2724,44 @@ function checkPromptStale() {
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
   if (['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-camera', 'gen-lighting',
-       'gen-expression', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
-       'gen-model'].includes(id)) checkPromptStale();
+       'gen-expression', 'gen-zoom', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction',
+       'gen-ref', 'gen-model'].includes(id)) { checkPromptStale(); queueAutoPrompt(); }
 }));
 
 // The direction fills itself in from the shot and scene, and only while it
 // still holds a suggestion: the moment she types, the words are hers and
 // nothing here writes over them.
 let genDirectionSeq = 0;
+
+function directionChoices() {
+  return {
+    persona: slug(), rating: genRating, shot: el('gen-shot').value,
+    scene: (genLocation && ((genScenes.find(x => x.key === genScene()) || {}).level === 'sfw'))
+      ? '' : genScene(),
+    location: genLocation ? '' : (el('gen-scene') || {}).value || '',
+    style: el('gen-style').value, expression: el('gen-expression').value,
+    clothing: el('gen-clothing').value.trim(),
+  };
+}
+
+// The instant version: a short line built from the dropdowns, no model call.
+async function autoDirection() {
+  const input = el('gen-direction');
+  if (!slug() || !input) return;
+  const seq = ++genDirectionSeq;
+  try {
+    const res = await fetch('/api/generate/direction', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign(directionChoices(), { mode: 'auto' })),
+    });
+    const d = await res.json();
+    if (!d.ok || seq !== genDirectionSeq) return;
+    if (input.value.trim() && !input.dataset.auto) return;
+    input.value = d.direction;
+    input.dataset.auto = '1';
+    el('gen-direction-note').textContent = 'Follows your choices above — click Suggest for a different idea, or type your own.';
+  } catch (e) {}
+}
 
 async function suggestDirection() {
   const input = el('gen-direction');
@@ -2132,19 +2774,16 @@ async function suggestDirection() {
   try {
     const res = await fetch('/api/generate/direction', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        persona: slug(), rating: genRating, shot: el('gen-shot').value,
-        scene: genScene(), location: (el('gen-scene') || {}).value || '', style: el('gen-style').value,
-        clothing: el('gen-clothing').value.trim(),
-      }),
+      body: JSON.stringify(directionChoices()),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'no suggestion');
     if (seq !== genDirectionSeq) return;
     input.value = d.direction;
     input.dataset.auto = '1';
-    note.textContent = 'Suggested for this shot — edit it, or Suggest again.';
+    note.textContent = 'Suggested for these choices — edit it, or Suggest again.';
     checkPromptStale();
+    queueAutoPrompt();
   } catch (e) { note.textContent = '✗ ' + e.message; }
   finally { btn.disabled = false; }
 }
@@ -2153,9 +2792,8 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'gen-direction') delete e.target.dataset.auto;
 });
 document.addEventListener('change', e => {
-  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw'].includes(e.target.id)) return;
-  const input = el('gen-direction');
-  if (!input.value.trim() || input.dataset.auto) suggestDirection();
+  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-expression'].includes(e.target.id)) return;
+  refreshShot();
 });
 
 // What this job is still missing, said plainly, or '' when it is ready. One
@@ -2166,8 +2804,9 @@ function jobBlocker() {
   if (genJob === 'extend') return genExtendClip ? '' : 'Keep a clip first';
   if (genJob === 'multiref') return genSceneRefs.length ? '' : 'Pick a scene photo';
   if (genJob === 'reel') {
+    if (KLING_MC.includes(engineModel())) return genDrive ? '' : 'Upload a clip first';
     const typed = ((el('gen-reel-prompt') || {}).value || '').trim();
-    return (typed || genReelPick) ? '' : 'Write a prompt or pick a photo';
+    return (typed || genReelPick || genDrive) ? '' : 'Write a prompt or pick a photo';
   }
   return '';
 }
@@ -2284,7 +2923,10 @@ async function runGeneration() {
   if (genMake !== 'image') return runVideoJob();
   const btn = el('gen-run-btn');
   btn.disabled = true;
-  if (!el('gen-prompt').value.trim() && !el('gen-direction').value.trim()) await suggestDirection();
+  if (!el('gen-direction').value.trim()) await autoDirection();
+  // A choice changed a moment ago may not have rewritten the prompt yet.
+  clearTimeout(genPromptTimer);
+  await autoWritePrompt();
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
@@ -2305,10 +2947,12 @@ async function runGeneration() {
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,
         expression: el('gen-expression').value,
+        zoom: el('gen-zoom').value,
         smudges: el('gen-smudges').checked,
         quality: el('gen-quality').value,
         clothing: el('gen-clothing').value.trim(),
         outfit_ref: genOutfit,
+        location_ref: genLocation,
         direction: el('gen-direction').value.trim(),
         aspect: currentImageAspect(),
         phone_look: el('gen-phone-look').value,
@@ -2331,28 +2975,29 @@ async function jobPayload() {
     model: genMake === 'swap' ? swapModel() : videoModel(),
     aspect: currentAspect(),
     audio: audioPayload(),
+    video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
   };
   if (genJob === 'swap') {
     return Object.assign(base, {
       source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
-      identity_media: identityOf('swap') === 'vault' ? genIdPick : [],
+      identity_media: genIdPick,
       character_views: identityOf('swap') === 'character' ? genCvPick : [],
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
-      keep_sound: el('gen-swap-sound').checked,
-    });
+      keep_sound: genAudio.mode === 'original',
+    }, clipExtrasPayload());
   }
   const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
   Object.assign(base, { resolution: resv, seconds: videoSecondsNow() });
   if (genJob === 'reel') {
     return Object.assign(base, {
-      prompt: (el('gen-reel-prompt').value || '').trim(),
+      prompt: engineUses('prompt', engineModel()) ? (el('gen-reel-prompt').value || '').trim() : '',
       reference_media: genReelPick || '',
       source: genDrive ? genDrive.id : '',
       identity: identityOf('reel'),
-      identity_media: identityOf('reel') === 'vault' ? genIdPick : [],
+      identity_media: genIdPick,
       character_views: identityOf('reel') === 'character' ? genCvPick : [],
-    });
+    }, clipExtrasPayload());
   }
   if (genJob === 'multiref') {
     return Object.assign(base, {
@@ -2444,14 +3089,15 @@ function renderGenStaging() {
   if (!box) return;
   const cards = [];
   genJobs.forEach(job => {
+    const engine = job.engine ? `<span class="gen-engine" title="Made with ${esc(job.engine)}">${esc(job.engine)}</span>` : '';
     if (job.status === 'queued' || job.status === 'running') {
       cards.push(['p:' + job.id, `<div class="gen-card gen-pending"><span class="loader-dots" aria-hidden="true"><i></i><i></i><i></i></span>Generating
-        ${isClip(job.kind) ? 'a clip' : 'photos'}…</div>`]);
+        ${isClip(job.kind) ? 'a clip' : 'photos'}…${engine}</div>`]);
       return;
     }
     if (job.status === 'failed') {
       cards.push(['f:' + job.id, `<div class="gen-card gen-failed" title="${esc(job.error || 'failed')}"><span>${esc(job.error || 'Failed')}</span>
-        <span class="gen-refund">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>
+        <span class="gen-refund">${job.tokens} token${job.tokens === 1 ? '' : 's'} refunded</span>${engine}
         <button type="button" class="gen-del" title="Delete this generation"
           onclick="event.stopPropagation(); deleteGenJob('${job.id}')">&times;</button></div>`]);
       return;
@@ -2465,6 +3111,7 @@ function renderGenStaging() {
         <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}" onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
+          ${engine}
           <div class="gen-acts">
             <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
@@ -2556,7 +3203,9 @@ function renderReelPhotos() {
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickReelPhoto('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>';
+    + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`
+    : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>'
+      + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`;
 }
 
 function pickReelPhoto(id) {
@@ -2716,7 +3365,7 @@ function renderVaultTools() {
   el('vault-select-btn').textContent = vaultSelecting ? 'Cancel' : 'Select';
   el('vault-select-tools').hidden = !vaultSelecting;
   el('vault-picked').textContent = n ? `${n} selected` : 'Tap items to select';
-  el('fv-open-btn').disabled = !n;
+  el('fv-open-btn').disabled = !n || chatbotOff;
 }
 
 function openFanvueUpload() {

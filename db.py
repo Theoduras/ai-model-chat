@@ -331,6 +331,18 @@ class StudioOutfit(Base):
     created_at = Column(DateTime, default=_now)
 
 
+class StudioLocation(Base):
+    """A photo of a place a creator uploaded so the studio shoots there. Kept
+    apart from PersonaMedia for the same reason as StudioOutfit."""
+    __tablename__ = 'studio_locations'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(80), nullable=False, index=True)
+    gcs_path = Column(String(400), default='')
+    mime = Column(String(60), default='image/jpeg')
+    created_at = Column(DateTime, default=_now)
+
+
 class CharacterImage(Base):
     """A reference or the approved image for one view of a character.
 
@@ -2341,6 +2353,20 @@ class RegisterLink(Base):
     created_at = Column(DateTime, default=_now, index=True)
     clicks = Column(Integer, default=0)
     signups = Column(Integer, default=0)
+
+
+class BioPage(Base):
+    """A persona's public link-in-bio page at /link-<handle>. Everything the
+    creator edits is one JSON blob; click counts live in their own dict so a
+    save from a tab opened last week cannot roll them back."""
+    __tablename__ = 'bio_pages'
+
+    slug = Column(String(64), primary_key=True)
+    handle = Column(String(32), unique=True, index=True)
+    config_json = Column(Text, default='{}')
+    views = Column(Integer, default=0)
+    clicks_json = Column(Text, default='{}')
+    updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
 def get_register_link(session, code):

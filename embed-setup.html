@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Share Your Chat</title>
+  <title>Link in bio</title>
   <meta name="robots" content="noindex,nofollow">
   <link rel="icon" href="/favicon.ico" sizes="any">
   <link rel="icon" type="image/png" href="/favicon.png">
@@ -15,17 +15,86 @@
 <link rel="stylesheet" href="/css/lazy.css">
 <script src="/js/skeleton.js"></script>
   <script src="/js/devnav.js" defer></script>
+  <script src="/js/bio-render.js"></script>
   <style>
     /* body.page-dashboard is a fixed-height, overflow:hidden flex column, so
-       this page's own content needs to be the scroll region — telegram.html's
-       .xbot-scroll does the same thing. */
-    .es-wrap { max-width: 720px; margin: 0 auto; padding: 28px 24px 80px; display: flex; flex-direction: column; gap: 20px; flex: 1; min-height: 0; overflow-y: auto; }
-    .note { background: var(--bg); border: 1px solid #2a2a30; color: var(--text-3); border-radius: 8px; padding: 10px 12px; font-size: 0.8rem; line-height: 1.55; }
-    .es-snippet { width: 100%; min-height: 108px; resize: vertical; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
-    .es-link { width: 100%; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; }
-    .es-row { display: flex; gap: 10px; flex-wrap: wrap; }
-    .es-row .field { flex: 1; min-width: 160px; }
-    @media (max-width: 640px) { .es-wrap { padding: 18px 14px 70px; } }
+       the page's own grid is the scroll region. */
+    .lb { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(0, 1fr) 380px; }
+    .lb-main { overflow-y: auto; padding: 24px 24px 90px; display: flex; flex-direction: column; gap: 18px; min-width: 0; }
+    .lb-side { overflow-y: auto; border-left: 1px solid var(--border); background: var(--panel); padding: 20px; display: flex; flex-direction: column; align-items: center; gap: 12px; }
+    .lb-top { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+    .tabs { display: flex; gap: 4px; background: var(--surface); padding: 4px; border-radius: var(--r-md); overflow-x: auto; max-width: 100%; }
+    .tabs button { background: none; border: 0; color: var(--text-3); padding: 8px 14px; border-radius: var(--r-sm); font: inherit; font-size: .85rem; font-weight: 600; cursor: pointer; white-space: nowrap; }
+    .tabs button.on { background: var(--surface-2); color: var(--text); }
+    .card { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .lbl { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .handle { display: flex; align-items: stretch; border: 1.5px solid var(--border); border-radius: var(--r-md); overflow: hidden; font-family: ui-monospace, Menlo, monospace; font-size: .85rem; }
+    .handle.good { border-color: var(--ok); } .handle.bad { border-color: var(--err); }
+    .handle span { padding: 10px 0 10px 12px; color: var(--text-muted); background: var(--surface); white-space: nowrap; }
+    .handle input { flex: 1; min-width: 80px; border: 0 !important; background: var(--surface) !important; padding: 10px 12px 10px 0 !important; font: inherit; color: var(--text); outline: none; border-radius: 0 !important; }
+    .msg { font-size: .8rem; } .msg.good { color: var(--ok); } .msg.bad { color: var(--err); }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 6px 12px; font: inherit; font-size: .8rem; font-weight: 600; cursor: pointer; }
+    .chip.on { background: var(--text); color: var(--bg); border-color: var(--text); }
+    .stats { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+    .stats div { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r); padding: 12px; }
+    .stats b { display: block; font-size: 1.35rem; font-variant-numeric: tabular-nums; }
+    .stats span { font-size: .75rem; color: var(--text-muted); }
+    .blk { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r); padding: 10px 12px; display: grid; grid-template-columns: 20px 44px minmax(0, 1fr) auto; gap: 10px; align-items: center; }
+    .blk.drag { opacity: .4; } .blk.over { border-color: var(--accent); }
+    .blk .grip { cursor: grab; color: var(--text-muted); user-select: none; text-align: center; letter-spacing: -2px; }
+    .blk .th { width: 44px; height: 44px; border-radius: var(--r-sm); background: var(--surface); display: grid; place-items: center; font-size: .7rem; color: var(--text-muted); overflow: hidden; cursor: pointer; border: 1px dashed var(--border); padding: 0; }
+    .blk .th img { width: 100%; height: 100%; object-fit: cover; }
+    .blk .fields { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+    .blk input, .blk textarea { width: 100%; font-size: .85rem !important; padding: 7px 9px !important; }
+    .blk .meta { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; font-size: .72rem; color: var(--text-muted); font-variant-numeric: tabular-nums; }
+    .blk .opts { display: flex; gap: 10px; flex-wrap: wrap; font-size: .75rem; color: var(--text-3); }
+    .blk .opts label { display: flex; gap: 4px; align-items: center; cursor: pointer; }
+    .blk .tools { display: flex; gap: 2px; }
+    .blk .tools button { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 3px 5px; font-size: .85rem; }
+    .blk .tools button:hover { color: var(--text); }
+    .tag { font-size: .65rem; font-weight: 700; padding: 2px 6px; border-radius: 5px; background: var(--accent-soft); color: var(--accent); }
+    .grid2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 14px; }
+    .grid2 > div { display: flex; flex-direction: column; gap: 6px; }
+    .colors { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .colors label { display: flex; align-items: center; gap: 8px; font-size: .8rem; color: var(--text-3); }
+    .colors input[type=color] { width: 32px; height: 32px; border: 1px solid var(--border); border-radius: 50%; padding: 0; background: none; cursor: pointer; }
+    .presets { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 10px; }
+    .preset { border: 2px solid transparent; border-radius: var(--r); height: 108px; cursor: pointer; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 5px; padding: 10px 8px; font: inherit; font-size: .72rem; font-weight: 700; }
+    .preset.on { border-color: var(--accent); }
+    .preset i { display: block; width: 100%; height: 12px; }
+    .av-pick { display: flex; gap: 12px; align-items: center; }
+    .av-pick img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--surface); }
+    .netgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+    .netgrid button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text-2); font: inherit; font-size: .72rem; font-weight: 600; cursor: pointer; }
+    .netgrid button:hover { border-color: var(--text-muted); color: var(--text); }
+    .netgrid button.used { opacity: .45; }
+    .netgrid .lg { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .netgrid .lg svg, .soc-row .lg svg { width: 18px; height: 18px; }
+    .soc-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 8px 10px; }
+    .soc-row .lg { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .soc-row .in { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); overflow: hidden; min-width: 0; }
+    .soc-row .in span { padding: 0 0 0 10px; color: var(--text-muted); font-size: .82rem; white-space: nowrap; }
+    .soc-row .in input { flex: 1; min-width: 60px; border: 0 !important; background: transparent !important; padding: 8px 10px 8px 2px !important; font-size: .85rem !important; outline: none; }
+    .soc-row .ok { font-size: .72rem; margin-top: 3px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .soc-row .tools { display: flex; gap: 2px; }
+    .soc-row .tools button { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 3px 5px; }
+    .phone { width: 320px; max-width: 100%; height: 640px; border-radius: 44px; padding: 10px; background: #050406; box-shadow: 0 20px 50px -20px #000, inset 0 0 0 2px #2b2530; flex: none; }
+    .screen { height: 100%; border-radius: 35px; overflow-y: auto; scrollbar-width: none; }
+    .screen > .bio { min-height: 100%; }
+    .live { font-size: .75rem; color: var(--text-muted); font-family: ui-monospace, Menlo, monospace; text-align: center; word-break: break-all; }
+    .savebar { position: sticky; bottom: -90px; margin: auto -24px -90px; padding: 14px 24px; background: var(--panel); border-top: 1px solid var(--border); display: flex; gap: 12px; align-items: center; justify-content: flex-end; z-index: 3; }
+    [hidden] { display: none !important; }
+    .lb-modal { position: fixed; inset: 0; background: rgba(0,0,0,.6); display: flex; align-items: center; justify-content: center; z-index: 50; padding: 16px; }
+    .lb-modal > div { background: var(--panel-2); border: 1px solid var(--border); border-radius: var(--r-lg); padding: 18px; width: 520px; max-width: 100%; max-height: 80vh; overflow-y: auto; display: flex; flex-direction: column; gap: 12px; }
+    .vgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(90px, 1fr)); gap: 8px; }
+    .vgrid button { aspect-ratio: 1; border: 0; padding: 0; border-radius: var(--r-sm); overflow: hidden; cursor: pointer; background: var(--surface); }
+    .vgrid img { width: 100%; height: 100%; object-fit: cover; }
+    .es-snippet, .es-link { width: 100%; font-family: ui-monospace, Menlo, monospace; font-size: .78rem; }
+    .es-snippet { min-height: 108px; resize: vertical; }
+    [data-tab] { display: flex; flex-direction: column; gap: 18px; }
+    @media (max-width: 980px) { .lb { grid-template-columns: 1fr; overflow-y: auto; } .lb-main, .lb-side { overflow: visible; } .lb-side { border-left: 0; border-top: 1px solid var(--border); } .savebar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; } }
+    @media (max-width: 560px) { .lb-main { padding: 16px 14px 90px; } .blk { grid-template-columns: 16px 40px minmax(0, 1fr); } .blk .meta { grid-column: 2 / -1; flex-direction: row; justify-content: space-between; align-items: center; } }
   </style>
 <link rel="stylesheet" href="/css/site-nav.css">
 <script src="/js/site-nav.js" defer></script>
@@ -34,7 +103,7 @@
 
 <header>
   <div style="display:flex; align-items:center; gap:10px;">
-    <h1>Share Your Chat</h1>
+    <h1>Link in bio</h1>
     <span class="badge">🔗</span>
   </div>
   <div style="display:flex; align-items:center; gap:16px;">
@@ -43,141 +112,454 @@
   </div>
 </header>
 
-<div class="es-wrap">
-
-  <div class="note">
-    Two ways to share a persona chat: a plain link you can drop anywhere
-    (bio, link-tree, socials), or a floating bubble you paste into a page
-    you own. Both open the same persona chat, clearly labelled as AI. Both
-    are for places you control — not a way to run this chat inside another
-    platform's own inbox (a dating app's messages, for example), which that
-    platform's terms wouldn't allow.
-  </div>
-
-  <div class="form-section">
-    <div class="section-title">Direct link</div>
-    <span class="hint" style="display:block; margin-bottom:10px;">Opens straight into a full-page chat with this persona — no picker, no other personas visible. Safe to hand out on its own.</span>
-    <div class="field full">
-      <label>Persona</label>
-      <select id="persona" onchange="renderAll()"></select>
-    </div>
-    <div class="field full" style="margin-top:12px;">
-      <label>Theme</label>
-      <select id="theme" onchange="renderAll()">
-        <option value="dark">Dark</option>
-        <option value="light">Light</option>
-      </select>
-    </div>
-    <div class="field full" style="margin-top:12px;">
-      <label>Your link</label>
-      <input type="text" class="es-link" id="chat-link" readonly onclick="this.select()">
-    </div>
-    <button class="btn-ai" style="margin-top:12px;" onclick="copyLink()">Copy link</button>
-    <div id="link-copy-status" style="margin-top:8px;"></div>
-  </div>
-
-  <div class="form-section">
-    <div class="section-title">Embed on your page</div>
-    <span class="hint" style="display:block; margin-bottom:10px;">A floating "Chat with my AI companion" bubble instead of a full page — paste this on a page you own.</span>
-    <div class="es-row">
-      <div class="field">
-        <label>Bubble position</label>
-        <select id="position" onchange="renderSnippet()">
-          <option value="right">Bottom right</option>
-          <option value="left">Bottom left</option>
-        </select>
+<div class="lb">
+  <div class="lb-main">
+    <div class="lb-top">
+      <div class="field" style="min-width:200px; margin:0;">
+        <select id="persona" onchange="loadPersona(this.value)"></select>
       </div>
-      <div class="field">
-        <label>Bubble label</label>
-        <input type="text" id="label" value="Chat with my AI companion" oninput="renderSnippet()">
+      <div class="tabs" id="tabs">
+        <button class="on" data-for="links">Links</button>
+        <button data-for="profile">Profile</button>
+        <button data-for="style">Style</button>
+        <button data-for="embed">Embed</button>
       </div>
     </div>
+
+    <div class="card">
+      <span class="lbl">Your link</span>
+      <div class="handle" id="handle-box"><span id="handle-pre"></span><input id="handle" maxlength="30" autocomplete="off" spellcheck="false" oninput="checkHandle()"></div>
+      <div class="row" style="justify-content:space-between;">
+        <span class="msg" id="handle-msg">Put this in your Instagram, TikTok or X bio.</span>
+        <div class="row"><button class="chip" onclick="copyLink()" id="copy-btn">Copy link</button><a class="chip" id="open-link" target="_blank" rel="noopener" style="text-decoration:none;">Open ↗</a></div>
+      </div>
+    </div>
+
+    <div class="stats">
+      <div><b id="st-views">0</b><span>Page views</span></div>
+      <div><b id="st-clicks">0</b><span>Button clicks</span></div>
+      <div><b id="st-rate">0%</b><span>Click rate</span></div>
+    </div>
+
+    <section data-tab="links">
+      <div class="row">
+        <button class="chip on" onclick="addBlock('link')">+ Add link</button>
+        <button class="chip" onclick="addBlock('header')">+ Header</button>
+        <button class="chip" onclick="addBlock('text')">+ Text</button>
+        <button class="chip" id="add-chat" onclick="addBlock('chat')">+ Chat with me</button>
+      </div>
+      <div id="blocks" style="display:flex; flex-direction:column; gap:10px;"></div>
+      <div class="card">
+        <span class="lbl">Social icons</span>
+        <span class="hint">Tap a platform and type your username. The link is made for you.</span>
+        <div class="netgrid" id="netgrid"></div>
+        <div id="socials" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div class="row"><span class="hint">Show icons</span><span id="socpos" class="row"></span>
+          <span class="hint" style="margin-left:8px;">Colour</span><span id="iconcol" class="row"></span></div>
+      </div>
+      <div class="card">
+        <span class="lbl">18+ content</span>
+        <div class="row" id="gate-opts"></div>
+        <span class="hint" id="gate-hint"></span>
+      </div>
+    </section>
+
+    <section data-tab="profile" hidden>
+      <div class="card">
+        <span class="lbl">Profile picture</span>
+        <div class="av-pick"><img id="av-img" alt=""><div class="row"><button class="chip" onclick="pickImage('avatar')">Change</button><button class="chip" onclick="setImage('avatar', null)">Use her persona picture</button></div></div>
+        <div class="field full" style="margin:0;"><label>Name</label><input id="p-name" maxlength="60" oninput="cfg.name=this.value; preview()"></div>
+        <div class="field full" style="margin:0;"><label>Bio</label><textarea id="p-bio" maxlength="300" rows="3" oninput="cfg.bio=this.value; preview()"></textarea></div>
+      </div>
+    </section>
+
+    <section data-tab="style" hidden>
+      <div class="card"><span class="lbl">Theme</span><div class="presets" id="presets"></div></div>
+      <div class="card">
+        <span class="lbl">Background</span>
+        <div class="row" id="bg-type"></div>
+        <div class="colors">
+          <label><input type="color" data-c="bg1"> Colour 1</label>
+          <label id="bg2-wrap"><input type="color" data-c="bg2"> Colour 2</label>
+        </div>
+        <div class="row" id="bg-img-row"><button class="chip" onclick="pickImage('bg')">Choose background photo</button></div>
+      </div>
+      <div class="card">
+        <span class="lbl">Buttons</span>
+        <div class="grid2">
+          <div><span class="hint">Style</span><div class="row" id="btn-style"></div></div>
+          <div><span class="hint">Corners</span><div class="row" id="radius"></div></div>
+        </div>
+        <div class="colors">
+          <label><input type="color" data-c="btn_bg"> Button</label>
+          <label><input type="color" data-c="btn_text"> Button text</label>
+          <label><input type="color" data-c="accent"> Spotlight</label>
+          <label><input type="color" data-c="text"> Page text</label>
+        </div>
+      </div>
+      <div class="card">
+        <span class="lbl">Text and picture</span>
+        <div class="grid2">
+          <div><span class="hint">Name font</span><select id="font_title"></select></div>
+          <div><span class="hint">Body font</span><select id="font_body"></select></div>
+        </div>
+        <div><span class="hint">Picture shape</span><div class="row" id="avatar-shape" style="margin-top:6px;"></div></div>
+      </div>
+    </section>
+
+    <section data-tab="embed" hidden>
+      <div class="card">
+        <span class="lbl">Direct chat link</span>
+        <span class="hint">Opens straight into a full-page chat with this persona, clearly labelled as AI.</span>
+        <input type="text" class="es-link" id="chat-link" readonly onclick="this.select()">
+      </div>
+      <div class="card">
+        <span class="lbl">Chat bubble for a site you own</span>
+        <div class="grid2">
+          <div><span class="hint">Position</span><select id="position" onchange="renderSnippet()"><option value="right">Bottom right</option><option value="left">Bottom left</option></select></div>
+          <div><span class="hint">Label</span><input type="text" id="label" value="Chat with my AI companion" oninput="renderSnippet()"></div>
+        </div>
+        <span class="hint">Paste this just before <code>&lt;/body&gt;</code>.</span>
+        <textarea class="es-snippet" id="snippet" readonly onclick="this.select()"></textarea>
+      </div>
+    </section>
+
+    <div class="savebar"><span class="msg" id="save-msg"></span><button class="btn-ai" id="save-btn" onclick="save()">Save</button></div>
   </div>
 
-  <div class="form-section">
-    <div class="section-title">Paste this on your page</div>
-    <span class="hint" style="display:block; margin-bottom:10px;">Drop it anywhere in the page's HTML, ideally just before <code>&lt;/body&gt;</code>.</span>
-    <textarea class="es-snippet" id="snippet" readonly onclick="this.select()"></textarea>
-    <button class="btn-ai" style="margin-top:12px;" onclick="copySnippet()">Copy snippet</button>
-    <div id="copy-status" style="margin-top:8px;"></div>
-  </div>
+  <aside class="lb-side">
+    <span class="live" id="live-url">Live preview</span>
+    <div class="phone"><div class="screen" id="preview"></div></div>
+  </aside>
+</div>
 
+<div class="lb-modal" id="modal" hidden onclick="if(event.target===this)this.hidden=true">
+  <div>
+    <div class="row" style="justify-content:space-between;"><b>Choose a photo</b><button class="chip" onclick="document.getElementById('modal').hidden=true">Close</button></div>
+    <label class="chip" style="align-self:flex-start;">Upload from device<input type="file" accept="image/*" hidden onchange="uploadImage(this)"></label>
+    <span class="hint" id="vault-hint">Or pick one of her approved safe-work photos:</span>
+    <div class="vgrid" id="vgrid"></div>
+  </div>
 </div>
 
 <script>
-function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+var PRESETS = {
+  peach:  { label: 'Soft Peach', bg_type: 'gradient', bg1: '#ffe9dd', bg2: '#f2c7e3', text: '#4a2733', btn_bg: '#fff9f6', btn_text: '#4a2733', accent: '#8d3f5c', btn_style: 'fill', radius: 'round', avatar_shape: 'rounded', font_title: 'Caveat', font_body: 'DM Sans' },
+  velvet: { label: 'Velvet Night', bg_type: 'gradient', bg1: '#4a1530', bg2: '#0e070b', text: '#f7e8ef', btn_bg: '#ffffff', btn_text: '#fbeef3', accent: '#e0457e', btn_style: 'glass', radius: 'pill', avatar_shape: 'circle', font_title: 'Fraunces', font_body: 'DM Sans' },
+  poster: { label: 'Poster', bg_type: 'solid', bg1: '#f2ff5b', bg2: '#f2ff5b', text: '#111111', btn_bg: '#ffffff', btn_text: '#111111', accent: '#ff3d7f', btn_style: 'shadow', radius: 'square', avatar_shape: 'cover', font_title: 'Syne', font_body: 'DM Sans' },
+  noir:   { label: 'Noir', bg_type: 'solid', bg1: '#0d0d0f', bg2: '#0d0d0f', text: '#f2f2f2', btn_bg: '#f2f2f2', btn_text: '#f2f2f2', accent: '#c9a45c', btn_style: 'outline', radius: 'round', avatar_shape: 'circle', font_title: 'Playfair Display', font_body: 'Inter' },
+  mint:   { label: 'Mint', bg_type: 'gradient', bg1: '#dff7ee', bg2: '#bfe6ff', text: '#12343b', btn_bg: '#12343b', btn_text: '#ffffff', accent: '#ff6f61', btn_style: 'fill', radius: 'pill', avatar_shape: 'circle', font_title: 'Pacifico', font_body: 'Nunito' }
+};
+var FONTS_T = ['Caveat', 'Fraunces', 'Syne', 'DM Sans', 'Playfair Display', 'Bebas Neue', 'Pacifico', 'Space Mono'];
+var FONTS_B = ['DM Sans', 'Inter', 'Lora', 'Space Mono', 'Nunito'];
 
-async function getJSON(url){
-  const r = await fetch(url, { headers: { 'Accept': 'application/json' } });
-  const t = await r.text();
-  try { return JSON.parse(t); }
-  catch (e) { throw new Error(r.status === 200 ? 'unexpected response' : 'HTTP ' + r.status); }
+var slug = '', cfg = null, data = null, handleOk = true, dirty = false, pickTarget = null, dragIdx = null, handleTimer = null;
+
+function esc(s) { return (s || '').replace(/[&<>"]/g, function (c) { return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]; }); }
+function $(id) { return document.getElementById(id); }
+function uid() { return Math.random().toString(36).slice(2, 10); }
+function imgUrl(i) { return !i ? null : i.src === 'upload' ? i.data : '/api/personas/' + slug + '/media/' + i.id + '/image'; }
+function touch() { dirty = true; $('save-msg').textContent = 'Unsaved changes'; $('save-msg').className = 'msg'; }
+
+function chips(boxId, options, current, onPick) {
+  $(boxId).innerHTML = '';
+  options.forEach(function (o) {
+    var b = document.createElement('button');
+    b.className = 'chip' + (o[0] === current ? ' on' : '');
+    b.textContent = o[1];
+    b.onclick = function () { onPick(o[0]); };
+    $(boxId).appendChild(b);
+  });
 }
 
-function ok(box, msg){ box.innerHTML = '<span class="hint" style="color:#4ade80;">✓ ' + esc(msg) + '</span>'; }
-
-function renderLink(){
-  const persona = document.getElementById('persona').value;
-  const theme = document.getElementById('theme').value;
-  const url = location.origin + '/chat?persona=' + encodeURIComponent(persona)
-    + '&only=1&theme=' + encodeURIComponent(theme);
-  document.getElementById('chat-link').value = url;
+function preview() {
+  if (!cfg) return;
+  var c = JSON.parse(JSON.stringify(cfg));
+  c.avatar_url = imgUrl(cfg.avatar) || '/api/personas/' + slug + '/avatar';
+  c.theme.bg_image_url = imgUrl(cfg.theme.bg_image);
+  c.blocks.forEach(function (b) { b.thumb_url = imgUrl(b.thumb); });
+  c.socials = cfg.socials.map(function (so) { return { net: so.net, url: socialUrl(so) }; });
+  renderBio($('preview'), c, { preview: true });
+  $('av-img').src = c.avatar_url;
+  touch();
 }
 
-function copyLink(){
-  const el = document.getElementById('chat-link');
-  el.select();
-  document.execCommand('copy');
-  ok(document.getElementById('link-copy-status'), 'Link copied.');
-}
-
-function renderAll(){
-  renderLink();
-  renderSnippet();
-}
-
-function renderSnippet(){
-  const persona = document.getElementById('persona').value;
-  const theme = document.getElementById('theme').value;
-  const position = document.getElementById('position').value;
-  const label = document.getElementById('label').value.trim() || 'Chat with my AI companion';
-  const attrs = [
-    'src="' + location.origin + '/js/companion-widget.js"',
-    'data-persona="' + esc(persona) + '"',
-    'data-theme="' + esc(theme) + '"',
-    'data-position="' + esc(position) + '"',
-    'data-label="' + esc(label) + '"',
-    'defer',
-  ];
-  document.getElementById('snippet').value = '<script ' + attrs.join('\n        ') + '><' + '/script>';
-}
-
-function copySnippet(){
-  const el = document.getElementById('snippet');
-  el.select();
-  document.execCommand('copy');
-  ok(document.getElementById('copy-status'), 'Snippet copied.');
-}
-
-async function init(){
-  const params = new URLSearchParams(location.search);
-  const wanted = params.get('persona') || '';
-  const sel = document.getElementById('persona');
-  try {
-    const list = await getJSON('/api/personas');
-    if (Array.isArray(list) && list.length) {
-      sel.innerHTML = list.map(p => '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
-      if (wanted && list.some(p => p.slug === wanted)) sel.value = wanted;
-    } else {
-      sel.innerHTML = '<option value="">No personas found</option>';
+// ── Links tab ──
+function renderBlocks() {
+  var box = $('blocks'), clicks = data.clicks || {};
+  box.innerHTML = '';
+  cfg.blocks.forEach(function (b, i) {
+    var row = document.createElement('div');
+    row.className = 'blk'; row.draggable = true;
+    row.ondragstart = function () { dragIdx = i; row.classList.add('drag'); };
+    row.ondragend = function () { row.classList.remove('drag'); };
+    row.ondragover = function (e) { e.preventDefault(); row.classList.add('over'); };
+    row.ondragleave = function () { row.classList.remove('over'); };
+    row.ondrop = function (e) { e.preventDefault(); move(dragIdx, i); };
+    var th = b.type === 'chat' || b.type === 'link'
+      ? '<button class="th" title="Thumbnail" onclick="pickImage(\'thumb\',' + i + ')">' + (b.thumb ? '<img src="' + esc(imgUrl(b.thumb)) + '">' : '+ img') + '</button>'
+      : '<span class="th" style="cursor:default;border-style:solid">' + (b.type === 'header' ? 'H' : 'T') + '</span>';
+    var f = '';
+    if (b.type === 'text') f = '<textarea rows="2" maxlength="500" placeholder="Short note" data-k="text">' + esc(b.text) + '</textarea>';
+    else f = '<input maxlength="80" placeholder="' + (b.type === 'header' ? 'Section title' : 'Button text') + '" data-k="title" value="' + esc(b.title) + '">';
+    if (b.type === 'link') f += '<input maxlength="1000" placeholder="https://" data-k="url" value="' + esc(b.url) + '">';
+    if (b.type === 'chat') f += '<span class="hint">Opens her AI chat <span class="tag">Built in</span></span>';
+    if (b.type === 'chat' || b.type === 'link') {
+      f += '<div class="opts"><label><input type="checkbox" data-k="spotlight"' + (b.spotlight ? ' checked' : '') + '> Spotlight</label>' +
+           '<label><input type="checkbox" data-k="adult"' + (b.adult ? ' checked' : '') + '> 18+</label>' +
+           (b.thumb ? '<label onclick="setThumb(' + i + ',null)" style="text-decoration:underline">Remove image</label>' : '') + '</div>';
     }
-  } catch (e) {
-    sel.innerHTML = '<option value="">Could not load personas (' + esc(e.message) + ')</option>';
-  }
-  renderAll();
+    var n = clicks[b.id] || 0;
+    row.innerHTML = '<span class="grip" title="Drag to reorder">⋮⋮</span>' + th + '<div class="fields">' + f + '</div>' +
+      '<div class="meta">' + (b.type === 'chat' || b.type === 'link' ? '<span>' + n + ' click' + (n === 1 ? '' : 's') + '</span>' : '<span></span>') +
+      '<div class="tools"><button title="Move up" onclick="move(' + i + ',' + (i - 1) + ')">↑</button><button title="Move down" onclick="move(' + i + ',' + (i + 1) + ')">↓</button>' +
+      '<button title="' + (b.hidden ? 'Show' : 'Hide') + '" onclick="toggleHidden(' + i + ')">' + (b.hidden ? '◌' : '●') + '</button>' +
+      '<button title="Delete" onclick="removeBlock(' + i + ')">✕</button></div></div>';
+    row.querySelectorAll('[data-k]').forEach(function (inp) {
+      var ev = inp.type === 'checkbox' ? 'change' : 'input';
+      inp.addEventListener(ev, function () { b[inp.dataset.k] = inp.type === 'checkbox' ? inp.checked : inp.value; preview(); });
+    });
+    if (b.hidden) row.style.opacity = '.55';
+    box.appendChild(row);
+  });
+  $('add-chat').hidden = cfg.blocks.some(function (b) { return b.type === 'chat'; });
+}
+function addBlock(type) {
+  var b = { id: uid(), type: type, hidden: false };
+  if (type === 'text') b.text = ''; else b.title = type === 'chat' ? 'Chat with me' : '';
+  if (type === 'link') b.url = '';
+  if (type === 'link' || type === 'chat') { b.spotlight = type === 'chat'; b.adult = false; b.thumb = null; }
+  if (type === 'chat') cfg.blocks.unshift(b); else cfg.blocks.push(b);
+  renderBlocks(); preview();
+  var inputs = $('blocks').querySelectorAll('.blk'), last = inputs[type === 'chat' ? 0 : inputs.length - 1];
+  if (last) { last.scrollIntoView({ block: 'nearest' }); var f = last.querySelector('input,textarea'); if (f) f.focus(); }
+}
+function move(a, b) { if (a == null || b < 0 || b >= cfg.blocks.length || a === b) return; var x = cfg.blocks.splice(a, 1)[0]; cfg.blocks.splice(b, 0, x); renderBlocks(); preview(); }
+function toggleHidden(i) { cfg.blocks[i].hidden = !cfg.blocks[i].hidden; renderBlocks(); preview(); }
+function removeBlock(i) { cfg.blocks.splice(i, 1); renderBlocks(); preview(); }
+function setThumb(i, img) { cfg.blocks[i].thumb = img; renderBlocks(); preview(); }
+function renderGate() {
+  chips('gate-opts', [['off', 'Off'], ['button', 'On 18+ buttons'], ['page', 'Whole page']], cfg.gate, function (v) { cfg.gate = v; renderGate(); preview(); });
+  $('gate-hint').textContent = { off: 'Buttons marked 18+ open without a question.', button: 'Visitors confirm they are 18 before an 18+ button opens.', page: 'Visitors confirm they are 18 before they see the page.' }[cfg.gate];
 }
 
-init();
+// ── Social icons ──
+var NETS = window.BIO_NETS;
+var PH = { user: 'username', phone: 'phone number with country code', email: 'you@example.com', url: 'https://' };
+function lg(net) { var n = NETS[net]; return '<span class="lg" style="background:' + n.color + ';color:' + (parseInt(n.color.slice(1, 3), 16) * .299 + parseInt(n.color.slice(3, 5), 16) * .587 + parseInt(n.color.slice(5, 7), 16) * .114 > 158 ? '#111' : '#fff') + '">' + bioIcon(net) + '</span>'; }
+function cleanUser(net, v) {
+  var k = NETS[net].kind; v = (v || '').trim();
+  if (k === 'url') return v;
+  if (k === 'email') return v.replace(/^mailto:/, '');
+  v = v.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('?')[0];
+  v = v.split('/').pop().replace(/^@/, '');
+  return k === 'phone' ? v.replace(/[^0-9]/g, '') : v;
+}
+function socialUrl(so) {
+  var n = NETS[so.net], u = cleanUser(so.net, so.user != null ? so.user : so.url);
+  if (!n || !u) return '';
+  if (n.kind === 'url') return /^[a-z]+:\/\//i.test(u) ? u : 'https://' + u;
+  if (n.kind === 'email') return /^[^@\s\/]+@[^@\s\/]+\.[a-z]{2,}$/i.test(u) ? 'mailto:' + u : '';
+  return /^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,60}$/.test(u) ? n.url.replace('{u}', u) : '';
+}
+function renderNetGrid() {
+  var used = cfg.socials.map(function (so) { return so.net; });
+  $('netgrid').innerHTML = Object.keys(NETS).map(function (k) {
+    return '<button type="button" data-net="' + k + '"' + (used.indexOf(k) >= 0 ? ' class="used"' : '') + '>' + lg(k) + esc(NETS[k].label) + '</button>';
+  }).join('');
+  $('netgrid').querySelectorAll('button').forEach(function (b) { b.onclick = function () { addSocial(b.dataset.net); }; });
+}
+function renderSocials() {
+  var box = $('socials'); box.innerHTML = '';
+  cfg.socials.forEach(function (so, i) {
+    if (!NETS[so.net]) return;
+    if (so.user == null) so.user = cleanUser(so.net, so.url);
+    var n = NETS[so.net], prefix = n.kind === 'user' ? n.url.replace(/^https:\/\//, '').replace('{u}', '') : n.kind === 'phone' ? '+' : '';
+    var row = document.createElement('div'); row.className = 'soc-row';
+    row.innerHTML = lg(so.net) + '<div style="min-width:0"><div class="in">' + (prefix ? '<span>' + esc(prefix) + '</span>' : '') +
+      '<input maxlength="200" placeholder="' + PH[n.kind] + '" value="' + esc(so.user) + '" aria-label="' + esc(n.label) + '"></div><span class="ok"></span></div>' +
+      '<div class="tools"><button title="Move up">↑</button><button title="Move down">↓</button><button title="Remove">✕</button></div>';
+    var inp = row.querySelector('input'), ok = row.querySelector('.ok');
+    var check = function () {
+      var url = socialUrl(so);
+      ok.className = 'ok msg ' + (url ? 'good' : so.user ? 'bad' : '');
+      ok.textContent = url ? '✓ ' + url.replace(/^(https:\/\/|mailto:)/, '') : so.user ? 'Check the ' + (n.kind === 'user' ? 'username' : n.kind) : '';
+    };
+    inp.oninput = function () { so.user = inp.value; check(); preview(); };
+    inp.onblur = function () { so.user = cleanUser(so.net, inp.value); inp.value = so.user; check(); };
+    var t = row.querySelectorAll('.tools button');
+    t[0].onclick = function () { moveSocial(i, i - 1); };
+    t[1].onclick = function () { moveSocial(i, i + 1); };
+    t[2].onclick = function () { cfg.socials.splice(i, 1); renderSocials(); preview(); };
+    check();
+    box.appendChild(row);
+  });
+  renderNetGrid();
+  chips('socpos', [['top', 'Under bio'], ['bottom', 'At the bottom']], cfg.theme.socials_pos, function (v) { cfg.theme.socials_pos = v; renderSocials(); preview(); });
+  chips('iconcol', [['text', 'Match text'], ['brand', 'Brand colours']], cfg.theme.icon_color || 'text', function (v) { cfg.theme.icon_color = v; renderSocials(); preview(); });
+}
+function moveSocial(a, b) { if (b < 0 || b >= cfg.socials.length) return; var x = cfg.socials.splice(a, 1)[0]; cfg.socials.splice(b, 0, x); renderSocials(); preview(); }
+function addSocial(net) {
+  var have = cfg.socials.findIndex(function (so) { return so.net === net; });
+  if (have < 0) { cfg.socials.push({ net: net, user: '' }); have = cfg.socials.length - 1; renderSocials(); preview(); }
+  var inp = $('socials').querySelectorAll('input')[have];
+  if (inp) { inp.focus(); inp.scrollIntoView({ block: 'nearest' }); }
+}
+
+// ── Style tab ──
+function renderStyle() {
+  var t = cfg.theme, box = $('presets'); box.innerHTML = '';
+  Object.keys(PRESETS).forEach(function (k) {
+    var p = PRESETS[k], b = document.createElement('button');
+    b.className = 'preset' + (t.preset === k ? ' on' : '');
+    b.style.background = p.bg_type === 'gradient' ? 'linear-gradient(180deg,' + p.bg1 + ',' + p.bg2 + ')' : p.bg1;
+    b.style.color = p.text;
+    var r = { square: '0', round: '5px', pill: '9px' }[p.radius];
+    var btn = p.btn_style === 'outline' ? 'border:1.5px solid ' + p.btn_text : p.btn_style === 'glass' ? 'background:rgba(255,255,255,.18)' : p.btn_style === 'shadow' ? 'background:' + p.btn_bg + ';border:1.5px solid ' + p.text + ';box-shadow:2px 2px 0 ' + p.text : 'background:' + p.btn_bg;
+    b.innerHTML = '<i style="border-radius:' + r + ';background:' + p.accent + '"></i><i style="border-radius:' + r + ';' + btn + '"></i>' + p.label;
+    b.onclick = function () { Object.assign(cfg.theme, p, { preset: k }); delete cfg.theme.label; renderStyle(); preview(); };
+    box.appendChild(b);
+  });
+  var custom = function (key) { return function (v) { cfg.theme[key] = v; cfg.theme.preset = ''; renderStyle(); preview(); }; };
+  chips('bg-type', [['solid', 'Solid'], ['gradient', 'Gradient'], ['image', 'Photo']], t.bg_type, custom('bg_type'));
+  $('bg2-wrap').hidden = t.bg_type !== 'gradient';
+  $('bg-img-row').hidden = t.bg_type !== 'image';
+  chips('btn-style', [['fill', 'Fill'], ['glass', 'Glass'], ['outline', 'Outline'], ['shadow', 'Hard shadow']], t.btn_style, custom('btn_style'));
+  chips('radius', [['square', 'Square'], ['round', 'Rounded'], ['pill', 'Pill']], t.radius, custom('radius'));
+  chips('avatar-shape', [['circle', 'Circle'], ['rounded', 'Rounded'], ['cover', 'Big cover']], t.avatar_shape, custom('avatar_shape'));
+  document.querySelectorAll('[data-c]').forEach(function (inp) {
+    inp.value = t[inp.dataset.c];
+    inp.oninput = function () { cfg.theme[inp.dataset.c] = inp.value; cfg.theme.preset = ''; preview(); };
+  });
+  [['font_title', FONTS_T], ['font_body', FONTS_B]].forEach(function (x) {
+    var sel = $(x[0]);
+    sel.innerHTML = x[1].map(function (f) { return '<option' + (f === t[x[0]] ? ' selected' : '') + '>' + f + '</option>'; }).join('');
+    sel.onchange = function () { cfg.theme[x[0]] = sel.value; cfg.theme.preset = ''; renderStyle(); preview(); };
+  });
+}
+
+// ── Images ──
+function pickImage(target, i) {
+  pickTarget = { target: target, i: i };
+  var g = $('vgrid'); g.innerHTML = '';
+  (data.vault || []).forEach(function (v) {
+    var b = document.createElement('button');
+    b.innerHTML = '<img loading="lazy" src="' + esc(v.thumb) + '" alt="">';
+    b.onclick = function () { setImage(target, { src: 'vault', id: v.id }, i); };
+    g.appendChild(b);
+  });
+  $('vault-hint').textContent = (data.vault || []).length ? 'Or pick one of her approved safe-work photos:' : 'Approved safe-work photos from her vault show up here too.';
+  $('modal').hidden = false;
+}
+function setImage(target, img, i) {
+  if (target === 'avatar') cfg.avatar = img;
+  else if (target === 'bg') { cfg.theme.bg_image = img; cfg.theme.bg_type = 'image'; cfg.theme.preset = ''; renderStyle(); }
+  else setThumb(i, img);
+  $('modal').hidden = true;
+  preview();
+}
+function uploadImage(input) {
+  var file = input.files[0]; input.value = '';
+  if (!file) return;
+  var max = pickTarget.target === 'bg' ? 1280 : pickTarget.target === 'avatar' ? 480 : 200;
+  var im = new Image();
+  im.onload = function () {
+    var s = Math.min(1, max / Math.max(im.width, im.height));
+    var c = document.createElement('canvas'); c.width = Math.round(im.width * s); c.height = Math.round(im.height * s);
+    c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+    setImage(pickTarget.target, { src: 'upload', data: c.toDataURL('image/jpeg', 0.85) }, pickTarget.i);
+    URL.revokeObjectURL(im.src);
+  };
+  im.src = URL.createObjectURL(file);
+}
+
+// ── Handle, save, stats ──
+function linkUrl() { return data.link_base + $('handle').value.trim().toLowerCase(); }
+function showLink() {
+  $('handle-pre').textContent = data.link_base.replace(/^https?:\/\//, '');
+  $('open-link').href = data.link_base + (data.handle || '');
+  $('live-url').textContent = linkUrl().replace(/^https?:\/\//, '');
+}
+function checkHandle() {
+  var h = $('handle').value.trim().toLowerCase(), box = $('handle-box'), m = $('handle-msg');
+  showLink(); touch();
+  clearTimeout(handleTimer);
+  if (h === data.handle) { handleOk = true; box.className = 'handle'; m.className = 'msg'; m.textContent = 'Put this in your Instagram, TikTok or X bio.'; return; }
+  handleTimer = setTimeout(async function () {
+    var r = await (await fetch('/api/bio/' + slug + '/handle?h=' + encodeURIComponent(h))).json();
+    handleOk = r.ok;
+    box.className = 'handle ' + (r.ok ? 'good' : 'bad');
+    m.className = 'msg ' + (r.ok ? 'good' : 'bad');
+    m.textContent = r.ok ? '✓ Available. Save to use it (your old link stops working).' : r.error;
+  }, 300);
+}
+function copyLink() {
+  var url = linkUrl();
+  var done = function () { $('copy-btn').textContent = 'Copied'; setTimeout(function () { $('copy-btn').textContent = 'Copy link'; }, 1500); };
+  if (navigator.clipboard) navigator.clipboard.writeText(url).then(done, function () {}); else done();
+}
+function renderStats() {
+  var views = data.views || 0, clicks = Object.values(data.clicks || {}).reduce(function (a, b) { return a + b; }, 0);
+  $('st-views').textContent = views.toLocaleString();
+  $('st-clicks').textContent = clicks.toLocaleString();
+  $('st-rate').textContent = views ? Math.round(clicks / views * 1000) / 10 + '%' : '0%';
+}
+async function save() {
+  if (!handleOk) { $('save-msg').className = 'msg bad'; $('save-msg').textContent = 'Pick a link name that is available first.'; return; }
+  $('save-btn').disabled = true;
+  try {
+    var r = await fetch('/api/bio/' + slug, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ handle: $('handle').value.trim().toLowerCase(), config: cfg }) });
+    var j = await r.json();
+    if (!r.ok) throw new Error(j.error || 'Could not save');
+    data.handle = j.handle; cfg = j.config;
+    renderBlocks(); preview(); showLink(); checkHandle();
+    dirty = false;
+    $('save-msg').className = 'msg good'; $('save-msg').textContent = '✓ Saved. Your page is live.';
+  } catch (e) {
+    $('save-msg').className = 'msg bad'; $('save-msg').textContent = e.message;
+  } finally { $('save-btn').disabled = false; }
+}
+
+// ── Embed tab ──
+function renderSnippet() {
+  $('chat-link').value = location.origin + '/chat?persona=' + encodeURIComponent(slug) + '&only=1';
+  var label = $('label').value.trim() || 'Chat with my AI companion';
+  $('snippet').value = '<script ' + ['src="' + location.origin + '/js/companion-widget.js"', 'data-persona="' + esc(slug) + '"', 'data-theme="dark"', 'data-position="' + esc($('position').value) + '"', 'data-label="' + esc(label) + '"', 'defer'].join('\n        ') + '><' + '/script>';
+}
+
+async function loadPersona(s) {
+  slug = s;
+  var r = await fetch('/api/bio/' + encodeURIComponent(s));
+  data = await r.json();
+  if (!r.ok) { $('save-msg').textContent = data.error || 'Could not load'; return; }
+  cfg = data.config;
+  $('handle').value = data.handle;
+  $('p-name').value = cfg.name || ''; $('p-bio').value = cfg.bio || '';
+  renderBlocks(); renderGate(); renderSocials(); renderStyle(); renderStats(); renderSnippet(); showLink(); checkHandle(); preview();
+  dirty = false; $('save-msg').textContent = '';
+}
+
+$('tabs').onclick = function (e) {
+  var b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#tabs button').forEach(function (x) { x.classList.toggle('on', x === b); });
+  document.querySelectorAll('[data-tab]').forEach(function (s) { s.hidden = s.dataset.tab !== b.dataset.for; });
+};
+document.addEventListener('keydown', function (e) { if (e.key === 'Escape') $('modal').hidden = true; });
+window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDefault(); e.returnValue = ''; } });
+
+(async function init() {
+  var wanted = new URLSearchParams(location.search).get('persona') || '';
+  var sel = $('persona');
+  try {
+    var list = await (await fetch('/api/personas', { headers: { Accept: 'application/json' } })).json();
+    if (!Array.isArray(list) || !list.length) { sel.innerHTML = '<option value="">No personas yet</option>'; return; }
+    sel.innerHTML = list.map(function (p) { return '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>'; }).join('');
+    if (wanted && list.some(function (p) { return p.slug === wanted; })) sel.value = wanted;
+    loadPersona(sel.value);
+  } catch (e) {
+    sel.innerHTML = '<option value="">Could not load personas</option>';
+  }
+})();
 </script>
 
 </body>

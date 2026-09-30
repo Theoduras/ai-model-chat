@@ -1020,6 +1020,16 @@ body:not(.is-admin) .admin-only { display: none !important; }
   text-transform: uppercase; padding: 2px 7px; border-radius: 999px;
   background: var(--accent-soft, rgba(255,92,56,.18)); color: var(--accent, #ff5c38);
 }
+/* The Free plan's "Subscribers only" rows: greyed, and the longer label stays on
+   one line and smaller than a tier name. */
+.sb-item span.sb-lock:not(.sb-badge):not(.sb-chevron) { flex: 0 0 auto; overflow: visible; }
+.sb-item.sub-only .sb-lock { font-size: .5rem; letter-spacing: .02em; padding: 2px 5px; white-space: nowrap; }
+.btn-new.sub-only, .sb-refer.sub-only {
+  opacity: .5; cursor: pointer; background: var(--surface-2); color: var(--text-muted);
+  box-shadow: none; animation: none;
+}
+.btn-new.sub-only .sb-lock, .sb-refer.sub-only .sb-lock { display: block; width: max-content; margin: 4px auto 0; }
+.btn-new.sub-only:hover, .sb-refer.sub-only:hover { transform: none; box-shadow: none; animation: none; }
 
 
 

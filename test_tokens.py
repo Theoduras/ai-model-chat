@@ -412,12 +412,200 @@ def test_test_pack_is_not_for_sale():
           all(p['id'] == str(p['tokens']) for p in CR.packs_for('eur')))
 
 
+def test_video_negative_prompt():
+    print('video negative prompt')
+    import imagegen as IG
+    sent = []
+    real_post = IG._post
+
+    def fake_post(url, payload, headers, timeout=IG.TIMEOUT):
+        sent.append(payload[1])
+        return {'data': [{'videoURL': 'https://example.test/clip.mp4'}]}
+
+    IG._post = fake_post
+    try:
+        prov = IG.RunwareProvider(key='test')
+        spec = {'job': 'reel', 'prompt': 'a walk', 'seconds': 5,
+                'reference_urls': ['data:image/png;base64,AAAA']}
+        for model in ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast'):
+            sent.clear()
+            prov.submit_video(dict(spec, model=model))
+            check(f'{model} is sent no negativePrompt',
+                  'negativePrompt' not in sent[0])
+            check(f'{model} still carries her references',
+                  bool(sent[0].get('inputs', {}).get('referenceImages')))
+        sent.clear()
+        prov.submit_video(dict(spec, model='wan-2-5', reference_urls=[]))
+        check('a flat model keeps its negativePrompt',
+              'negativePrompt' in sent[0])
+
+        attempts = []
+
+        def refusing(url, payload, headers, timeout=IG.TIMEOUT):
+            task = payload[1]
+            attempts.append(sorted(task))
+            if 'fps' in task:
+                return {'errors': [{'message':
+                        "Unsupported use of 'fps' parameter."}]}
+            return {'data': [{'videoURL': 'https://example.test/clip.mp4'}]}
+
+        IG._post = refusing
+        prov._send([{'taskType': 'videoInference', 'fps': 24}])
+        check('a refused optional key is stripped and the task resent',
+              len(attempts) == 2 and 'fps' not in attempts[1])
+
+        def refuses_refs(url, payload, headers, timeout=IG.TIMEOUT):
+            return {'errors': [{'message':
+                    "Unsupported use of 'referenceImages' parameter."}]}
+
+        IG._post = refuses_refs
+        try:
+            prov._send([{'taskType': 'videoInference',
+                         'inputs': {'referenceImages': ['x']}}])
+            raised = False
+        except IG.GenerationError:
+            raised = True
+        check('a refused identity key fails the job instead of running without it',
+              raised)
+    finally:
+        IG._post = real_post
+
+
+def test_video_prompt_is_not_cut():
+    print('video prompt length')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    script = ' '.join(f'Shot {n}: she walks and looks back.' for n in range(1, 50))
+    check('the script is longer than a still may carry',
+          A.GEN_PROMPT_MAX < len(script) < A.GEN_VIDEO_PROMPT_MAX)
+    reel = A._gen_spec('lilith', {'job': 'reel', 'prompt': script,
+                                  'rating': 'sfw'}, None)
+    check('a reel keeps the whole script', reel['prompt_extra'] == script)
+    still = A._gen_spec('lilith', {'kind': 'image', 'prompt': script,
+                                   'rating': 'sfw'}, None)
+    check('a still is still capped at its own limit',
+          len(still['prompt_extra']) == A.GEN_PROMPT_MAX)
+    huge = A._gen_spec('lilith', {'job': 'reel', 'prompt': 'x' * 5000,
+                                  'rating': 'sfw'}, None)
+    check('a clip prompt is capped at the long limit',
+          len(huge['prompt_extra']) == A.GEN_VIDEO_PROMPT_MAX)
+    text = A.imagegen.build_reel_prompt(script, character=True)
+    check('the built reel prompt carries the script to the end',
+          script in text and text.endswith('realistic motion.'))
+
+
+def test_swap_identity():
+    print('swap identity')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    IG = A.imagegen
+    p = IG.build_swap_prompt('she waves', roles=['face', 'body'])
+    check('the identity clause is in the prompt', IG.IDENTITY_CLAUSE in p)
+    check('the images are named by position',
+          'Reference image 1 shows her face; reference image 2 shows her full body' in p)
+    check('the creator\'s words come last', p.endswith('she waves'))
+    check('no roles, no clause', IG.IDENTITY_CLAUSE not in IG.build_swap_prompt('x'))
+    check('the replace model locks identity', IG.locks_identity('p-video-replace'))
+    check('Kling does not', not IG.locks_identity('kling-3-0-mc'))
+    check('replace sends body as well as face', not IG.wants_face_only('p-video-replace'))
+    check('reference caps follow the model',
+          IG.ref_cap('p-video-replace') == 4 and IG.ref_cap('kling-3-0-mc') == 1
+          and IG.ref_cap('wan-3-0') == IG.PICK_REF_MAX)
+    check('Kling is offered on a reel', 'kling-3-0-mc' in CR.JOB_MODELS['reel'])
+    char = {'body_type': 'female', 'views': {k: {} for k in
+            ('body_front', 'face_front', 'face_profile')}}
+    keys, roles = A._clip_views(char, ['body_front', 'face_profile', 'face_front'],
+                                'p-video-replace')
+    check('face leads, body follows', roles == ['face', 'face', 'body'], roles)
+    check('Kling gets the body view alone',
+          A._clip_views(char, ['face_front', 'body_front'], 'kling-3-0-mc')[0]
+          == ['body_front'])
+
+
+def test_clip_library_and_places():
+    print('clip library and places')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    IG = A.imagegen
+    check('clips are stored outside the staging sweep',
+          A.VIDEO_SOURCE_PREFIX.startswith('kept/'))
+    check('the animate model is gone',
+          all('p-video-animate' not in m for m in CR.JOB_MODELS.values())
+          and 'p-video-animate' not in CR.VIDEO_PRICES
+          and 'p-video-animate' not in IG.RUNWARE_VIDEO_MODELS)
+    check('Omni is a swap and reel option, not the default',
+          'kling-3-0-omni' in CR.JOB_MODELS['swap'] and CR.DEFAULT_SWAP_MODEL != 'kling-3-0-omni'
+          and IG.ref_cap('kling-3-0-omni') == 4)
+    p = IG.build_swap_prompt('x', preserve=True, roles=['face', 'body', 'location'],
+                             place='a rooftop bar')
+    check('a place drops the keep-the-background wording',
+          IG.PRESERVE_CLAUSE not in p and 'Set in: a rooftop bar.' in p
+          and 'shows the location' in p and 'lighting exactly' not in p)
+    check('no place keeps it', IG.PRESERVE_CLAUSE in IG.build_swap_prompt('x', preserve=True))
+    check('Omni names images with @', '@Image1' in IG.build_swap_prompt(
+        '', roles=['face'], at_images=True))
+    sent = []
+    real = IG._post
+    IG._post = lambda url, payload, headers, timeout=IG.TIMEOUT: (
+        sent.append(payload[1]) or {'data': [{'videoURL': 'https://example.test/c.mp4'}]})
+    try:
+        prov = IG.RunwareProvider(key='test')
+        base = {'job': 'swap', 'model': 'kling-3-0-mc', 'source_url': 'https://x/c.mp4',
+                'reference_urls': ['data:image/png;base64,AAAA']}
+        prov.submit_video(dict(base))
+        kling = sent[-1]['providerSettings']['klingai']
+        check('Kling 3.0 keeps the clip sound', kling.get('keepOriginalSound') is True)
+        check('no background choice without a place', 'backgroundSource' not in kling)
+        prov.submit_video(dict(base, place='a beach'))
+        check('a place takes the background from her photo',
+              sent[-1]['providerSettings']['klingai'].get('backgroundSource') == 'input_image')
+        calls = []
+
+        def refuse(url, payload, headers, timeout=IG.TIMEOUT):
+            t = payload[1]
+            calls.append(t)
+            if 'backgroundSource' in t.get('providerSettings', {}).get('klingai', {}):
+                return {'errors': [{'message': "Unsupported use of 'backgroundSource' parameter."}]}
+            return {'data': [{'videoURL': 'https://example.test/c.mp4'}]}
+
+        IG._post = refuse
+        prov.submit_video(dict(base, place='a beach'))
+        check('a refused provider setting is dropped and resent',
+              len(calls) == 2 and 'backgroundSource' not in
+              calls[-1]['providerSettings']['klingai'])
+    finally:
+        IG._post = real
+
+
+def test_character_plus_vault_photos():
+    print('character views plus vault photos')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    char = {'body_type': 'female', 'views': {'face_front': {}, 'body_front': {}}}
+    real_snap, real_row = A._character_snapshot, A._media_row
+    A._character_snapshot = lambda slug: char
+    A._media_row = lambda slug, i: {'approved': i != 'bad'}
+    try:
+        spec = {}
+        A._gen_identity('lilith', {'identity': 'character',
+                                   'character_views': ['face_front', 'body_front'],
+                                   'identity_media': ['a', 'bad', 'b', 'c']}, spec, 3)
+        check('views and vault photos are both kept', spec['character_views']
+              == ['face_front', 'body_front'] and spec['identity_media'] == ['a', 'b', 'c'][:3])
+        check('an unapproved photo is dropped', 'bad' not in spec['identity_media'])
+    finally:
+        A._character_snapshot, A._media_row = real_snap, real_row
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
                test_ledger, test_equivalents,
-               test_stripe_minimums, test_test_pack_is_not_for_sale):
+               test_stripe_minimums, test_test_pack_is_not_for_sale,
+               test_video_negative_prompt, test_video_prompt_is_not_cut,
+               test_swap_identity, test_clip_library_and_places,
+               test_character_plus_vault_photos):
         fn()
     print()
     if FAILURES:
