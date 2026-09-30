@@ -111,6 +111,9 @@ KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
 # a prompt, so a reel or an animate can carry her character on them.
 REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0')
+# Models whose allow-list has no `negativePrompt`. Sending it costs a refused
+# round trip carrying every reference photo before `_send` strips it.
+NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
 # Models that only work on a clip the creator uploaded.
 CLIP_ONLY_MODELS = ('p-video-replace', 'p-video-animate')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
@@ -1536,7 +1539,8 @@ class RunwareProvider(Provider):
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
         else:
-            task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
+            if model_key not in NO_NEGATIVE_MODELS:
+                task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
             task['width'] = width
             task['height'] = height
             task['duration'] = video_seconds(model_key, spec.get('seconds') or 5)

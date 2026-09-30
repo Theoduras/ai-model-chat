@@ -412,12 +412,72 @@ def test_test_pack_is_not_for_sale():
           all(p['id'] == str(p['tokens']) for p in CR.packs_for('eur')))
 
 
+def test_video_negative_prompt():
+    print('video negative prompt')
+    import imagegen as IG
+    sent = []
+    real_post = IG._post
+
+    def fake_post(url, payload, headers, timeout=IG.TIMEOUT):
+        sent.append(payload[1])
+        return {'data': [{'videoURL': 'https://example.test/clip.mp4'}]}
+
+    IG._post = fake_post
+    try:
+        prov = IG.RunwareProvider(key='test')
+        spec = {'job': 'reel', 'prompt': 'a walk', 'seconds': 5,
+                'reference_urls': ['data:image/png;base64,AAAA']}
+        for model in ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast'):
+            sent.clear()
+            prov.submit_video(dict(spec, model=model))
+            check(f'{model} is sent no negativePrompt',
+                  'negativePrompt' not in sent[0])
+            check(f'{model} still carries her references',
+                  bool(sent[0].get('inputs', {}).get('referenceImages')))
+        sent.clear()
+        prov.submit_video(dict(spec, model='wan-2-5', reference_urls=[]))
+        check('a flat model keeps its negativePrompt',
+              'negativePrompt' in sent[0])
+
+        attempts = []
+
+        def refusing(url, payload, headers, timeout=IG.TIMEOUT):
+            task = payload[1]
+            attempts.append(sorted(task))
+            if 'fps' in task:
+                return {'errors': [{'message':
+                        "Unsupported use of 'fps' parameter."}]}
+            return {'data': [{'videoURL': 'https://example.test/clip.mp4'}]}
+
+        IG._post = refusing
+        prov._send([{'taskType': 'videoInference', 'fps': 24}])
+        check('a refused optional key is stripped and the task resent',
+              len(attempts) == 2 and 'fps' not in attempts[1])
+
+        def refuses_refs(url, payload, headers, timeout=IG.TIMEOUT):
+            return {'errors': [{'message':
+                    "Unsupported use of 'referenceImages' parameter."}]}
+
+        IG._post = refuses_refs
+        try:
+            prov._send([{'taskType': 'videoInference',
+                         'inputs': {'referenceImages': ['x']}}])
+            raised = False
+        except IG.GenerationError:
+            raised = True
+        check('a refused identity key fails the job instead of running without it',
+              raised)
+    finally:
+        IG._post = real_post
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
                test_ledger, test_equivalents,
-               test_stripe_minimums, test_test_pack_is_not_for_sale):
+               test_stripe_minimums, test_test_pack_is_not_for_sale,
+               test_video_negative_prompt):
         fn()
     print()
     if FAILURES:
