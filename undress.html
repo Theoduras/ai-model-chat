@@ -16,6 +16,9 @@
     .ud-bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
     .ud-bar select { padding:8px 10px; border-radius:8px; border:1px solid var(--border, #333);
       background:var(--surface, transparent); color:inherit; }
+    .ud-upload-btn { padding:8px 12px; border-radius:8px; border:1px solid var(--border, #333);
+      background:var(--surface, transparent); color:inherit; cursor:pointer; font-size:.9rem; }
+    .ud-upload-btn:hover { background:var(--hover, #222); }
     .ud-note { margin:0 0 14px; padding:10px 14px; border-radius:8px;
       border:1px solid var(--border, #333); font-size:.85rem; }
     .ud-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
@@ -23,13 +26,13 @@
       border:1px solid var(--border, #333); background:var(--surface, transparent); }
     .ud-card img { display:block; width:100%; aspect-ratio:3/4; object-fit:cover; }
     .ud-card .btn { position:absolute; left:8px; right:8px; bottom:8px; }
-    .ud-pending { display:flex; align-items:center; justify-content:center; aspect-ratio:3/4; font-size:.85rem; color:var(--text-muted); padding:8px; text-align:center; }
+    .ud-pending { display:flex; align-items:center; justify-content:center; aspect-ratio:3/4; font-size:.85rem; color:var(--text-muted); padding:8px; text-align:center; background:rgba(0,0,0,0.05); }
     .ud-lb { position:fixed; inset:0; z-index:9999; background:rgba(0,0,0,.92); display:none; align-items:center; justify-content:center; flex-direction:column; gap:14px; }
     .ud-lb.on { display:flex; }
     .ud-lb img { max-width:92vw; max-height:78vh; object-fit:contain; }
     .ud-lb .nav { position:absolute; top:50%; transform:translateY(-50%); background:rgba(255,255,255,.12); color:#fff; border:0; font-size:2rem; width:48px; height:64px; cursor:pointer; border-radius:8px; }
     .ud-lb .x { position:absolute; top:14px; right:18px; background:none; border:0; color:#fff; font-size:2rem; cursor:pointer; }
-    .ud-empty { color:var(--text-muted); font-size:.9rem; padding:40px 0; text-align:center; }
+    .ud-empty { color:var(--text-muted); font-size:.9rem; padding:40px 0; text-align:center; width:100%; grid-column:1/-1; }
   </style>
 </head>
 <body class="page-dashboard">
@@ -45,7 +48,13 @@
   <div class="ud-bar">
     <label for="ud-persona">Persona</label>
     <select id="ud-persona" onchange="udPick(this.value)"></select>
-    <span style="color:var(--text-muted); font-size:.85rem">1 token per photo. Only photos generated here are listed.</span>
+    
+    <label class="ud-upload-btn">
+      Upload Photo
+      <input type="file" id="ud-upload-input" accept="image/*" style="display:none;" onchange="udUpload(this)">
+    </label>
+
+    <span style="color:var(--text-muted); font-size:.85rem">1 token per photo. Uploads and generated photos are listed.</span>
   </div>
   <div class="ud-note" id="ud-note" hidden></div>
   <div class="ud-grid" id="ud-grid"></div>
@@ -83,9 +92,10 @@ async function udPick(slug) {
   el('ud-grid').innerHTML = '';
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && m.source === 'generated');
+    // Allow both generated and uploaded sources
+    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && (m.source === 'generated' || m.source === 'uploaded'));
     el('ud-grid').innerHTML = rows.length ? rows.map(m => `
-${udCard(m)}`).join('') : '<div class="ud-empty">No generated photos kept for this persona yet.</div>';
+${udCard(m)}`).join('') : '<div class="ud-empty">No photos kept for this persona yet.</div>';
     note('');
   } catch (e) { note('Could not load the gallery.'); }
 }
@@ -93,6 +103,47 @@ ${udCard(m)}`).join('') : '<div class="ud-empty">No generated photos kept for th
 function udCard(m) {
   return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="" data-id="${esc(m.id)}" onclick="udOpen(this)" style="cursor:zoom-in">
     <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button></div>`;
+}
+
+async function udUpload(input) {
+  const file = input.files && input.files[0];
+  input.value = ''; // Reset input so the same file can be uploaded again if needed
+  if (!file) return;
+  if (!udSlug) return note('Please select a persona first.');
+
+  const grid = el('ud-grid');
+  const empty = grid.querySelector('.ud-empty');
+  if (empty) empty.remove();
+
+  const pending = document.createElement('div');
+  pending.className = 'ud-card ud-pending';
+  pending.innerHTML = '<span>Uploading…</span>';
+  grid.prepend(pending);
+
+  try {
+    const fd = new FormData();
+    fd.append('file', file);
+    fd.append('persona', udSlug);
+    fd.append('source', 'uploaded'); // Tag it as uploaded if backend requires it
+
+    // Note: Verify this upload endpoint matches your server's routing
+    const res = await fetch('/api/media/upload', {
+      method: 'POST',
+      body: fd
+    });
+    const d = await res.json();
+
+    if (!d.ok) {
+      pending.innerHTML = `<span>${esc(d.error || 'Upload failed.')}</span>`;
+      return;
+    }
+
+    // Replace pending placeholder with the new image card
+    pending.outerHTML = udCard(d.media);
+    note('Upload complete.');
+  } catch (e) {
+    pending.innerHTML = '<span>Upload error.</span>';
+  }
 }
 
 async function udGo(id) {
@@ -129,6 +180,7 @@ async function udGo(id) {
     note('Done — added to this page.');
   } catch (e) { fail('Undress failed.'); }
 }
+
 let udIdx = -1;
 function udImgs() { return [...document.querySelectorAll('#ud-grid img[data-id]')]; }
 function udLbId() { const i = udImgs()[udIdx]; return i ? i.dataset.id : ''; }
