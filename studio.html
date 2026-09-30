@@ -446,11 +446,11 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
-        <div class="gen-f" id="gen-swap-cvpick-row"><span>Character view (up to 3)</span>
+        <div class="gen-f" id="gen-swap-cvpick-row"><span class="gen-refcap-lbl">Character view (up to 3)</span>
           <div class="anim-strip" id="gen-swap-cvpick"></div>
           <span class="hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
-        <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span>Pick her photos (up to 3)</span>
+        <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span class="gen-refcap-lbl">Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
         <div class="gen-f"><span>Upload</span>
           <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
@@ -491,11 +491,11 @@
             <option value="vault">Vault reference photos</option>
             <option value="character">Character build</option>
           </select></label>
-        <div class="gen-f" id="gen-reel-cvpick-row"><span>Character view (up to 3)</span>
+        <div class="gen-f" id="gen-reel-cvpick-row"><span class="gen-refcap-lbl">Character view (up to 3)</span>
           <div class="anim-strip" id="gen-reel-cvpick"></div>
           <span class="hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
-        <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span>Pick her photos (up to 3)</span>
+        <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span class="gen-refcap-lbl">Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
       </div>
 
@@ -1823,6 +1823,8 @@ const SWAP_NOTES = {
     'camera, lighting and background — and changes only who is in it.',
   'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
     'motion. A new video that resembles yours, not your video with her in it.',
+  'kling-3-0-mc': 'Her one full-body photo performs your clip. Carries her build, not only her face, but takes a single photo.',
+  'kling-2-6-mc': 'Like Kling 3.0 at a lower price; one full-body photo.',
   'ml-face-swap': 'Same as the replace above — keeps your clip, swaps only ' +
     'who is in it — on the one provider that will also run this explicit.',
 };
@@ -1973,7 +1975,13 @@ function swapTakesDuration() {
 // a reel onto one of these before quoting, so the price shown follows it.
 const REF_VIDEO_MODELS = ['wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
-const CLIP_MODELS = ['p-video-replace', 'p-video-animate'];
+const CLIP_MODELS = ['p-video-replace', 'p-video-animate', 'kling-3-0-mc', 'kling-2-6-mc'];
+
+// How many of her photos the running model takes (imagegen.ref_cap).
+function refCap() {
+  const m = genJob === 'swap' ? swapModel() : videoModelNow();
+  return ((((genPrices || {}).swap_model_caps || {})[m] || {}).refs) || 3;
+}
 
 function identityOf(job) {
   return genCharacter && genCharacter.has_approved
@@ -1991,11 +1999,17 @@ let genCvPick = [];
 // None picked sends the default views: full body for Kling, face and body for a reel.
 function pickCharView(key) {
   genCvPick = genCvPick.includes(key) ? genCvPick.filter(x => x !== key)
-            : genCvPick.concat(key).slice(-3);
+            : genCvPick.concat(key).slice(-refCap());
   renderGenForm();
 }
 
 function syncIdentity() {
+  const cap = refCap();
+  genCvPick = genCvPick.slice(-cap);
+  genIdPick = genIdPick.slice(-cap);
+  document.querySelectorAll('.gen-refcap-lbl').forEach(l => {
+    l.textContent = l.textContent.replace(/up to \d+/, 'up to ' + cap);
+  });
   const has = !!(genCharacter && genCharacter.has_approved);
   document.querySelectorAll('.gen-identity').forEach(sel => {
     sel.querySelector('option[value="character"]').disabled = !has;
@@ -2026,7 +2040,7 @@ function syncIdentity() {
 // None picked falls back to the photos saved against the model in panel 2.
 function pickIdPhoto(id) {
   genIdPick = genIdPick.includes(id) ? genIdPick.filter(x => x !== id)
-            : genIdPick.concat(id).slice(-3);
+            : genIdPick.concat(id).slice(-refCap());
   renderGenForm();
 }
 

@@ -30566,9 +30566,10 @@ def _gen_frame(raw):
     return b64, mime
 
 
-def _gen_identity(slug, body, spec):
+def _gen_identity(slug, body, spec, cap=3):
     """Where her identity comes from, as the creator picks: the character's
-    approved views or the vault's reference photos."""
+    approved views or the vault's reference photos, as many as the model that
+    will run takes (`cap`)."""
     char = _character_snapshot(slug)
     identity = (body.get('identity') or '').strip().lower()
     if identity not in ('character', 'vault'):
@@ -30582,11 +30583,11 @@ def _gen_identity(slug, body, spec):
         keys = [str(k) for k in (body.get('character_views') or [])]
         spec['character_views'] = [
             k for k in keys if k in char['views']
-            and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:3]
+            and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:cap]
     else:
         # Picked per job from kept vault photos; none picked falls back to the
         # model's saved reference slots.
-        ids = [str(i) for i in (body.get('identity_media') or []) if i][:3]
+        ids = [str(i) for i in (body.get('identity_media') or []) if i][:cap]
         spec['identity_media'] = [i for i in ids
                                   if (_media_row(slug, i) or {}).get('approved')]
     return identity
@@ -30686,6 +30687,25 @@ def _gen_media_urls(slug, media_ids):
 # (`prompt_mode == 'full'`); a clip's is a script, so it gets the long limit.
 GEN_PROMPT_MAX = 600
 GEN_VIDEO_PROMPT_MAX = 2000
+
+
+def _clip_views(char, picked, model):
+    """The character views a clip replace sends, as (keys, roles): face first,
+    then body, then the rest, up to what the model takes. Kling takes one photo,
+    and it has to be the full body."""
+    keys = [k for k in (picked or CH.reel_views(char)) if k in char['views']]
+
+    def role(k):
+        if ((CH.view(k, char['body_type']) or {}).get('group')) == 'face':
+            return 'face'
+        return 'body' if k.startswith('body_') else 'other'
+
+    if imagegen.wants_body_only(model):
+        keys = ([k for k in keys if role(k) == 'body']
+                or [k for k in CH.reel_views(char) if role(k) == 'body'] or keys)[:1]
+    keys.sort(key=lambda k: ('face', 'body', 'other').index(role(k)))
+    keys = keys[:imagegen.ref_cap(model)]
+    return keys, [role(k) for k in keys]
 
 
 def _gen_spec(slug, body, user):
@@ -30812,7 +30832,7 @@ def _gen_spec(slug, body, user):
         spec['addons'].append('audio')
 
     if job == 'swap':
-        _gen_identity(slug, body, spec)
+        _gen_identity(slug, body, spec, imagegen.ref_cap(model))
         orientation = (body.get('orientation') or 'video').strip().lower()
         if orientation not in ('video', 'image'):
             raise imagegen.GenerationError('Unknown facing option.')
@@ -30855,7 +30875,7 @@ def _gen_spec(slug, body, user):
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
             raise imagegen.GenerationError('That photo is not in this vault.')
         # A model is moved before the quote, like a rating, never after it.
-        identity = _gen_identity(slug, body, spec)
+        identity = _gen_identity(slug, body, spec, imagegen.ref_cap(model))
         drive_id = str(body.get('source') or '').strip()
         if drive_id:
             src = _video_source_row(slug, drive_id)
@@ -30864,16 +30884,18 @@ def _gen_spec(slug, body, user):
                     'That clip is no longer there. Upload it again.')
             # A true replace by default: the clip keeps its motion, camera and
             # background and only the person changes.
-            if model not in imagegen.CLIP_ONLY_MODELS + (CR.VIDEO_EDIT_MODEL,):
+            if model not in (imagegen.CLIP_ONLY_MODELS
+                             + imagegen.KLING_MOTION_MODELS
+                             + (CR.VIDEO_EDIT_MODEL,)):
                 model = 'p-video-replace'
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
             spec['source_height'] = src['height']
             seconds = imagegen.video_seconds(model, src['seconds'])
-        elif model in imagegen.CLIP_ONLY_MODELS:
+        elif model in imagegen.CLIP_ONLY_MODELS + imagegen.KLING_MOTION_MODELS:
             raise imagegen.GenerationError(
-                'That model replaces the person in a clip — upload one first.')
+                'That model puts her into a clip — upload one first.')
         elif ((identity == 'character' or spec.get('identity_media'))
               and model not in imagegen.REFERENCE_VIDEO_MODELS):
             model = CR.VIDEO_EDIT_MODEL
@@ -33197,6 +33219,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 job = spec.get('job') or (
                     'swap' if spec['kind'] == 'swap' else 'animate')
                 motion = spec.get('motion', '') or spec.get('prompt_extra', '')
+                roles = None
                 if job == 'swap':
                     call['prompt'] = imagegen.build_swap_prompt(
                         motion,
@@ -33205,11 +33228,15 @@ def _gen_start(job_id, slug, spec, workspace):
                     char = spec.get('character')
                     picked = spec.get('identity_media')
                     if char or picked:
+                        keys = (spec.get('character_views') or CH.reel_views(char)
+                                if char else [])
+                        if char and spec.get('source_path'):
+                            keys, roles = _clip_views(
+                                char, spec.get('character_views'), spec.get('model'))
                         call['reference_urls'] = [
                             u for u in (_char_path_url(char['views'][k]['path'],
                                                        char['views'][k]['mime'])
-                                        for k in (spec.get('character_views')
-                                                  or CH.reel_views(char))) if u
+                                        for k in keys) if u
                         ] if char else _gen_media_urls(slug, picked)
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
@@ -33295,20 +33322,17 @@ def _gen_start(job_id, slug, spec, workspace):
                     elif spec.get('identity_media'):
                         refs = _gen_media_urls(slug, spec['identity_media'])
                         ref_model = 'picked'
-                    elif spec.get('identity') == 'character' and spec.get('character_views'):
+                    elif (spec.get('identity') == 'character' and role != 'face'):
                         char = spec['character']
+                        keys, roles = _clip_views(
+                            char, spec.get('character_views'), spec.get('model'))
                         refs = [u for u in (_char_path_url(char['views'][k]['path'],
                                                            char['views'][k]['mime'])
-                                            for k in spec['character_views']) if u]
-                        ref_model = 'character'
-                    elif spec.get('identity') == 'character' and role == 'body':
-                        body_view = spec['character']['views'].get('body_front')
-                        refs = [u for u in [body_view and _char_path_url(
-                            body_view['path'], body_view['mime'])] if u]
+                                            for k in keys) if u]
                         ref_model = 'character'
                     elif spec.get('identity') == 'character':
                         refs = _character_urls(spec['character'], None, None,
-                                               face_only=role == 'face')
+                                               face_only=True)
                         ref_model = 'character'
                     elif spec.get('character'):
                         refs = (_character_urls(spec['character'], None, None,
@@ -33318,6 +33342,15 @@ def _gen_start(job_id, slug, spec, workspace):
                                 job_id, len(refs), role or 'face+body', ref_model)
                     if refs and imagegen.wants_body_only(spec.get('model')):
                         refs = [imagegen.fit_reference(refs[0])]
+                    refs = refs[:imagegen.ref_cap(spec.get('model'))]
+                    if imagegen.locks_identity(spec.get('model')):
+                        call['prompt'] = imagegen.build_swap_prompt(
+                            motion if job == 'swap'
+                            else (spec.get('prompt_extra') or motion),
+                            preserve=imagegen.preserves_source(
+                                'swap', spec.get('model')),
+                            roles=(roles or [])[:len(refs)]
+                            if roles and len(roles) >= len(refs) else [])
                     if refs:
                         call['reference_urls'] = refs
                 provider_job, result = provider.submit_video(call)

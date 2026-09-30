@@ -602,6 +602,7 @@ def model_caps(model):
     frame of the clip it was given has neither to offer, and a picker in front
     of it would be a control that changes nothing."""
     return {'duration': _imagegen_takes_duration(model),
+            'refs': _IG.ref_cap(model),
             'aspect': _imagegen_takes_aspect(model),
             'resolutions': _imagegen_rungs(model),
             'durations': _imagegen_durations(model)}

@@ -494,13 +494,42 @@ def test_video_prompt_is_not_cut():
           script in text and text.endswith('realistic motion.'))
 
 
+def test_swap_identity():
+    print('swap identity')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    IG = A.imagegen
+    p = IG.build_swap_prompt('she waves', roles=['face', 'body'])
+    check('the identity clause is in the prompt', IG.IDENTITY_CLAUSE in p)
+    check('the images are named by position',
+          'Reference image 1 shows her face; reference image 2 shows her full body' in p)
+    check('the creator\'s words come last', p.endswith('she waves'))
+    check('no roles, no clause', IG.IDENTITY_CLAUSE not in IG.build_swap_prompt('x'))
+    check('the replace model locks identity', IG.locks_identity('p-video-replace'))
+    check('Kling does not', not IG.locks_identity('kling-3-0-mc'))
+    check('replace sends body as well as face', not IG.wants_face_only('p-video-replace'))
+    check('reference caps follow the model',
+          IG.ref_cap('p-video-replace') == 4 and IG.ref_cap('kling-3-0-mc') == 1
+          and IG.ref_cap('wan-3-0') == IG.PICK_REF_MAX)
+    check('Kling is offered on a reel', 'kling-3-0-mc' in CR.JOB_MODELS['reel'])
+    char = {'body_type': 'female', 'views': {k: {} for k in
+            ('body_front', 'face_front', 'face_profile')}}
+    keys, roles = A._clip_views(char, ['body_front', 'face_profile', 'face_front'],
+                                'p-video-replace')
+    check('face leads, body follows', roles == ['face', 'face', 'body'], roles)
+    check('Kling gets the body view alone',
+          A._clip_views(char, ['face_front', 'body_front'], 'kling-3-0-mc')[0]
+          == ['body_front'])
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
                test_ledger, test_equivalents,
                test_stripe_minimums, test_test_pack_is_not_for_sale,
-               test_video_negative_prompt, test_video_prompt_is_not_cut):
+               test_video_negative_prompt, test_video_prompt_is_not_cut,
+               test_swap_identity):
         fn()
     print()
     if FAILURES:

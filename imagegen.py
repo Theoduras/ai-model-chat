@@ -147,7 +147,8 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
     'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                        'p-video-replace', 'p-video-animate'), 'needs': (),
+                        'p-video-replace', 'p-video-animate',
+                        'kling-3-0-mc', 'kling-2-6-mc'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
@@ -502,15 +503,12 @@ def takes_duration(model_key):
 def wants_face_only(model_key):
     """Whether a model should be sent her face references and nothing else.
 
-    One that replaces the person in a clip takes wardrobe, build and setting
-    from the source, so a body reference adds no information it can use -- and
-    a body shot cropped below the neck, or of anyone else, is a second identity
-    for it to average her face towards. One that regenerates the whole clip
-    needs both.
+    Only the face swap endpoint: it moves a face and nothing else. A model that
+    replaces the person takes her body from the references too now -- a face on
+    a borrowed body is not her -- and is told which image is which, so a body
+    photo is named as her build rather than left to read as a second identity.
     """
-    if model_key == 'ml-face-swap':
-        return True
-    return _video_fields(model_key).get('shape') in ('replace',)
+    return model_key == 'ml-face-swap'
 
 
 def wants_body_only(model_key):
@@ -522,6 +520,16 @@ def wants_body_only(model_key):
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
 MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
+
+# The studio offers a handful of her views, not thirty, so a model that takes
+# that many is still asked for the few a creator would actually tick.
+PICK_REF_MAX = 6
+
+
+def ref_cap(model_key):
+    """How many of her photos a model is sent, and so how many the picker lets
+    a creator tick for it."""
+    return min(MODEL_REF_CAP.get(model_key, MAX_VIDEO_REFERENCES), PICK_REF_MAX)
 
 
 def video_seconds(model_key, seconds):
@@ -1129,18 +1137,57 @@ def engine_report():
     }
 
 
-def build_swap_prompt(motion='', preserve=False):
+# The second clause a swap cannot be talked out of: who she is, in the detail a
+# model otherwise averages away. Ours, like PRESERVE_CLAUSE, not the creator's.
+IDENTITY_CLAUSE = (
+    'The woman in the reference images is the only person who may appear. '
+    'Reproduce her exactly, not approximately: the same face — bone structure, '
+    'eyes, eyebrows, nose, lips, jaw, skin tone and texture, every beauty mark, '
+    'freckle, scar and piercing — the same hair colour, length and style, and '
+    'the same body — height, proportions, shoulders, waist, hips and legs, with '
+    'every tattoo exactly where and as it appears in the references. Do not '
+    'beautify, slim, smooth, age or restyle her, and do not add, remove or '
+    'alter any feature or body part. Keep the clothing from the video.')
+
+_ROLE_SAID = {'face': 'shows her face', 'body': 'shows her full body'}
+
+
+def locks_identity(model_key):
+    """Whether a swap on this model carries IDENTITY_CLAUSE. Kling takes who she
+    is from its one photo and uses the prompt only to steer the scene; the face
+    swap endpoint has no prompt to put it in."""
+    return model_key not in KLING_MOTION_MODELS and model_key != EXPLICIT_SWAP_MODEL
+
+
+def _roles_sentence(roles):
+    """Which reference image is which, by position: the payload has no other way
+    to tell a model that one photograph is her face and another her body."""
+    if not roles:
+        return ''
+    parts = [f'reference image {n} ' + _ROLE_SAID.get(role, 'is another view of her')
+             for n, role in enumerate(roles, 1)]
+    text = '; '.join(parts)
+    return text[0].upper() + text[1:] + '. All of them are the same woman.'
+
+
+def build_swap_prompt(motion='', preserve=False, roles=None):
     """Instruction text for an edit, not for a still coming to life: the model
     is being told whose face to carry over, and what to leave alone.
 
     `preserve` adds the locked clause, which is ours and not the creator's:
     her own words are appended after it, where they can refine the swap but
-    cannot talk the model out of keeping the clip.
+    cannot talk the model out of keeping the clip. `roles` adds the identity
+    clause: one entry per reference image, in the order they are sent, each
+    `face`, `body` or anything else for another view. An empty list adds the
+    clause without naming the images; None leaves it out.
     """
     base = ('Replace the woman in the reference video with the woman in the '
             'reference images, keeping her face and body consistent with them. '
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
+    if roles is not None:
+        base = ' '.join(part for part in (base, IDENTITY_CLAUSE,
+                                          _roles_sentence(roles)) if part)
     if preserve:
         base = base + ' ' + PRESERVE_CLAUSE
     return (base + ' ' + motion.strip()) if motion.strip() else base
