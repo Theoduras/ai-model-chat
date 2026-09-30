@@ -365,8 +365,9 @@ Stay completely in character. Never mention being an AI.
 - **Fan wishes are the one exception to review** (`/api/fanvue/wish`, Fanvue only,
   super admin only while testing, off per persona by default). A Fanvue message that
   passes `wishes.looks_like_wish` gets one classifier call; a wish is generated from
-  her character and sent as a locked PPV (`set_id='wish'`) without review. The media
-  stays unapproved, so no other fan's send path can reach it, and a fan's next wish
+  her character on Seedream 4.5 and sent as a locked PPV (`set_id='wish'`) without
+  review. The media is kept and approved in her vault (reusable like any kept photo)
+  and uploaded to her Fanvue vault's `Wishes` folder, and a fan's next wish
   waits until the last one is bought, because each one spends the creator's tokens.
 - **Tokens are pegged to provider cost** — `credits.TOKEN_COST_USD`, one
   number — so margin is identical whatever is generated and a new model is a

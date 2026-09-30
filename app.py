@@ -21104,7 +21104,7 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
     try:
         with app.app_context():
             owner = wish['owner']
-            body = {'kind': 'image', 'batch': 1,
+            body = {'kind': 'image', 'batch': 1, 'model': 'seedream-4-5',
                     'rating': 'explicit' if wish['explicit'] else 'sfw',
                     'shot': 'nude' if wish['explicit'] else 'full',
                     'prompt': wish['scene'], 'clothing': wish['outfit']}
@@ -21125,9 +21125,29 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
             if not data:
                 _fv_trace(persona, 'error', f'{who}: wish generation failed', fan=fan_key)
                 return
-            ext = (media.mime or 'image/jpeg').split('/')[-1]
-            uuid = _fv_upload_media(persona, data, 'image', f'wish-{media.id}.{ext}',
-                                    content_type=media.mime or 'image/jpeg', scope=scope)
+            media_id, mime = media.id, media.mime or 'image/jpeg'
+            s = _db_session()
+            try:
+                from db import get_persona_media
+                _gen_keep_row(s, get_persona_media(s, media_id))
+            finally:
+                s.close()
+            uuid = _fv_upload_media(persona, data, 'image',
+                                    f'wish-{media_id}.{mime.split("/")[-1]}',
+                                    content_type=mime, scope=scope)
+            uploads = _fv_uploads(persona)
+            uploads[media_id] = uuid
+            _set_setting(_fv_uploads_key(persona), json.dumps(uploads))
+            try:
+                try:
+                    _fanvue_call(persona, 'POST', '/vault/folders', body={'name': 'Wishes'})
+                except url_error.HTTPError as e:
+                    if e.code not in (400, 409):
+                        raise
+                _fv_attach_to_folder(persona, 'Wishes', uuid)
+            except Exception as e:
+                _fv_trace(persona, 'error', f'{who}: wish not filed in Wishes: '
+                                            f'{_fv_error_text(e)}', fan=fan_key)
             caption = wish['caption'] or 'made this one just for you'
             msg_uuid = plat.send_ppv(persona, scope, fan_uuid, caption, [uuid],
                                      wish['price'])
@@ -35060,22 +35080,29 @@ def api_generate_keep():
                            and row.slug != _undress_slug(user)):
                 continue
             if keep:
-                try:
-                    row.gcs_path = storage.promote(row.gcs_path or '')
-                    if row.original_path:
-                        row.original_path = storage.promote(row.original_path)
-                except Exception:
-                    logger.exception('promote failed for media %s', mid)
+                if not _gen_keep_row(s, row):
                     continue
-                row.expires_at = None
-                row.approved = True
-                s.commit()
             else:
                 _gen_drop_media(s, row)
             done.append(mid)
     finally:
         s.close()
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
+
+
+def _gen_keep_row(s, row):
+    """Promote staged media to kept/ and approve it. False if the move failed."""
+    try:
+        row.gcs_path = storage.promote(row.gcs_path or '')
+        if row.original_path:
+            row.original_path = storage.promote(row.original_path)
+    except Exception:
+        logger.exception('promote failed for media %s', row.id)
+        return False
+    row.expires_at = None
+    row.approved = True
+    s.commit()
+    return True
 
 
 def _studio_photo_model(kind):
