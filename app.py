@@ -32205,8 +32205,16 @@ def _char_views_state(s, row):
             if not live:
                 cv.status = ('review' if any(j.status == 'done' for j in found)
                              else _char_view_fallback(s, row.id, cv.view_key))
+    canon = _char_canonicals(s, row.id)
+    for k, cv in rows.items():
+        if k in canon and cv.status == 'not_started':
+            # A photo is approved, whatever the row last said.
+            cv.status, cv.result_image_id = 'approved', canon[k].id
+            cv.version = cv.version or 1
     s.commit()
     dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
+    for k, d in dicts.items():
+        d['has_photo'] = k in canon
     shown = CH.resolve_all(dicts, row.body_type, row.nsfw_level)
     refs = {}
     ids = [cv.id for cv in rows.values()]
@@ -33341,7 +33349,7 @@ def api_character_generate(char_id):
         shown = state[view_key]['display']
         if shown == 'locked':
             waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
-                       if state.get(d, {}).get('status') != 'approved']
+                       if not state.get(d, {}).get('has_photo')]
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if shown == 'generating':
             return jsonify({'ok': False, 'error': 'That view is already generating.'}), 409
@@ -33534,7 +33542,7 @@ def api_character_approve(char_id, img_id):
         rows, state = _char_views_state(s, row)
         if state[img.view]['display'] == 'locked':
             waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
-                       if state.get(d, {}).get('status') != 'approved']
+                       if not state.get(d, {}).get('has_photo')]
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if img.view in CH.AGE_CHECKED_VIEWS:
             try:

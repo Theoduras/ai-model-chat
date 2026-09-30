@@ -811,7 +811,7 @@ function cost(view, n) {
   return (sets > 1 ? `${sets} outfits · ` : '') + tokensFor(n * sets, view).toLocaleString() + ' tokens';
 }
 function paintRailCost() {
-  const left = cat.views.filter(v => v.required && vs(v.key).status !== 'approved');
+  const left = cat.views.filter(v => v.required && !hasPhoto(v.key));
   const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch), v.key), 0);
   const box = el('rail-cost');
   if (box) box.textContent = left.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens to finish` : '';
@@ -1114,7 +1114,7 @@ function render() {
   // slide-over it would cover the list the moment the step opens.
   if (isPhotos() && !selView && matchMedia('(min-width: 1320px)').matches) {
     const pool = stepViews(curStep());
-    const open = v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked';
+    const open = v => !hasPhoto(v.key) && vs(v.key).display !== 'locked';
     const next = nextPhoto() || pool.find(open) || pool[0];
     selView = next ? next.key : '';
   }
@@ -1308,14 +1308,14 @@ const setupKey = () => 'character:' + cur.id;
 const stepIdx = () => STEPS.findIndex(s => s.key === step);
 function approvedCount() {
   const req = cat.views.filter(v => v.required);
-  return [req.filter(v => vs(v.key).status === 'approved').length, req.length];
+  return [req.filter(v => hasPhoto(v.key)).length, req.length];
 }
 // Her photos are walked one at a time: Continue opens the first required view
 // still waiting, in catalogue order, so Full body, front always comes first.
 function nextPhoto() {
   const t = curStep();
   if (!t || !t.views) return undefined;
-  const left = reqViews(t).filter(v => vs(v.key).status !== 'approved');
+  const left = reqViews(t).filter(v => !hasPhoto(v.key));
   return left.find(v => vs(v.key).display !== 'locked') || left[0];
 }
 // The first step a returning creator still has work in.
@@ -1338,7 +1338,7 @@ function stepDone(i) {
   if (k === 'check') return face;
   if (k === 'body') return seenChoice('body') || !!canonOf('body_front');
   if (k === 'intimate') return seenChoice('intimate') || cat.views.some(v => v.group === 'nsfw' && canonOf(v.key));
-  if (t.views) return stepViews(t).every(v => !v.required || vs(v.key).status === 'approved');
+  if (t.views) return stepViews(t).every(v => !v.required || hasPhoto(v.key));
   return accepted();
 }
 // The same gates go() applies, so the rail never offers a step it would refuse.
@@ -1376,15 +1376,16 @@ function stepWhy(i) {
   if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
   if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
   if (k === 'intimate') {
-    const sheet = cur.sheet || {}, miss = (cat.looks || []).filter(l => !sheet[l.key] && l.views.some(x => (viewDef(x) || {}).required));
+    // Photos she already has (her own, imported) need no choice to be made for them.
+    const sheet = cur.sheet || {}, todo = k => !hasPhoto(k), miss = (cat.looks || []).filter(l => !sheet[l.key] && l.views.some(x => (viewDef(x) || {}).required && todo(x)));
     if (miss.length) return `Pick an example for ${miss.map(l => l.label.toLowerCase()).join(', ')} to continue.`;
-    if (cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style) return 'Choose her pubic hair style to continue.';
+    if (cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style && ['pubic', 'vulva_closed', 'nude_front'].some(k => viewDef(k) && todo(k))) return 'Choose her pubic hair style to continue.';
   }
   if (t.views && !stepOptional(t)) {
-    const vws = reqViews(t), left = vws.filter(v => vs(v.key).status !== 'approved');
+    const vws = reqViews(t), left = vws.filter(v => !hasPhoto(v.key));
     // An optional photo being open never holds Continue; the next required one does.
     if (left.length) return `Approve ${left[0].label} to continue (${vws.length - left.length} of ${vws.length} required).`;
-    const wait = stepViews(t).find(v => DERIVED[v.key] && v.required && vs(v.key).status !== 'approved');
+    const wait = stepViews(t).find(v => DERIVED[v.key] && v.required && !hasPhoto(v.key));
     if (wait) return derivedFailed.has(wait.key) ? `Her ${wait.label.toLowerCase()} could not be prepared \u2014 press Retry.` : `Preparing her ${wait.label.toLowerCase()} from her ${viewDef(DERIVED[wait.key]).label.toLowerCase().split(' (')[0]} photo\u2026`;
   }
   if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
@@ -1455,7 +1456,7 @@ async function stepNext() {
   go(STEPS[i].key);
 }
 function continueLabel() {
-  if (isPhotos() && stepOptional(curStep()) && stepViews(curStep()).some(v => vs(v.key).status !== 'approved')) return 'Skip for now \u2192';
+  if (isPhotos() && stepOptional(curStep()) && stepViews(curStep()).some(v => !hasPhoto(v.key))) return 'Skip for now \u2192';
   const v = isPhotos() && nextPhoto();
   return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
 }
@@ -1991,6 +1992,7 @@ const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
 const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Pick one to approve', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
 const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
 const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
+const hasPhoto = key => !!canonOf(key);
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
 function imgById(id) { return (cur.images || []).find(i => i.id === id); }
@@ -2011,7 +2013,7 @@ function paintStepCard() {
   const t = curStep();
   if (!t || !t.views) return;
   const vws = listedViews(t), req = vws.filter(v => v.required), opt = vws.filter(v => !v.required);
-  const n = req.filter(v => vs(v.key).status === 'approved').length;
+  const n = req.filter(v => hasPhoto(v.key)).length;
   el('step-card-title').textContent = t.nav;
   el('step-progress').textContent = req.length ? `${n} of ${req.length} required approved` : 'all optional';
   el('body-batch-chips').innerHTML = batchChips();
@@ -2024,7 +2026,7 @@ let derivedBusy = false;
 function derivedRows(t) {
   return stepViews(t).filter(v => DERIVED[v.key]).map(v => {
     const parentLabel = viewDef(DERIVED[v.key]).label.toLowerCase().split(' (')[0], st = vs(v.key);
-    const state = st.status === 'approved' && st.display !== 'outdated' ? '\u2713 Done'
+    const state = hasPhoto(v.key) && st.display !== 'outdated' ? '\u2713 Done'
       : derivedFailed.has(v.key) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="retryDerived('${v.key}')">Retry</button>`
       : canonOf(DERIVED[v.key]) ? 'Preparing\u2026' : `Waits for ${parentLabel}`;
     return `<div class="shots-h">Automatic</div><div class="step-shot"><div class="sn">${esc(v.label.split(' (')[0])}${info('view:' + v.key)}<br>
@@ -2038,7 +2040,7 @@ async function autoDerive() {
   for (const [key, parentKey] of Object.entries(DERIVED)) {
     const v = viewDef(key), st = vs(key), parent = canonOf(parentKey);
     if (!v || !parent || st.display === 'locked' || st.display === 'generating') continue;
-    if (st.status === 'approved' && st.display !== 'outdated') continue;
+    if (hasPhoto(key) && st.display !== 'outdated') continue;
     const stamp = key + ':' + parent.id;
     if (derivedDone.has(stamp)) continue;
     derivedDone.add(stamp);
@@ -2123,7 +2125,7 @@ function renderViewPanel() {
   const st = vs(v.key);
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
-  const blockers = v.parents.filter(p => vs(p).status !== 'approved');
+  const blockers = v.parents.filter(p => !hasPhoto(p));
   const banner = el('vp-banner'), pending = images(v.key, 'candidate').length, main = canonOf(v.key);
   const shown = ['locked', 'outdated'].includes(st.display) ? st.display : pending ? 'review' : '';
   banner.hidden = !shown;
@@ -2225,8 +2227,8 @@ let vpPick = {view: '', id: ''};
 const autoCropped = new Set();
 // The required photo the walk opens after this one, once it is approved.
 function nextAfter(key) {
-  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && vs(v.key).status !== 'approved');
-  return left.find(v => v.parents.every(p => p === key || vs(p).status === 'approved')) || left[0];
+  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && !hasPhoto(v.key));
+  return left.find(v => v.parents.every(p => p === key || hasPhoto(p))) || left[0];
 }
 function approveSelected() { if (vpPick.id) approveView(vpPick.id, false, true); }
 // What a photo needs picked before it is generated: its intimate features and,
