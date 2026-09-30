@@ -32730,20 +32730,9 @@ def characters_page():
     return send_from_directory(BASE_DIR, 'characters.html')
 
 
-@app.before_request
-def _gate_characters_v2_file():
-    # static_folder serves every file in the root, so the preview page needs
-    # its own gate on the direct .html path too.
-    if request.path == '/characters-v2.html':
-        return _require_admin()
-
-
 @app.route('/characters-v2')
-def characters_v2_page():
-    blocked = _require_admin()
-    if blocked:
-        return blocked
-    return send_from_directory(BASE_DIR, 'characters-v2.html')
+def characters_v2_redirect():
+    return redirect('/characters', code=302)
 
 
 @app.route('/api/characters/catalogue')

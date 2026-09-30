@@ -19,7 +19,35 @@
     else document.documentElement.classList.add('in-workspace');
   </script>
   <style>
-    /* Colours, type, buttons and fields come from style.css; the editor runs in
+    .rail-sub { display: flex; flex-direction: column; gap: 1px; margin: 2px 0 8px 26px; }
+    .ob-rsub { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border: 0; border-radius: var(--r-sm); background: transparent; color: var(--text-2); font: inherit; font-size: 0.78rem; text-align: left; cursor: pointer; }
+    .ob-rsub:hover { background: var(--surface); }
+    .ob-rsub.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
+    .ob-rsub.locked { opacity: .55; }
+    .ob-rsub-o { margin-left: auto; font-size: 0.62rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+    .shots-h { margin: 6px 0 0; font-size: 0.66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .ob-rsub-i { width: 14px; text-align: center; font-size: 0.7rem; flex-shrink: 0; color: var(--text-muted); }
+    .ob-rsub.approved .ob-rsub-i { color: var(--ok); }
+    .ob-rsub.review .ob-rsub-i, .ob-rsub.generating .ob-rsub-i, .ob-rsub.outdated .ob-rsub-i { color: var(--warn); }
+    .info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid var(--text-muted); border-radius: 50%; font: italic 700 .68rem/1 Georgia, serif; color: var(--text-muted); cursor: pointer; vertical-align: middle; background: transparent; flex-shrink: 0; }
+    .info:hover, .info:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
+    .info-slot { display: inline-flex; }
+    .info-pop { position: fixed; z-index: 120; max-width: 300px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg); font-size: .82rem; line-height: 1.45; color: var(--text-2); }
+    .info-pop strong { display: block; margin-bottom: 4px; color: var(--text); font-size: .86rem; }
+    .info-pop p { margin: 0; white-space: pre-line; }
+    .step-shots { display: flex; flex-direction: column; gap: 8px; }
+    .step-shot { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-md); background: var(--surface-2); }
+    .step-shot[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
+    .step-shot .vt { width: 38px; height: 50px; border-radius: var(--r-sm); overflow: hidden; background: var(--panel-2); display: flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; }
+    .step-shot .vt img { width: 100%; height: 100%; object-fit: cover; }
+    .step-shot .vt svg { width: 16px; height: 16px; opacity: .6; }
+    .step-shot .sn { flex: 1; min-width: 0; font-size: .82rem; font-weight: 600; cursor: pointer; }
+    .step-shot .sn .st { margin-top: 3px; display: inline-block; }
+    .ch-gen .step-shot .btn { width: auto; flex-shrink: 0; white-space: nowrap; }
+    .view.off-step { opacity: .72; }
+    details.parts { margin-bottom: 12px; }
+    details.parts > summary { cursor: pointer; font-weight: 700; font-size: .85rem; padding: 6px 0; }
+        /* Colours, type, buttons and fields come from style.css; the editor runs in
        the persona wizard's frame (.ob-*). Only this page's own parts live here. */
     [hidden] { display: none !important; }
     .in-workspace body > header { display: none; }
@@ -126,13 +154,6 @@
     .mode-opt strong { font-size: 0.88rem; font-weight: 600; }
     .mode-opt span { font-size: 0.77rem; color: var(--text-muted); line-height: 1.45; }
     .mode-opt:hover { border-color: var(--accent-line); }
-    .mode-opt.mode-locked { opacity: .6; cursor: default; }
-    .mode-opt.mode-locked:hover { border-color: var(--border); }
-    .sub-only-tag {
-      display: inline-block; margin-left: 6px; padding: 2px 7px; border-radius: 999px; vertical-align: middle;
-      font-size: .6rem; font-weight: 700; letter-spacing: .04em; text-transform: uppercase;
-      background: var(--surface-2); color: var(--text-muted);
-    }
     .mode-opt[aria-pressed="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
 
     /* Feature pickers: a drawing per option, or a chip when there is nothing to draw. */
@@ -358,6 +379,7 @@
     .ref-pop button:hover, .ref-pop button[aria-pressed="true"] { background: var(--accent-soft); }
     .ref-pop img { width: 32px; height: 40px; border-radius: var(--r-xs); object-fit: cover; flex-shrink: 0; }
     .ref-pop span { flex: 1; }
+    .ref-err { padding: 6px 10px; font-size: 0.76rem; color: var(--err); }
     .ref-pop i { font-style: normal; color: var(--accent); font-weight: 700; }
     .up-card { display: flex; flex-direction: column; gap: 8px; padding: 14px; border: 1px dashed var(--accent-line); border-radius: var(--r); background: var(--accent-soft); }
     .up-card strong { font-size: 0.84rem; }
@@ -505,8 +527,8 @@
         <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80" oninput="markDirty()"></div>
         <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80" oninput="markDirty()">
           <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
-        <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
-          <span class="hint">Sets which body photos are required.</span></div>
+        <div class="field"><label data-info="basics:level">Explicitness level</label><div class="chips" id="level-chips"></div>
+          <span class="hint" id="level-hint"></span></div>
         <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
       </section>
     </div>
@@ -557,12 +579,7 @@
     <div class="ch-cols ch-check" data-step="check" hidden>
       <div class="ch-side">
         <div class="ch-shot"><img id="check-img" alt="Selected face option"></div>
-        <div class="field"><label>Optional extra angles</label>
-          <div class="chips">
-            <button type="button" class="chip" onclick="openView('face_three_quarter')">+ Three-quarter</button>
-            <button type="button" class="chip" onclick="openView('face_profile')">+ Profile</button>
-            <button type="button" class="chip" onclick="openView('face_smile')">+ Smiling</button>
-          </div></div>
+        <p class="hint" data-info="step:photos_face">After she is approved, an optional step lets you add three more angles of her face for extra control.</p>
       </div>
       <section class="form-section ch-check-card">
         <div class="ch-check-head ch-inline">
@@ -601,7 +618,7 @@
         <div class="banner" id="vp-banner" hidden></div>
         <div id="vp-body">
           <details id="vp-crop" class="vp-sec adv" hidden>
-            <summary>Adjust the crop</summary>
+            <summary data-info="drawer:crop">Adjust the crop</summary>
             <div class="crop-stage" id="crop-stage"><img id="crop-img" alt="Source photo"><div class="crop-box" id="crop-box"><span class="crop-handle" data-c="nw"></span><span class="crop-handle" data-c="ne"></span><span class="crop-handle" data-c="sw"></span><span class="crop-handle" data-c="se"></span></div></div>
             <div class="crop-acts">
               <button type="button" class="btn btn-ghost btn-sm" onclick="useCrop('candidate')">Use crop as this photo</button>
@@ -611,29 +628,30 @@
           </details>
           <div class="vp-sec vp-refs">
             <div>
-              <span class="dl">References</span>
+              <span class="dl" data-info="drawer:refs">References</span>
               <p class="hint" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them.</p>
               <div class="ref-line" id="vp-refs"></div>
+              <p class="hint" id="vp-refs-n" style="margin:6px 0 0;"></p>
             </div>
             <div class="up-card">
-              <strong>Use your own reference photo</strong>
+              <strong data-info="drawer:upload">Use your own reference photo</strong>
               <span class="hint">Sent alongside the references, for this photo only. Use it to steer pose, angle or framing. Her look still comes from the approved photos.</span>
               <label class="attest"><input type="checkbox" id="vp-attest" onchange="el('add-view-ref').disabled=!this.checked">I have the rights to this image, and anyone shown is 18+ and agreed to their likeness being used.</label>
               <button type="button" class="btn btn-ghost btn-sm" id="add-view-ref" disabled onclick="pickUpload(selView, 'vp-attest')">Upload photo</button>
             </div>
           </div>
           <div class="vp-sec">
-            <div class="vp-row"><span class="dl">Body profile used</span><span class="hint" id="vp-traits-n"></span></div>
+            <div class="vp-row"><span class="dl" data-info="drawer:traits"><span id="vp-traits-l">Body profile used</span></span><span class="hint" id="vp-traits-n"></span></div>
             <div class="chips" id="vp-traits"></div>
             <p class="hint" id="vp-traits-off"></p>
           </div>
           <div class="vp-sec vp-anat" id="vp-anat" hidden></div>
           <div class="actionbar">
-            <span class="dl">Variations</span><div class="chips" id="vp-batch"></div>
+            <span class="dl" data-info="drawer:variations">Variations</span><div class="chips" id="vp-batch"></div>
             <span class="grow"></span>
             <span class="hint" id="vp-quote"></span>
-            <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button>
-            <button type="button" class="btn btn-primary" id="vp-approve" hidden onclick="approveSelected()"></button>
+            <button type="button" class="btn btn-primary btn-sm" id="vp-var" onclick="generate(selView)"></button><span class="info-slot" data-info="drawer:generate"></span>
+            <button type="button" class="btn btn-primary" id="vp-approve" hidden onclick="approveSelected()"></button><span class="info-slot" data-info="drawer:approve"></span>
           </div>
           <p class="opts-head" id="vp-opts-head" hidden>Tap the best option, then press Approve. Options you do not approve delete themselves after 3 days.</p>
           <div class="vp-next" id="vp-next" hidden></div>
@@ -642,8 +660,9 @@
       </aside>
       <div class="ch-main">
         <section class="form-section" id="body-profile">
-          <div class="section-title">Body profile</div>
-          <div class="mode-pick" role="group" aria-label="Body source">
+          <div class="section-title"><span id="prof-title">Body profile</span></div>
+          <div id="prof-body">
+          <div class="mode-pick" role="group" aria-label="Body source" data-info="body:mode">
             <button type="button" class="mode-opt" data-body-mode="build" onclick="setBodyMode('build')">
               <strong>Create with the builder</strong><span>Pick her shape from drawings.</span></button>
             <button type="button" class="mode-opt" data-body-mode="match" onclick="setBodyMode('match')">
@@ -655,33 +674,28 @@
             <label class="attest"><input type="checkbox" id="attest-body">I have the rights to these images, and everyone shown is 18+ and agreed to their likeness being used.</label>
             <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start;" onclick="pickUpload('body_front', 'attest-body')">+ Add body photos</button>
           </div>
-          <div class="field" id="preset-field"><label>Start from a preset</label><div class="fp-opts" id="presets"></div>
-            <span class="hint">Sets her whole body, topless and intimate shapes included. Fine-tune under Advanced.</span></div>
+          <div class="field" id="preset-field"><label data-info="body:preset">Start from a preset</label><div class="fp-opts" id="presets"></div>
+            <span class="hint">Sets her whole body, breast size and intimate shapes. Change her breast size right below, then fine-tune under Advanced.</span></div>
+          <div id="preset-cup"></div>
           <div id="outfit-pick"></div>
           <details class="adv" id="body-adv">
-            <summary>Advanced: adjust individual features</summary>
+            <summary data-info="body:advanced">Advanced: adjust individual features</summary>
             <p class="hint">Every pick here overrides the preset, so she may no longer look like it.</p>
             <div class="fp-list" id="body-features"></div>
-            <div id="intimate-wrap" hidden>
-              <div class="fp-list" id="intimate-features"></div>
-            </div>
           </details>
+          </div>
+          <div id="prof-intimate" hidden>
+            <p class="hint">Choose these before any intimate photo is generated: every intimate photo is made from these choices, so nothing gets drawn first and corrected later.</p>
+            <div class="fp-list" id="intimate-features"></div>
+          </div>
         </section>
-        <div class="views-toolbar" id="views-head">
-          <div class="chips" id="view-filter"></div>
-          <span class="hint" id="body-summary"></span>
-        </div>
-        <div id="tiers"></div>
       </div>
-      <aside class="ch-side">
-        <section class="form-section ch-gen">
-          <div class="section-title">Generate</div>
-          <div class="ch-inline"><span>Options per view</span><div class="chips" id="body-batch-chips"></div></div>
-          <p class="hint" id="gen-left"></p>
-          <ul class="gen-list" id="gen-list"></ul>
-          <button type="button" class="btn btn-primary" id="gen-remaining" onclick="generateRemaining()">Generate remaining</button>
-          <span class="hint ch-quote" id="gen-total"></span>
-          <button type="button" class="btn btn-ghost" id="regen-branch" onclick="regenerateBranch()">Regenerate outdated</button>
+      <aside class="ch-side" id="ch-side-card">
+        <section class="form-section ch-gen step-card" id="step-card">
+          <div class="section-title"><span id="step-card-title">This step</span> <span class="hint" id="step-progress"></span></div>
+          <div class="ch-inline"><span data-info="gen:batch">Options per photo</span><div class="chips" id="body-batch-chips"></div></div>
+          <div class="step-shots" id="step-shots"></div>
+          <p class="hint">Each button generates just that photo. Nothing is used until you approve one.</p>
         </section>
       </aside>
     </div>
@@ -772,7 +786,7 @@ function renderPresets() {
   const sheet = cur.sheet || {};
   el('preset-field').hidden = bodyMode() === 'match';
   box.innerHTML = (cat.presets || []).map(p => {
-    const vals = Object.entries(p.values || {});
+    const vals = Object.entries(p.values || {}).filter(([k]) => k !== 'cup' && k !== 'bust');
     const on = vals.length && vals.every(([k, v]) => sheet[k] === v);
     const art = window.CharacterVisuals && CharacterVisuals.preset ? CharacterVisuals.preset(p.values) : '';
     return `<button type="button" class="fp-opt preset-opt" aria-pressed="${on ? 'true' : 'false'}" title="${esc(p.hint)}"
@@ -786,7 +800,7 @@ const DRESSED = ['body_front', 'body_side', 'body_back'];
 const outfitSets = view => DRESSED.includes(view) ? Math.max(1, pickedOutfits().length) : 1;
 const imagesFor = (view, n) => n * outfitSets(view);
 const tokensFor = (images, view) => images * ((cat && ((viewDef(view) || {}).rating === 'sfw' || !view
-  ? cat.price_per_image : cat.price_per_image_nsfw || cat.price_per_image)) || 0);
+  ? cat.price_per_image_nb2 || cat.price_per_image : cat.price_per_image_nsfw || cat.price_per_image)) || 0);
 // The price sits beside the button rather than in it, so a long label never
 // wraps a button onto two lines.
 function cost(view, n) {
@@ -795,7 +809,7 @@ function cost(view, n) {
   return (sets > 1 ? `${sets} outfits · ` : '') + tokensFor(n * sets, view).toLocaleString() + ' tokens';
 }
 function paintRailCost() {
-  const left = cat.views.filter(v => v.required && vs(v.key).status !== 'approved');
+  const left = cat.views.filter(v => v.required && !hasPhoto(v.key));
   const total = left.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch), v.key), 0);
   const box = el('rail-cost');
   if (box) box.textContent = left.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens to finish` : '';
@@ -843,6 +857,10 @@ document.addEventListener('keydown', e => {
 });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LEVEL_LABEL = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'};
+const LEVEL_HINT = {
+  sfw: 'Clothed only: face and full-body photos. No Intimate steps.',
+  moderate: 'Adds breasts and nipples, and topless full-body photos in panties. No pubic hair, vulva or anus.',
+  explicit: 'Everything: adds pubic hair, vulva and anus, and full nude photos.'};
 let chars = [], filter = 'all', cur = null, cat = null, personas = [];
 let step = 'describe', batch = 4, pickedFace = '', selView = '', uploadView = '', uploadRole = '';
 let confirmed = new Set();
@@ -866,14 +884,11 @@ function say(text, kind) {
 
 // ── List ────────────────────────────────────────────────────────────────────
 let isAdmin = false;
-let chatbotOn = true;
 async function loadList() {
   el('cards').innerHTML = skelGrid(4);
   try {
     chars = (await api('/api/characters')).characters || [];
-    const who = await PageWizard.me();
-    isAdmin = !!who.isAdmin;
-    chatbotOn = who.chatbot !== false;
+    isAdmin = !!(await PageWizard.me()).isAdmin;
   }
   catch (e) {
     el('cards').innerHTML = `<div class="pg-none"><div class="pg-none-t">Could not load your characters.</div>
@@ -1034,7 +1049,6 @@ async function newCharacter(persona) {
 // ── Editor ──────────────────────────────────────────────────────────────────
 async function openCharacter(id) {
   const [c, m] = await Promise.all([api('/api/characters/' + id), PageWizard.me(), loadPersonas()]);
-  chatbotOn = m.chatbot !== false;
   cur = c.character;
   cat = await api('/api/characters/catalogue?level=' + cur.nsfw_level);
   el('list-view').hidden = true; el('edit-view').hidden = false;
@@ -1042,16 +1056,16 @@ async function openCharacter(id) {
   try { window.parent !== window && window.parent.markActiveChar && window.parent.markActiveChar(id); } catch (e) {}
   // A creator is walked through each new character until they finish or skip;
   // an admin gets the same frame without the guide, and Guide brings it back.
-  guided = !m.isAdmin && !PageWizard.entry(setupKey()).done;
+  guided = !PageWizard.entry(setupKey()).done && !canonOf('face_front');
   showDone = false; selView = ''; pickedFace = ''; lastMsg = ['', '']; dirty = false;
   const canon = canonOf('face_front');
   // A refresh comes back to the step (and photo panel) it left, this tab only.
   let saved = null;
-  try { saved = JSON.parse(sessionStorage.getItem('ch-state:' + id) || 'null'); } catch (e) {}
+  try { saved = JSON.parse(sessionStorage.getItem('ch2-state:' + id) || 'null'); } catch (e) {}
   if (saved && saved.edits) { Object.assign(cur, saved.edits); dirty = true; }
-  go((saved && saved.step) || (canon ? 'views' : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe')));
-  if (saved && saved.selView && step === 'views') { selView = saved.selView; render(); }
-  if (guided && !saved) requestAnimationFrame(() => tourStart(false));
+  syncSteps();
+  go((saved && STEPS.some(x => x.key === saved.step) && saved.step) || (canon ? resumeStep() : (images('face_front', 'candidate').length ? 'pick' : basicsWhy() ? 'basics' : 'describe')));
+  if (saved && saved.selView && isPhotos() && curStep().views.includes(saved.selView)) { selView = saved.selView; render(); }
 }
 function images(view, role) { return (cur.images || []).filter(i => i.view === view && (!role || i.role === role)); }
 function canonOf(view) { return images(view, 'canonical')[0]; }
@@ -1066,70 +1080,246 @@ async function reload() {
 
 function go(s) {
   if (dirty && s !== step) return confirmLeave(() => go(s));
-  if (s !== 'basics' && s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
-  if (s === 'describe' && !canonOf('face_front') && basicsWhy()) s = 'basics';
+  syncSteps();
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
-  if ((s === 'body' || s === 'views' || s === 'finish') && !canonOf('face_front')) s = 'describe';
-  if (s === 'finish' && cur.status !== 'complete') s = 'views';
-  if (s !== step) lastMsg = ['', ''];
-  // The photo panel belongs to Fine Tuning; leaving it closes the panel.
-  if (s !== 'views') selView = '';
-  else if (!selView) showFilterFor((nextPhoto() || {}).key);
-  step = s; showDone = false; render();
+  let idx = STEPS.findIndex(x => x.key === s), refused = '';
+  if (idx < 0) idx = STEPS.findIndex(x => x.key === 'body');
+  if (!stepOpen(idx)) {
+    refused = openWhy(idx);
+    const open = STEPS.map((x, j) => j).filter(j => stepOpen(j));
+    idx = open.find(j => !stepDone(j) && !stepOptional(STEPS[j])) ?? open[open.length - 1] ?? 0;
+  }
+  s = STEPS[idx].key;
+  if (s !== step) { lastMsg = ['', '']; if (TOUR && TOUR.on()) TOUR.end(true); }
+  if (refused) lastMsg = [refused, 'err'];
+  const t = STEPS[idx];
+  step = s;
+  if (!t.views) selView = '';
+  else if (!selView || !t.views.includes(selView)) selView = (nextPhoto() || {}).key || '';
+  showDone = false; render();
   el('ch-stepwrap').scrollTop = 0;
   if (s === 'finish' && accepted() && !cur.persona) setTimeout(pointToNext, 300);
 }
 function render() {
-  const shown = step === 'views' ? 'body' : step;
+  syncSteps();
+  const prof = step === 'body' || step === 'intimate';
+  const shown = prof || isPhotos() ? 'body' : step;
   document.querySelectorAll('[data-step]').forEach(n => n.hidden = showDone || n.dataset.step !== shown);
-  el('body-profile').hidden = step === 'views';
-  el('views-head').hidden = el('tiers').hidden = step === 'body';
-  el('edit-view').classList.toggle('views-mode', step === 'views');
-  // Beside the tree there is room to open the next photo straight away; as a
-  // slide-over it would cover the tree the moment the step opens.
-  if (step === 'views' && !selView && matchMedia('(min-width: 1320px)').matches) {
-    const pool = cat.views.filter(inFilter);
-    const open = v => vs(v.key).status !== 'approved' && vs(v.key).display !== 'locked';
+  el('body-profile').hidden = !prof;
+  el('ch-side-card').hidden = prof;
+  el('edit-view').classList.toggle('views-mode', isPhotos());
+  // Beside the list there is room to open the next photo straight away; as a
+  // slide-over it would cover the list the moment the step opens.
+  if (isPhotos() && !selView && matchMedia('(min-width: 1320px)').matches) {
+    const pool = stepViews(curStep());
+    const open = v => !hasPhoto(v.key) && vs(v.key).display !== 'locked';
     const next = nextPhoto() || pool.find(open) || pool[0];
     selView = next ? next.key : '';
   }
-  ({basics: renderBasics, describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, views: renderBody, finish: renderFinish})[step]();
+  ({basics: renderBasics, describe: renderDescribe, pick: renderPick, check: renderCheck, body: renderBody, intimate: renderBody, finish: renderFinish})[isPhotos() ? 'body' : step]();
   renderFrame();
+  decorateInfo();
+  maybeTour();
+  autoDerive();
+}
+// ── Help (the i icons) ──────────────────────────────────────────────────────
+const HELP = {
+  'basics:level': ['Explicitness level', 'How far her photos may go. It decides which steps, choices and photos exist for her, what her prompts may say, and how far content made for her can go.\n\nSFW: clothed only. Face and full-body photos (plus hands and feet). There are no Intimate steps, and no intimate word ever reaches a prompt.\n\nTopless: adds breasts and nipples (choices and photos) and topless full-body photos in panties. No pubic hair, vulva or anus.\n\nExplicit: adds pubic hair, vulva and anus (choices, examples and photos) and full nude photos.\n\nYou can raise it later to unlock more steps. Lowering it hides those steps but keeps the photos. A persona linked to her is set to the same level for chat.'],
+  'step:basics': ['About her', 'Her name, age and how explicit her photos may be. Age must be 18+. The level decides which steps exist: at Safe for work the Intimate steps do not appear at all.'],
+  'step:describe': ['Design her face', 'Build her face from drawings, or blend 2 to 6 face photos into a new face. This step only sets up the face; the next step generates options for it.'],
+  'step:pick': ['Pick her face', 'Choose the option that looks most like her. Options you do not pick delete themselves after 3 days, and you can regenerate if none is right.'],
+  'step:check': ['Check & approve', 'Tick every feature that matches what you chose. Approving runs an adult-appearance check and locks her face; every later photo copies it.'],
+  'step:body': ['Body profile', 'Her overall shape: a preset, her breast size, and the individual features. You can set this before her face is done. Every body photo is made from it, so finish it before generating any.'],
+  'step:photos_body': ['Body photos', 'Her clothed full-body photos, starting with the front. The others are built from the front, so they unlock once it is approved. The front (and back at Topless and Explicit) are required. Side, hands, palms, feet and soles are optional extras for more control.'],
+  'step:photos_face': ['Face angles (optional)', 'Not required. Three-quarter, profile and smiling, each built from her approved face. They give the generator more of her face to copy, for extra control over how she looks turned or smiling. Skip them if her front face is enough.'],
+  'step:intimate': ['Intimate details', 'What your level allows: breasts and nipples at Topless, plus pubic hair, vulva and anus at Explicit. You can choose these before her face is done. Choose all of it before generating: the intimate photos are generated from these choices, so nothing is generated first and then corrected. Breast size is set in Body profile.'],
+  'step:photos_intimate': ['Intimate photos', 'Each photo is built from the ones it depends on (the lock message says which) and from your intimate details. Required ones must be approved to finish; close-ups marked optional (the open views, and pubic and anus at Explicit) are extras.'],
+  'step:finish': ['Accept & link', 'Review her full set, accept this version, then link her to a persona so every photo that persona sends looks like her.'],
+  'body:mode': ['Body source', 'Create with the builder: pick her shape from drawings. Match reference bodies: upload photos and hers is made similar to them, never a copy. Her face is always her own.'],
+  'body:preset': ['Presets', 'A preset sets her whole body, breast size and intimate shapes at once, replacing earlier picks. Face features are never touched. Changing the breast size afterwards keeps the preset otherwise.'],
+  'body:size': ['Breast size', 'Her cup size. It is used in her first full-body photo already, so every later photo starts from the right bust. Picking a preset resets it to that preset\u2019s size.'],
+  'body:advanced': ['Advanced features', 'Individual body features. Each pick overrides the preset, so she may no longer look like it.'],
+  'shots:required': ['Required photos', 'These must be approved to open the next step. Her level decides which photos are required.'],
+  'shots:optional': ['Optional extras', 'Not needed to continue. Add them when you want more control over how she looks from those angles or details; you can come back any time.'],
+  'gen:batch': ['Options per photo', 'How many options each Generate makes. You pick and approve one; more options cost more tokens. Options you do not approve delete themselves after 3 days.'],
+  'drawer:refs': ['References', 'Approved photos sent along with the prompt so the model copies her face, skin and body from them.'],
+  'drawer:upload': ['Your own reference', 'Add a photo to steer pose, angle or framing for this one photo. Her look still comes from her approved photos. You must confirm you have the rights.'],
+  'drawer:crop': ['Adjust the crop', 'For close-ups: choose which part of the parent photo this shot is cut from. Drag the box to move it, a corner to resize.'],
+  'drawer:traits': ['Body profile used', 'The features from her profile that go into this photo\u2019s prompt. Close-ups keep only what matters for the crop.'],
+  'drawer:variations': ['Variations', 'The number of options this Generate makes for this photo.'],
+  'drawer:generate': ['Generate', 'Makes options for this photo only. The price is shown before you click. Failed generations are refunded.'],
+  'drawer:approve': ['Approve', 'Makes the selected option her official photo of this view. Later photos and content use it as a reference. Approving again bumps her version.'],
+  'group:breasts': ['Breasts', 'Shape, spacing and how natural or enhanced they look. Size is chosen in Body profile.'],
+  'group:nipples': ['Nipples', 'Areola and nipple size and shape, used by the breast and nude photos.'],
+  'group:pubic': ['Pubic hair', 'Style, colour and density. Choosing it now means her nude, pubic and vulva photos all show it from the first generation.'],
+  'group:vulva': ['Vulva', 'Colour of the vulva. Its shape comes from the example you pick below.'],
+  'group:anus': ['Anus', 'Colour of the anus. Its shape comes from the example you pick below.'],
+  'group:looks': ['Shape examples', 'Pick the example that looks most like how she should look. Her photos are generated to match it; required before those photos unlock.'],
+  'foot:back': ['Back', 'Go to the previous step. Nothing you did is lost.'],
+  'foot:save': ['Save', 'Saves your picks on this step without moving on.'],
+  'foot:continue': ['Continue', 'Goes to the next step once this one is done. If it is greyed out, the line above says what is missing.'],
+  'foot:guide': ['Guide', 'Shows the walkthrough again, or skips it. Skipping keeps everything you made.'],
+};
+const VIEW_HELP = {
+  face_front: 'Her main face photo. Every other photo copies this face, so it is approved first.',
+  face_three_quarter: 'Her face turned slightly. Built from the front face photo.',
+  face_profile: 'Her face from the side. Built from the front face photo.',
+  face_smile: 'Her face with a natural smile. Built from the front face photo.',
+  body_front: 'Her clothed full body from the front. It carries her breast size and every body feature, and all other body photos are built from it.',
+  body_back: 'Her clothed full body from behind, built from the front photo.',
+  body_side: 'Her clothed full body from the side, built from the front photo.',
+  hands: 'A close-up of the backs of her hands and her nails, built from the front photo.',
+  hands_palms: 'A close-up of her palms, built from the front photo. Approved together with the back of the hand.',
+  feet: 'A close-up of the tops of her bare feet, built from the front photo.',
+  feet_soles: 'A close-up of the soles of her feet, built from the front photo. Approved together with the top of the foot.',
+  breasts: 'A close-up of her bare breasts, built from the front body photo and your breast and nipple choices.',
+  nipples: 'A close-up of her nipples and areolae, cut automatically from her approved breasts photo. There is nothing to generate or choose.',
+  nude_front: 'Her full body from the front, topless (or nude at Explicit). Built last, from the front photo, breasts and nipples and, at Explicit, the pubic and vagina photos, so the whole body already matches them.',
+  rear_nude: 'Her full body from behind, topless (or nude at Explicit).',
+  pubic: 'A close-up of her pubic area, built from the front body photo, with the style you chose. The vagina and the full nude are built from it.',
+  vulva_closed: 'Explicit close-up of her vulva, closed, built from the approved pubic photo so the hair matches, and from the example you picked.',
+  vulva_open: 'Explicit close-up of her vulva, open. Built from the closed photo.',
+  anus_closed: 'Explicit close-up from behind, closed, matching the example you picked.',
+  anus_open: 'Explicit close-up from behind, open. Built from the rear nude photo.',
+};
+const GROUP_HELP = {
+  face: 'A facial feature. It goes into every prompt that shows her face.',
+  body: 'A body feature. It goes into every full-body photo.',
+  breasts: 'A breast feature. It is used by her breast and nude photos.',
+  nipples: 'A nipple or areola feature, used by her breast and nude photos.',
+  pubic: 'A pubic hair feature, used by her nude, pubic and vulva photos.',
+  vulva: 'A vulva feature, used by her vulva photos.',
+  anus: 'An anus feature, used by her anus photos.',
+};
+function helpFor(key) {
+  if (HELP[key]) return HELP[key];
+  if (key.startsWith('view:')) {
+    const v = viewDef(key.slice(5));
+    return v ? [v.label, (VIEW_HELP[v.key] || 'One photo of her from a set angle.') + (v.parents.length ? ' It unlocks once ' + v.parents.map(p => (viewDef(p) || {label: p}).label).join(' and ') + ' is approved.' : '')] : null;
+  }
+  if (key.startsWith('feature:')) {
+    const f = cat.features.find(x => x.key === key.slice(8));
+    return f ? [f.label, (GROUP_HELP[f.group] || 'A feature of her look.') + ' Tap the option that matches her; tapping it again clears it.'] : null;
+  }
+  return null;
+}
+function info(key) {
+  return `<span class="info" role="button" tabindex="0" aria-label="What is this?" onclick="showInfo(this,'${key}',event)" onkeydown="if(event.key==='Enter'||event.key===' ')showInfo(this,'${key}',event)">i</span>`;
+}
+function closeInfo() { const p = document.getElementById('info-pop'); if (p) p.remove(); }
+function showInfo(node, key, e) {
+  if (e) { e.stopPropagation(); e.preventDefault(); }
+  const same = document.getElementById('info-pop') && document.getElementById('info-pop').dataset.key === key + (node.dataset.n || '');
+  closeInfo();
+  const h = helpFor(key);
+  if (!h || same) return;
+  const pop = document.createElement('div');
+  pop.className = 'info-pop'; pop.id = 'info-pop'; pop.setAttribute('role', 'dialog');
+  pop.dataset.key = key + (node.dataset.n || '');
+  pop.innerHTML = `<strong>${esc(h[0])}</strong><p>${esc(h[1])}</p>`;
+  document.body.appendChild(pop);
+  const r = node.getBoundingClientRect();
+  const left = Math.min(Math.max(8, r.left - 8), innerWidth - pop.offsetWidth - 8);
+  const top = r.bottom + 8 + pop.offsetHeight > innerHeight ? Math.max(8, r.top - pop.offsetHeight - 8) : r.bottom + 8;
+  pop.style.left = left + 'px'; pop.style.top = top + 'px';
+}
+document.addEventListener('click', e => { if (!e.target.closest('.info-pop')) closeInfo(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeInfo(); });
+document.addEventListener('scroll', closeInfo, true);
+// Static labels carry data-info; the rail, the heading and the footer are
+// drawn by the shared wizard, so their icons are added after each draw.
+function decorateInfo() {
+  document.querySelectorAll('[data-info]').forEach(n => {
+    if (n.querySelector(':scope > .info')) return;
+    n.insertAdjacentHTML('beforeend', info(n.dataset.info));
+  });
+  const t = curStep();
+  if (!t) return;
+  const h = el('ch-head') && el('ch-head').querySelector('.ob-step-h');
+  if (h && !h.querySelector('.info')) h.insertAdjacentHTML('beforeend', info('step:' + t.key));
+  const mine = STEPS.filter(x => x.stage === t.stage);
+  document.querySelectorAll('#ch-rail .ob-rstep').forEach((r, i) => {
+    if (mine[i] && !r.querySelector('.info')) r.insertAdjacentHTML('beforeend', info('step:' + mine[i].key));
+  });
+  document.querySelectorAll('#ch-foot button').forEach(b => {
+    const txt = b.textContent, key = /^\s*(\u2190\s*)?back/i.test(txt) ? 'foot:back' : /continue|finish/i.test(txt) ? 'foot:continue'
+      : /^\s*save\s*$/i.test(txt) ? 'foot:save' : /guide|around|skip/i.test(txt) ? 'foot:guide' : '';
+    if (key && !(b.nextElementSibling && b.nextElementSibling.classList.contains('info'))) b.insertAdjacentHTML('afterend', info(key));
+  });
 }
 
 // ── The wizard frame ────────────────────────────────────────────────────────
 // The editor is laid out as the persona wizard: stages on a rail, one question
 // per step, Back and Continue underneath. The page's own go() stays the source
 // of truth; this only draws around whichever step it settled on.
-const STAGES = [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'}, {key: 'ready', label: 'Ready'}];
-const STEPS = [
+const ALL_STAGES = [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'},
+  {key: 'intimate', label: 'Intimate', nsfw: true}, {key: 'ready', label: 'Ready'}];
+const ALL_STEPS = [
   {key: 'basics', stage: 'face', nav: 'About her', title: 'Who is she?',
-   sub: 'Give her a name, her age and how explicit her photos may be. You link her to a persona at the end. Name, age and level go into every prompt.'},
+   sub: 'Give her a name, her age and how explicit her photos may be. You link her to a persona at the end. Name, age and level go into every prompt, and the level decides whether the Intimate steps exist.'},
   {key: 'describe', stage: 'face', nav: 'Design her face', title: 'How should her face be made?',
    sub: 'Build it from the drawings, or blend 2 to 6 faces into a new one. Nothing else can be generated until her face is approved.'},
   {key: 'pick', stage: 'face', nav: 'Pick one', title: 'Pick her face',
    sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
    sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
+  {key: 'photos_face', stage: 'face', nav: 'Face angles (optional)', title: 'Extra face angles (optional)',
+   views: ['face_three_quarter', 'face_profile', 'face_smile'],
+   sub: 'Not required. Her front face is enough to continue. Extra angles give the generator more of her face to copy, so it has more to work from when she is turned or smiling in later photos. Add them if you want that extra control, or skip.'},
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
-   sub: 'Every body photo inherits this. Start from a preset, pick from the drawings, or match reference bodies, then save.'},
-  {key: 'views', stage: 'body', nav: 'Her photos', title: 'Approve her photos',
-   sub: 'Each view is one photo of her from a set angle. Generate options and approve the best one, then Continue opens the next photo. She is ready when every required photo is approved.'},
+   sub: 'Start from a preset, set her breast size right under it, then fine-tune. Every body photo is made from this, so finish it before generating.'},
+  {key: 'photos_body', stage: 'body', nav: 'Body photos', title: 'Approve her body photos',
+   views: ['body_front', 'body_back', 'body_side', 'hands', 'hands_palms', 'feet', 'feet_soles'],
+   sub: 'Her clothed full-body photos, front first. Generate each photo and approve the best option. Photos marked optional (side, hands, feet, and back at SFW) are extras for more control; the required ones must be approved before the next step opens.'},
+  {key: 'intimate', stage: 'intimate', nsfw: true, nav: 'Intimate details', title: 'How is she intimately?',
+   sub: 'Breasts, nipples, pubic hair, vulva and anus. Choose everything here first: her intimate photos are generated from these choices, so nothing has to be redrawn later.'},
+  {key: 'photos_intimate', stage: 'intimate', nsfw: true, nav: 'Intimate photos', title: 'Approve her intimate photos',
+   views: ['breasts', 'nipples', 'pubic', 'vulva_closed', 'vulva_open', 'nude_front', 'rear_nude', 'anus_closed', 'anus_open'],
+   sub: 'Each photo is built from the ones before it and from your intimate details: breasts first (her nipples are cut from that photo automatically), then pubic area and vagina at Explicit, and the full nude last from all of them. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
    sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
 ];
+let STAGES = ALL_STAGES, STEPS = ALL_STEPS;
+function hasIntimate() { return !!cat && (cat.views.some(v => v.group === 'nsfw') || cat.features.some(f => INTIMATE.includes(f.group))); }
+function syncSteps() {
+  if (!cat) return;
+  const nsfw = hasIntimate();
+  STEPS = ALL_STEPS.filter(x => !x.nsfw || nsfw)
+    .map(x => x.views ? Object.assign({}, x, {views: x.views.filter(k => viewDef(k))}) : x)
+    .filter(x => !x.views || x.views.length);
+  STAGES = ALL_STAGES.filter(g => STEPS.some(x => x.stage === g.key));
+}
+const curStep = () => STEPS.find(x => x.key === step);
+const isPhotos = () => !!(curStep() && curStep().views);
+const stepViews = t => t.views.map(viewDef).filter(Boolean);
+const stepOfView = key => STEPS.find(x => x.views && x.views.includes(key));
+// A photo step is optional when none of its photos is required at her level.
+// A derived view is cut from its parent's photo by the page itself, so it is
+// never listed or chosen; it only gates what is built from it.
+const DERIVED = {nipples: 'breasts'};
+const listedViews = t => stepViews(t).filter(v => !DERIVED[v.key]);
+const reqViews = t => listedViews(t).filter(v => v.required);
+const stepOptional = t => !!t.views && !stepViews(t).some(v => v.required);
+const seenChoice = k => PageWizard.seen(setupKey()).includes(k);
 let guided = false, showDone = false;
 const setupKey = () => 'character:' + cur.id;
 const stepIdx = () => STEPS.findIndex(s => s.key === step);
 function approvedCount() {
   const req = cat.views.filter(v => v.required);
-  return [req.filter(v => vs(v.key).status === 'approved').length, req.length];
+  return [req.filter(v => hasPhoto(v.key)).length, req.length];
 }
 // Her photos are walked one at a time: Continue opens the first required view
 // still waiting, in catalogue order, so Full body, front always comes first.
 function nextPhoto() {
-  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && vs(v.key).status !== 'approved');
+  const t = curStep();
+  if (!t || !t.views) return undefined;
+  const left = reqViews(t).filter(v => !hasPhoto(v.key));
   return left.find(v => vs(v.key).display !== 'locked') || left[0];
+}
+// The first step a returning creator still has work in.
+function resumeStep() {
+  const j = STEPS.findIndex((x, i) => i > 3 && x.key !== 'finish' && !stepOptional(x) && stepOpen(i) && !stepDone(i));
+  return STEPS[j < 0 ? STEPS.length - 1 : j].key;
 }
 function basicsWhy() {
   const name = (cur.name || '').trim();
@@ -1139,35 +1329,62 @@ function basicsWhy() {
   return '';
 }
 function stepDone(i) {
-  const k = STEPS[i].key, face = !!canonOf('face_front');
+  const t = STEPS[i], k = t.key, face = !!canonOf('face_front');
   if (k === 'basics') return !basicsWhy();
   if (k === 'describe') return face || images('face_front').length > 0;
   if (k === 'pick') return face || !!pickedFace;
   if (k === 'check') return face;
-  if (k === 'body') return face && PageWizard.seen(setupKey()).includes('body');
-  if (k === 'views') return cur.status === 'complete';
+  if (k === 'body') return seenChoice('body') || !!canonOf('body_front');
+  if (k === 'intimate') return seenChoice('intimate') || cat.views.some(v => v.group === 'nsfw' && canonOf(v.key));
+  if (t.views) return stepViews(t).every(v => !v.required || hasPhoto(v.key));
   return accepted();
 }
 // The same gates go() applies, so the rail never offers a step it would refuse.
+// Choosing (name, body, intimate) is open from the start; a photo step opens
+// once her face is approved and the choices it is built from are made. Optional
+// steps never hold the next one back.
+const stepDoneKey = key => { const j = STEPS.findIndex(x => x.key === key); return j >= 0 && stepDone(j); };
 function stepOpen(i) {
   const k = STEPS[i].key, face = !!canonOf('face_front');
   if (k === 'basics') return true;
-  if (k === 'describe') return !basicsWhy();
+  if (k === 'describe' || k === 'body' || k === 'intimate') return !basicsWhy();
   if (k === 'pick') return face || images('face_front').length > 0;
   if (k === 'check') return face || !!pickedFace;
-  if (k === 'finish') return cur.status === 'complete';
-  return face;
+  if (k === 'photos_face') return face;
+  if (k === 'photos_body') return face && stepDoneKey('body');
+  if (k === 'photos_intimate') return face && stepDoneKey('photos_body') && stepDoneKey('intimate');
+  if (k === 'finish') return cur.status === 'complete' && STEPS.every((x, j) => j >= i || stepOptional(x) || stepDone(j));
+  return false;
+}
+function openWhy(i) {
+  const k = STEPS[i].key, face = !!canonOf('face_front');
+  if (k === 'describe' || k === 'body' || k === 'intimate') return basicsWhy();
+  if (k === 'pick' || k === 'check') return 'Generate her face first.';
+  if (k.startsWith('photos_') && !face) return 'Approve her face first \u2014 every photo is built from it.';
+  if (k === 'photos_body') return 'Finish Body profile first.';
+  if (k === 'photos_intimate') return stepDoneKey('photos_body') ? 'Finish Intimate details first.' : 'Finish Body photos first.';
+  if (k === 'finish') return 'Approve every required photo first.';
+  return '';
 }
 // What Continue is waiting for, so a greyed button is never a mystery.
 function stepWhy(i) {
-  const k = STEPS[i].key;
+  const t = STEPS[i], k = t.key;
   if (k === 'basics') return basicsWhy();
   if (k === 'describe' && !stepDone(i)) return 'Generate face options to continue.';
   if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
   if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
-  if (k === 'views' && cur.status !== 'complete') {
-    const v = selView && viewDef(selView), [ok, n] = approvedCount();
-    if (v && v.required && vs(v.key).status !== 'approved') return `Approve ${v.label} to continue (${ok} of ${n}).`;
+  if (k === 'intimate') {
+    // Photos she already has (her own, imported) need no choice to be made for them.
+    const sheet = cur.sheet || {}, todo = k => !hasPhoto(k), miss = (cat.looks || []).filter(l => !sheet[l.key] && l.views.some(x => (viewDef(x) || {}).required && todo(x)));
+    if (miss.length) return `Pick an example for ${miss.map(l => l.label.toLowerCase()).join(', ')} to continue.`;
+    if (cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style && ['pubic', 'vulva_closed', 'nude_front'].some(k => viewDef(k) && todo(k))) return 'Choose her pubic hair style to continue.';
+  }
+  if (t.views && !stepOptional(t)) {
+    const vws = reqViews(t), left = vws.filter(v => !hasPhoto(v.key));
+    // An optional photo being open never holds Continue; the next required one does.
+    if (left.length) return `Approve ${left[0].label} to continue (${vws.length - left.length} of ${vws.length} required).`;
+    const wait = stepViews(t).find(v => DERIVED[v.key] && v.required && !hasPhoto(v.key));
+    if (wait) return derivedFailed.has(wait.key) ? `Her ${wait.label.toLowerCase()} could not be prepared \u2014 press Retry.` : `Preparing her ${wait.label.toLowerCase()} from her ${viewDef(DERIVED[wait.key]).label.toLowerCase().split(' (')[0]} photo\u2026`;
   }
   if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
@@ -1178,7 +1395,7 @@ function stepWhy(i) {
 function nudgeTarget(i) {
   const k = STEPS[i].key;
   if (k === 'describe' && !stepDone(i)) return el('gen-face');
-  if (k === 'views' && stepWhy(i)) return el('vp-approve') && !el('vp-approve').hidden ? el('vp-approve') : el('vp-var');
+  if (STEPS[i].views && stepWhy(i)) return el('vp-approve') && !el('vp-approve').hidden ? el('vp-approve') : el('vp-var');
   return null;
 }
 function nudge(node, stay) {
@@ -1211,31 +1428,55 @@ async function stepNext() {
       return say('Saved. Now generate her face options \u2192', 'ok');
     }
     // Nothing waiting for approval means her photos still need generating.
-    if (STEPS[i].key === 'views' && !(el('vp-approve') && !el('vp-approve').hidden)) blinkGen();
+    if (STEPS[i].views && !(el('vp-approve') && !el('vp-approve').hidden)) blinkGen();
     else nudge(nudgeTarget(i));
     return say(stepWhy(i), 'err');
   }
   if (stepWhy(i)) return;
   if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
-  if (STEPS[i].key === 'body') PageWizard.markSeen(setupKey(), 'body');
-  if (STEPS[i].key === 'views' && cur.status !== 'complete' && nextPhoto()) {
-    showFilterFor(nextPhoto().key);
+  if (STEPS[i].key === 'body' || STEPS[i].key === 'intimate') PageWizard.markSeen(setupKey(), STEPS[i].key);
+  if (STEPS[i].views && !stepOptional(STEPS[i]) && nextPhoto()) {
+    selView = nextPhoto().key;
     lastMsg = ['', ''];
     return render();
   }
   if (i === STEPS.length - 1) return finishGuide();
-  go(STEPS[i + 1].key);
+  let j = i + 1;
+  while (j < STEPS.length && !stepOpen(j)) j++;
+  if (j < STEPS.length) return go(STEPS[j].key);
+  // Nothing further is open yet: carry on with what the next steps are waiting for.
+  const back = STEPS.findIndex((x, k) => k !== i && stepOpen(k) && !stepDone(k) && !stepOptional(x));
+  if (back >= 0) {
+    go(STEPS[back].key);
+    lastMsg = [`Saved. Next up: ${STEPS[back].nav}.`, 'ok'];
+    return say(...lastMsg);
+  }
+  go(STEPS[i].key);
 }
 function continueLabel() {
-  const v = step === 'views' && cur.status !== 'complete' && nextPhoto();
+  if (isPhotos() && stepOptional(curStep()) && stepViews(curStep()).some(v => !hasPhoto(v.key))) return 'Skip for now \u2192';
+  const v = isPhotos() && nextPhoto();
   return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
+}
+// Each photo of a photo step is listed under that step in the menu, so the menu
+// is the one place to see what exists and what is still to do.
+const RAIL_ICON = {approved: '\u2713', review: '\u25cf', generating: '\u25cf', outdated: '!', locked: '\ud83d\udd12'};
+function railPhotos(i) {
+  const t = STEPS[i];
+  if (!t || !t.views) return '';
+  const rows = listedViews(t).map(v => {
+    const d = vs(v.key).display;
+    return `<button type="button" class="ob-rsub ${d}${selView === v.key && step === t.key ? ' on' : ''}" onclick="openView('${v.key}')">
+      <span class="ob-rsub-i">${RAIL_ICON[d] || '\u25cb'}</span><span class="ob-rsub-t">${esc(v.label)}</span>${v.required ? '' : '<span class="ob-rsub-o">optional</span>'}</button>`;
+  }).join('');
+  return `<div class="rail-sub" role="group" aria-label="${esc(t.nav)} photos">${rows}</div>`;
 }
 function renderFrame() {
   const i = stepIdx(), [ok, n] = approvedCount();
   const pct = Math.round(STEPS.filter((s, k) => stepDone(k)).length / STEPS.length * 100);
   el('ch-rail').innerHTML = `<button type="button" class="btn-back-gallery" onclick="showList()">← All characters</button>` +
     PageWizard.railHtml({title: 'Your character', name: cur.name, pct, stages: STAGES, steps: STEPS, idx: i,
-      done: stepDone, reachable: stepOpen, call: 'goStep'}) +
+      done: stepDone, reachable: stepOpen, call: 'goStep', sub: railPhotos}) +
     `<div class="ch-rail-meta"><span><b>${ok} of ${n}</b> required photos approved</span><span id="rail-cost"></span>
       <button type="button" class="btn btn-ghost btn-sm" onclick="deleteCharacter('${cur.id}')">Delete character</button></div>`;
   paintRailCost();
@@ -1250,7 +1491,7 @@ function renderFrame() {
         {icon: '\u2726', title: 'Create content', desc: 'Open the studio and make photos of her.', call: 'openStudio()'},
         {icon: '\ud83d\udd17', title: 'Set up her persona',
          desc: 'Her voice and chats; it sends photos of her.', call: cur.persona ? 'openPersona()' : "closeDone('finish')"},
-        {icon: '\u2699\ufe0f', title: 'Fine-tune her photos', desc: 'Add optional views, or redo any photo.', call: "closeDone('views')"},
+        {icon: '\u2699\ufe0f', title: 'Fine-tune her photos', desc: 'Redo any photo.', call: "closeDone('photos_body')"},
       ]});
     return;
   }
@@ -1274,28 +1515,96 @@ function activeCard() {
   return document.querySelector('[data-step]:not([hidden]) .form-section:not([hidden]), [data-step]:not([hidden]) .opts');
 }
 function priceAnchor() {
-  return ['#gen-face', '#regen-face', '#vp-var', '#gen-remaining'].map(q => document.querySelector(q))
+  return ['#gen-face', '#regen-face', '#vp-var', '.step-shot .btn-primary'].map(q => document.querySelector(q))
     .find(b => b && b.getBoundingClientRect().width);
 }
-const TOUR = PageWizard.tour([
-  {anchor: '#ch-head', placement: 'bottom', title: 'One step at a time',
-   body: 'Her look is built in the order of the steps on the left. Each step asks one thing, and the line under the question says what to do.'},
-  {anchor: activeCard, placement: 'right', title: 'This is her real character',
-   body: 'Your picks are kept on her character when you press Save or Save & continue. Nothing reaches a fan until you approve it.'},
-  {anchor: '#ch-rail', placement: 'right', title: 'Where you are',
-   body: 'Start with who she is, then her face, her body, her photos and finally accept and link her. The bar shows how far she is, and you can jump back to any step you have already reached.'},
-  {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
-   body: 'Generating spends tokens from your allowance. The price is shown next to the button before you click, and anything that fails comes back to you.'},
-  {anchor: '#ch-foot', placement: 'top', title: 'Continue, or skip ahead',
-   body: 'Continue unlocks once a step is done. Skip setup leaves the guide and keeps everything you have made, and Guide brings it back any time.'},
-], {onEnd: skipped => PageWizard.save('page:characters', {tour: skipped ? 'skipped' : 'done'})});
-// The tour runs once per creator, not once per character.
+const vis = q => { const n = document.querySelector(q); return n && n.getBoundingClientRect().width ? n : null; };
+// The guide is one short set of tips per step, shown when that step opens and
+// only about what is on it. Pressing Continue opens the next step, which shows
+// its own tips, so the guide follows the creator instead of running ahead.
+const foot = t => ({anchor: '#ch-foot', placement: 'top', title: t[0], body: t[1]});
+const STEP_TIPS = {
+  basics: () => [
+    {anchor: '#ch-rail', placement: 'right', title: 'Welcome: one step at a time',
+     body: 'The steps on the left are the order to work in. Each step explains itself when you open it, and the next one opens when you press Continue.'},
+    {anchor: '#f-name', placement: 'bottom', title: 'Start with who she is',
+     body: 'Give her a name and an age (18 or over). Every prompt states she is a fictional adult of this age.'},
+    {anchor: '#level-chips', placement: 'bottom', title: 'Explicitness level',
+     body: 'This sets how far her photos may go. SFW is clothed only. Topless adds breasts, nipples and topless full-body photos. Explicit adds pubic hair, vulva, anus and full nude photos. It decides which steps and choices appear here and what her prompts may say. You can raise it later.'},
+    foot(['Then continue', 'Press Save & continue when name, age and level are set. The line above the button tells you if something is missing.'])],
+  describe: () => [
+    {anchor: '#face-features', placement: 'right', title: 'Design her face',
+     body: 'Tap the drawing that fits each feature, or blend 2 to 6 face photos instead. Take your time: the next step generates her face from exactly this.'},
+    {anchor: '#gen-face', placement: 'left', title: 'Then generate',
+     body: 'Choose how many options to make and press Generate. The price shows before you click. You pick one of the results on the next step.'}],
+  pick: () => [
+    {anchor: '#face-opts', placement: 'top', title: 'Pick her face',
+     body: 'Tap the option that looks most like her. Not right? Regenerate for new options. Options you do not pick delete themselves after 3 days.'}],
+  check: () => [
+    {anchor: '.ch-check-card', placement: 'left', title: 'Check and approve',
+     body: 'Tick every feature that matches what you chose, then press Approve face. That runs the adult-appearance check and locks her face for every later photo.'}],
+  body: () => [
+    {anchor: '#presets', placement: 'bottom', title: 'Start from a preset',
+     body: 'A preset fills her whole body in one click. You can change everything afterwards.'},
+    {anchor: '#preset-cup', placement: 'top', title: 'Then set her breast size',
+     body: 'This changes only her bust. Her full-body photos are drawn with it from the very first one, so set it before you generate.'},
+    foot(['Save when you are happy', 'Save & continue opens Body photos, where you generate her clothed full-body photos one at a time.'])],
+  intimate: () => [
+    {anchor: '#prof-intimate', placement: 'right', title: 'Choose everything first',
+     body: 'Pubic hair, vulva, anus and the shape examples. Her intimate photos are generated from these choices, so pick them all now and nothing has to be redrawn later.'},
+    foot(['Then continue', 'Save & continue opens the intimate photos, each built from the choices you just made.'])],
+  finish: () => [
+    {anchor: '#fin-accept-row', placement: 'top', title: 'Accept her',
+     body: 'Look through her approved set, then accept this version.'},
+    {anchor: '.fin-persona', placement: 'left', title: 'Link her to a persona',
+     body: 'Create a persona for her or link an existing one, so every photo it sends looks like her.'}],
+};
+const PHOTO_TIPS = () => [
+  {anchor: '#step-card', placement: 'left', title: 'Generate one photo at a time',
+   body: 'This list shows only the photos of this step. Each button generates that one photo and shows its price. Generate, then open it and approve the best option.'},
+  {anchor: '#ch-rail .rail-sub', placement: 'right', title: 'Her photos are in the menu',
+   body: 'Every photo of this step is listed under it in the menu, with its status. Tap one to open it. A photo unlocks once the ones it is built from are approved.'},
+  foot(['Approve the required ones', 'Continue opens the next step once every required photo is approved. Photos marked optional in the menu are extras you can add for more control, or skip.'])];
+['photos_body', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
+STEP_TIPS.photos_face = () => [
+  {anchor: '#step-card', placement: 'left', title: 'Optional: extra control over her face',
+   body: 'You do not need these. Her front face is already enough to continue. Extra angles give the generator more of her face to copy when she is turned or smiling, so add them only if you want that extra control.'},
+  foot(['Skip whenever you like', 'Press Skip for now to go on to her body. You can come back to these angles at any time.'])];
+const TODO_ANCHOR = {basics: '#f-name', describe: '#face-features', pick: '#face-opts', check: '.ch-check-card',
+  body: '#presets', intimate: '#prof-intimate', photos_body: '#step-card', photos_face: '#step-card',
+  photos_intimate: '#step-card', finish: '#fin-accept-row'};
+let TOUR = null;
+// Tips whose anchor is not on screen are dropped, so a stop never lands on nothing.
+function buildTour(key, force) {
+  const make = STEP_TIPS[key];
+  if (!make) return null;
+  const items = make().filter(t => { const n = typeof t.anchor === 'function' ? t.anchor() : document.querySelector(t.anchor); return n && n.getBoundingClientRect().width; });
+  return items.length ? PageWizard.tour(items, {smooth: true, block: 'center', onEnd: () => {
+    PageWizard.markSeen(setupKey(), 'tour:' + key);
+    // Each step builds its own tour, so the finished one's markup goes with it.
+    document.querySelectorAll('.obt-root:not(.on)').forEach(n => n.remove());
+    // Back to the first thing this step needs from the creator.
+    const todo = document.querySelector(TODO_ANCHOR[key] || '');
+    if (todo) {
+      todo.scrollIntoView({block: 'start', behavior: 'smooth'});
+      if (/^(INPUT|TEXTAREA)$/.test(todo.tagName)) setTimeout(() => todo.focus({preventScroll: true}), 450);
+    }
+  }}) : null;
+}
 function tourStart(force) {
-  if (showDone || (!force && PageWizard.entry('page:characters').tour)) return;
-  TOUR.start();
+  if (showDone || !curStep() || (TOUR && TOUR.on())) return;
+  if (!force && PageWizard.seen(setupKey()).includes('tour:' + step)) return;
+  TOUR = buildTour(step, force);
+  if (TOUR) TOUR.start();
+}
+// After every draw: a guided creator gets the tips of the step they just opened.
+function maybeTour() {
+  if (!guided || showDone || (TOUR && TOUR.on())) return;
+  clearTimeout(maybeTour.t);
+  maybeTour.t = setTimeout(() => tourStart(false), 350);
 }
 function skipGuide() {
-  TOUR.end(true);
+  if (TOUR) TOUR.end(true);
   guided = false;
   PageWizard.save(setupKey(), {done: true});
   render();
@@ -1303,12 +1612,12 @@ function skipGuide() {
 }
 function startGuide() {
   guided = true;
-  PageWizard.save(setupKey(), {done: false});
+  PageWizard.save(setupKey(), {done: false, seen: PageWizard.seen(setupKey()).filter(k => !k.startsWith('tour:'))});
   render();
   tourStart(true);
 }
 function finishGuide() {
-  TOUR.end(false);
+  if (TOUR) TOUR.end(false);
   guided = false;
   PageWizard.save(setupKey(), {done: true});
   showDone = true;
@@ -1344,7 +1653,7 @@ function featurePicker(f) {
   }).join('');
   const hex = f.key === 'hair_colour' ? `<label class="hex-pick"><input type="color" id="hair-hex"
       value="${esc((cur.sheet || {}).hair_colour_hex || '#7a5436')}" onchange="pickHairHex(this.value)">Or pick any colour</label>` : '';
-  return `<fieldset class="fp"><legend>${esc(f.label)}</legend><div class="fp-opts" role="group">${opts}</div>${hex}</fieldset>`;
+  return `<fieldset class="fp"><legend>${esc(f.label)}${info('feature:' + f.key)}</legend><div class="fp-opts" role="group">${opts}</div>${hex}</fieldset>`;
 }
 // Required at Explicit: her photos are generated to match the picked examples.
 function lookPicker(list) {
@@ -1470,7 +1779,7 @@ async function saveSheet(extra) {
 // Face and body picks save on Save or Save & continue, not per tap. Until then
 // they are held in cur.sheet, so a re-render (a filter, an upload, a reload)
 // shows them rather than the last saved sheet.
-const SAVED_STEPS = ['basics', 'describe', 'body'];
+const SAVED_STEPS = ['basics', 'describe', 'body', 'intimate'];
 let dirty = false;
 function markDirty() {
   cur.sheet = collectSheet();
@@ -1517,6 +1826,7 @@ function renderBasics() {
   el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
+  el('level-hint').textContent = (LEVEL_HINT[cur.nsfw_level] || '') + ' It decides which steps exist; tap the i for the details.';
 }
 async function linkPersona(slug) {
   try {
@@ -1570,7 +1880,7 @@ async function generate(view, n) {
   const look = (cat.looks || []).find(l => l.views.includes(view) && !(cur.sheet || {})[l.key]);
   if (look) {
     say(`Pick her ${look.label.toLowerCase()} example first.`, 'err');
-    return step === 'views' && !el('vp-anat').hidden ? nudge(el('vp-anat')) : go('body');
+    return isPhotos() && !el('vp-anat').hidden ? nudge(el('vp-anat')) : go('intimate');
   }
   setGenerating(true);
   say('');
@@ -1583,7 +1893,7 @@ async function generate(view, n) {
     setGenerating(false);
     await reload();
     if (view === 'face_front') go('pick');
-    else if (step === 'views') nudge(el('vp-opts'));
+    else if (isPhotos()) nudge(el('vp-opts'));
     say(d.warning || (view === 'face_front' ? 'New options are ready.' : 'Tap the best one, then press Approve.'), d.warning ? 'err' : 'ok');
   } catch (e) {
     setGenerating(false);
@@ -1677,71 +1987,125 @@ async function approveFace() {
 
 // ── Body ────────────────────────────────────────────────────────────────────
 const INTIMATE = ['breasts', 'nipples', 'pubic', 'vulva', 'anus'];
-const TIERS = [[0, 'Anchor · approve first'], [1, 'Derived from anchor'], [2, 'Second level']];
 const STATUS_LABEL = {not_started: 'Not started', generating: 'Generating', review: 'Pick one to approve', approved: 'Approved', locked: 'Locked', outdated: 'Outdated'};
 const MODE_LABEL = {reference: 'Reference', crop: 'Crop'};
 const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="3" y="4" width="18" height="16" rx="2"/><circle cx="9" cy="10" r="2"/><path d="m21 17-5-5-9 8"/></svg>';
-let viewFilter = 'SFW';
+const hasPhoto = key => !!canonOf(key);
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
-function inFilter(v) { return viewFilter === 'All' || (viewFilter === 'NSFW') === isNsfw(v); }
 function imgById(id) { return (cur.images || []).find(i => i.id === id); }
-function viewTile(v) {
-  const st = vs(v.key), c = canonOf(v.key);
-  const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
-  const mode = MODE_LABEL[st.mode];
-  return `<button type="button" class="view" aria-pressed="${selView === v.key}" onclick="openView('${v.key}')">
-    <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : PHOTO_ICON}</div>
-    <div class="view-t"><div class="view-n">${esc(v.label)}</div>
-      <div class="view-f">${esc(from)}${v.required ? ' · required' : ''}</div>
-      <div class="view-s"><span class="st ${st.display}">${STATUS_LABEL[st.display] || 'Locked'}</span>${mode ? `<span class="st">${mode}</span>` : ''}</div></div></button>`;
+// One row per photo in the current step, each with its own Generate.
+function shotRow(v) {
+  const st = vs(v.key), c = canonOf(v.key), d = st.display;
+  const price = cat.price_per_image ? ` · ≈${tokensFor(imagesFor(v.key, batch), v.key).toLocaleString()}` : '';
+  const btn = d === 'locked' ? '<button type="button" class="btn btn-ghost btn-sm" disabled>Locked</button>'
+    : d === 'generating' ? '<button type="button" class="btn btn-ghost btn-sm" disabled>Generating…</button>'
+    : d === 'review' ? `<button type="button" class="btn btn-primary btn-sm" onclick="openView('${v.key}')">Review</button>`
+    : d === 'approved' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="openView('${v.key}')">Open</button>`
+    : `<button type="button" class="btn btn-primary btn-sm" onclick="generateOne('${v.key}')">${d === 'outdated' ? 'Regenerate' : 'Generate'}${price}</button>`;
+  return `<div class="step-shot" aria-current="${selView === v.key}">
+    <div class="vt" onclick="openView('${v.key}')">${c ? `<img src="${esc(c.url)}" alt="">` : PHOTO_ICON}</div>
+    <div class="sn" onclick="openView('${v.key}')">${esc(v.label)}${info('view:' + v.key)}<br><span class="st ${d}">${STATUS_LABEL[d] || 'Locked'}</span></div>${btn}</div>`;
+}
+function paintStepCard() {
+  const t = curStep();
+  if (!t || !t.views) return;
+  const vws = listedViews(t), req = vws.filter(v => v.required), opt = vws.filter(v => !v.required);
+  const n = req.filter(v => hasPhoto(v.key)).length;
+  el('step-card-title').textContent = t.nav;
+  el('step-progress').textContent = req.length ? `${n} of ${req.length} required approved` : 'all optional';
+  el('body-batch-chips').innerHTML = batchChips();
+  el('step-shots').innerHTML = derivedRows(t) +
+    (req.length ? `<div class="shots-h">Required${info('shots:required')}</div>` + req.map(shotRow).join('') : '')
+    + (opt.length ? `<div class="shots-h">Optional extras${info('shots:optional')}</div>` + opt.map(shotRow).join('') : '');
+}
+const derivedDone = new Set(), derivedFailed = new Set();
+let derivedBusy = false;
+function derivedRows(t) {
+  return stepViews(t).filter(v => DERIVED[v.key]).map(v => {
+    const parentLabel = viewDef(DERIVED[v.key]).label.toLowerCase().split(' (')[0], st = vs(v.key);
+    const state = hasPhoto(v.key) && st.display !== 'outdated' ? '\u2713 Done'
+      : derivedFailed.has(v.key) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="retryDerived('${v.key}')">Retry</button>`
+      : canonOf(DERIVED[v.key]) ? 'Preparing\u2026' : `Waits for ${parentLabel}`;
+    return `<div class="shots-h">Automatic</div><div class="step-shot"><div class="sn">${esc(v.label.split(' (')[0])}${info('view:' + v.key)}<br>
+      <span class="hint">Cut from her ${esc(parentLabel)} photo. Nothing to choose.</span></div><span class="hint">${state}</span></div>`;
+  }).join('');
+}
+// Approves the crop of the parent's region as the derived photo, with no
+// generation: the parent already shows exactly what the crop should.
+async function autoDerive() {
+  if (derivedBusy || !cur || !cat) return;
+  for (const [key, parentKey] of Object.entries(DERIVED)) {
+    const v = viewDef(key), st = vs(key), parent = canonOf(parentKey);
+    if (!v || !parent || st.display === 'locked' || st.display === 'generating') continue;
+    if (hasPhoto(key) && st.display !== 'outdated') continue;
+    const stamp = key + ':' + parent.id;
+    if (derivedDone.has(stamp)) continue;
+    derivedDone.add(stamp);
+    derivedBusy = true;
+    try {
+      const image = await cropParent(key, true);
+      const added = await api(`/api/characters/${cur.id}/images`, {body: {view: key, image, crop_as: 'candidate'}});
+      await approveImage(cur.id, added.image.id, {});
+      derivedFailed.delete(key);
+    } catch (e) {
+      derivedFailed.add(key);
+    }
+    derivedBusy = false;
+    try { await reload(); } catch (e) {}
+    return;
+  }
+}
+function retryDerived(key) {
+  derivedFailed.delete(key);
+  for (const stamp of [...derivedDone]) if (stamp.startsWith(key + ':')) derivedDone.delete(stamp);
+  render();
+}
+function generateOne(key) {
+  selView = key;
+  renderBody();
+  generate(key);
 }
 function renderBody() {
   renderPresets();
-  const shown = cat.views.filter(v => v.key !== 'face_front' || viewFilter !== 'NSFW').filter(inFilter);
-  const req = cat.views.filter(v => v.required);
-  const ok = req.filter(v => vs(v.key).status === 'approved').length;
-  const waiting = cat.views.filter(v => vs(v.key).display === 'review').length;
-  el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}` +
-    (waiting ? ` · ${waiting} waiting for your approval` : '');
-  const hasNsfw = cat.views.some(isNsfw);
-  el('view-filter').hidden = !hasNsfw;
-  el('view-filter').innerHTML = (hasNsfw ? ['SFW', 'NSFW', 'All'] : ['SFW']).map(f =>
-    `<button type="button" class="chip" aria-pressed="${viewFilter === f}" onclick="setFilter('${f}')">${f}</button>`).join('');
-  el('tiers').innerHTML = TIERS.map(([t, label]) => {
-    const vs_ = shown.filter(v => v.tier === t);
-    return vs_.length ? `<div class="tier"><h3 class="tier-h">${label}</h3>
-      <div class="views">${vs_.map(viewTile).join('')}</div></div>` : '';
-  }).join('') || '<p class="hint">No views in this filter.</p>';
-  paintGenCard();
-  el('regen-branch').hidden = !shown.some(v => vs(v.key).display === 'outdated');
+  if (isPhotos()) {
+    paintStepCard();
+  }
   const match = bodyMode() === 'match', bodyRefs = images('body_front', 'reference');
   document.querySelectorAll('[data-body-mode]').forEach(b => b.setAttribute('aria-pressed', b.dataset.bodyMode === bodyMode()));
   el('body-match-panel').hidden = !match;
   el('body-match-refs').innerHTML = bodyRefs.map(refTile).join('');
-  el('body-match-count').textContent = `${bodyRefs.length} added${bodyRefs.length ? '.' : ' — add at least 1.'}`;
-  // The profile's pickers exist only on its own step; on Her photos the panel
-  // shows the ones a photo needs, and two copies of a picker would disagree.
-  const profile = step === 'body';
-  el('outfit-pick').innerHTML = profile ? outfitPicker() : '';
-  el('body-features').innerHTML = profile ? cat.features
-    .filter(f => f.group === 'body' && (!match || BODY_MATCH_KEEP.includes(f.key))).map(featurePicker).join('') : '';
-  const intimate = cat.features.filter(f => INTIMATE.includes(f.group));
-  el('intimate-wrap').hidden = !intimate.length;
-  el('intimate-features').innerHTML = profile ? lookPicker() + intimate.map(featurePicker).join('') : '';
+  el('body-match-count').textContent = `${bodyRefs.length} added${bodyRefs.length ? '.' : ' \u2014 add at least 1.'}`;
+  // A profile picker exists on one step only; two copies of a picker would disagree.
+  const prof = step === 'body', intimate = step === 'intimate';
+  el('prof-title').textContent = intimate ? 'Intimate details' : 'Body profile';
+  el('prof-body').hidden = !prof;
+  el('prof-intimate').hidden = !intimate;
+  const sizeKey = cat.features.some(f => f.key === 'cup') ? 'cup' : 'bust';
+  const sizeF = cat.features.find(f => f.key === sizeKey);
+  el('preset-cup').innerHTML = prof && !match && sizeF ? `<div class="field"><label data-info="body:size">Breast size</label>${featurePicker(sizeF)}</div>` : '';
+  el('outfit-pick').innerHTML = prof ? outfitPicker() : '';
+  el('body-features').innerHTML = prof ? cat.features
+    .filter(f => f.group === 'body' && f.key !== sizeKey && (!match || BODY_MATCH_KEEP.includes(f.key))).map(featurePicker).join('') : '';
+  el('intimate-features').innerHTML = intimate ? intimateForm(sizeKey) : '';
   renderViewPanel();
   pollGenerating();
+  decorateInfo();
 }
-function setFilter(f) { viewFilter = f; renderBody(); }
-function showFilterFor(key) {
-  const v = key && viewDef(key);
-  if (!v) return;
-  selView = key;
-  if (!inFilter(v)) viewFilter = isNsfw(v) ? 'NSFW' : 'SFW';
+const INTIMATE_LABEL = {breasts: 'Breasts', nipples: 'Nipples', pubic: 'Pubic hair', vulva: 'Vulva', anus: 'Anus'};
+function intimateForm(sizeKey) {
+  const groups = INTIMATE.map(g => [g, cat.features.filter(f => f.group === g && f.key !== sizeKey)]).filter(([, fs]) => fs.length);
+  const looks = lookPicker();
+  return groups.map(([g, fs]) => `<h3 class="tier-h">${INTIMATE_LABEL[g]}${info('group:' + g)}</h3>${fs.map(featurePicker).join('')}`).join('')
+    + (looks ? `<h3 class="tier-h">Shape examples${info('group:looks')}</h3>${looks}` : '');
 }
 function openView(key) {
+  const t = stepOfView(key), i = STEPS.indexOf(t);
+  if (!t) return;
+  if (!stepOpen(i)) return say(openWhy(i), 'err');
   selView = key;
-  if (step !== 'views') { step = 'views'; render(); } else renderBody();
+  step = t.key;
+  render();
 }
 function closeDrawer() { selView = null; renderBody(); }
 function refTile(i) {
@@ -1753,13 +2117,13 @@ function lineage(key) {
   return out;
 }
 function renderViewPanel() {
-  const v = step === 'views' && selView && viewDef(selView);
+  const v = isPhotos() && selView && viewDef(selView);
   el('drawer').hidden = el('drawer-scrim').hidden = !v;
   if (!v) return;
   const st = vs(v.key);
   el('vp-title').textContent = v.label;
   el('vp-lineage').innerHTML = lineage(v.key).map(k => `<a href="#" onclick="openView('${k}');return false;">${esc(viewDef(k).label)}</a>`).join(' → ');
-  const blockers = v.parents.filter(p => vs(p).status !== 'approved');
+  const blockers = v.parents.filter(p => !hasPhoto(p));
   const banner = el('vp-banner'), pending = images(v.key, 'candidate').length, main = canonOf(v.key);
   const shown = ['locked', 'outdated'].includes(st.display) ? st.display : pending ? 'review' : '';
   banner.hidden = !shown;
@@ -1767,14 +2131,14 @@ function renderViewPanel() {
   if (shown === 'review') banner.textContent = main
     ? 'New options waiting. Your approved photo stays in use until you approve one of these.'
     : 'Not approved yet — pick the best option below and press Approve. Nothing is used until you do.';
-  if (st.display === 'locked') banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
+  if (st.display === 'locked' && blockers.length) banner.innerHTML = `Locked until ${blockers.map(p => esc(viewDef(p).label)).join(' and ')} ${blockers.length > 1 ? 'are' : 'is'} approved.
     <button type="button" class="btn btn-ghost btn-sm" onclick="openView('${blockers[0]}')">Open ${esc(viewDef(blockers[0]).label)}</button>`;
   if (st.display === 'outdated') banner.textContent = 'A parent was re-approved since this was generated. Regenerate to match it.';
   // The slide-over covers the page footer on a narrow screen, so the way on
   // is repeated here once this photo is done.
   el('vp-next').hidden = st.status !== 'approved';
-  if (st.status === 'approved') el('vp-next').innerHTML = `<span>${cur.status === 'complete'
-      ? 'Every required photo is approved.' : 'Approved.'}</span><span class="grow"></span>
+  if (st.status === 'approved') el('vp-next').innerHTML = `<span>${stepDone(stepIdx())
+      ? 'Every photo in this step is approved.' : 'Approved.'}</span><span class="grow"></span>
     <button type="button" class="btn btn-primary btn-sm" onclick="stepNext()">${esc(continueLabel())}</button>`;
   const locked = st.display === 'locked';
   el('vp-body').style.opacity = locked ? .55 : 1;
@@ -1804,16 +2168,19 @@ function renderViewPanel() {
       : `<span class="hint">${approved.length ? 'No approved photo selected' : 'No approved photos yet'}</span>`) +
     (approved.length ? `<button type="button" class="ref-add" aria-label="Choose reference photos" aria-expanded="${refPop}" onclick="toggleRefPop(event)">+</button>` : '') +
     own.map(refTile).join('') +
-    (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${approved.map(o => { const c = canonOf(o.key);
+    (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${refErr ? `<div class="ref-err">${esc(refErr)}</div>` : ''}${approved.map(o => { const c = canonOf(o.key);
       return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
+  el('vp-refs-n').textContent = refCountText(v, st);
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
   // Only traits this level offers; the rest were never pickable here.
   const traits = (v.traits || []).filter(k => (cat.features || []).some(f => f.key === k));
   const on = traits.filter(k => (cur.sheet || {})[k]), off = traits.filter(k => !(cur.sheet || {})[k]);
+  const face = v.group === 'face';
   el('vp-traits-n').textContent = `${on.length} of ${traits.length} in the prompt`;
   el('vp-traits').innerHTML = on.map(k => `<span class="trait">${esc(fl(k))}: <b>${esc(cur.sheet[k])}</b></span>`).join('');
   el('vp-traits-off').innerHTML = (off.length ? `Not set, so not sent: ${off.map(k => esc(fl(k))).join(', ')}. ` : '') +
-    `<a href="#" onclick="go('body');return false;">Edit body profile</a>`;
+    `<a href="#" onclick="go('${face ? 'describe' : 'body'}');return false;">${face ? 'Edit her face' : 'Edit body profile'}</a>`;
+  el('vp-traits-l').textContent = face ? 'Face features used' : 'Body profile used';
   const dressed = DRESSED.includes(v.key);
   const opts = images(v.key, 'canonical').concat(images(v.key, 'wardrobe'), images(v.key, 'candidate'));
   const cands = images(v.key, 'candidate');
@@ -1858,8 +2225,8 @@ let vpPick = {view: '', id: ''};
 const autoCropped = new Set();
 // The required photo the walk opens after this one, once it is approved.
 function nextAfter(key) {
-  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && vs(v.key).status !== 'approved');
-  return left.find(v => v.parents.every(p => p === key || vs(p).status === 'approved')) || left[0];
+  const left = cat.views.filter(v => v.required && v.key !== 'face_front' && v.key !== key && !hasPhoto(v.key));
+  return left.find(v => v.parents.every(p => p === key || hasPhoto(p))) || left[0];
 }
 function approveSelected() { if (vpPick.id) approveView(vpPick.id, false, true); }
 // What a photo needs picked before it is generated: its intimate features and,
@@ -1867,18 +2234,37 @@ function approveSelected() { if (vpPick.id) approveView(vpPick.id, false, true);
 const ANATOMY = {breasts: ['breasts', 'nipples'], nipples: ['nipples'], nude_front: ['pubic'], pubic: ['pubic'],
   vulva_closed: ['vulva'], vulva_open: ['vulva'], anus_closed: ['anus'], anus_open: ['anus']};
 function renderAnatomy(v, locked) {
-  const box = el('vp-anat'), groups = ANATOMY[v.key] || [];
+  const box = el('vp-anat'), groups = ANATOMY[v.key] || [], sheet = cur.sheet || {};
   const looks = (cat.looks || []).filter(l => l.views.includes(v.key));
-  const feats = cat.features.filter(f => groups.includes(f.group));
-  box.hidden = locked || (!looks.length && !feats.length);
+  // The choices are made in Intimate details; only a missing one is pointed at here.
+  const missing = looks.filter(l => !sheet[l.key]).map(l => l.label.toLowerCase())
+    .concat(groups.includes('pubic') && cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style ? ['pubic hair style'] : []);
+  box.hidden = locked || !missing.length;
   if (box.hidden) return (box.innerHTML = '');
-  const missing = looks.some(l => !(cur.sheet || {})[l.key]);
-  box.innerHTML = `<span class="dl">Before you generate: pick her ${esc(v.label.toLowerCase().split(' (')[0])}</span>
-    <p class="hint" style="margin:0;">${missing ? 'Pick the example first; this photo is made to match it.' : 'Sent with this photo and every photo built on it. Saved when you generate.'}</p>
-    <div class="fp-list">${lookPicker(looks)}${feats.map(featurePicker).join('')}</div>`;
+  box.innerHTML = `<span class="dl">Choose first: ${esc(missing.join(', '))}</span>
+    <p class="hint" style="margin:0;">This photo is made from that choice. <a href="#" onclick="go('intimate');return false;">Choose it in Intimate details</a>, then come back to generate.</p>`;
 }
 let refPop = false;
-function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }
+// What is actually sent, by the server's own rule: a chosen list goes as chosen;
+// the default list also carries her own approved photo and her uploads.
+function refCountText(v, st) {
+  const parts = [], mine = images(v.key, 'reference').length;
+  if (st.references) parts.push([st.references.length, 'chosen']);
+  else {
+    const par = v.parents.filter(p => canonOf(p)).length;
+    if (par) parts.push([par, 'built from']);
+    if (canonOf(v.key)) parts.push([1, 'its current approved photo']);
+    if (v.group === 'face' && v.key !== 'face_front') parts.push([images('face_front', 'reference').length, 'face uploads']);
+    if (!(v.zoom && !(v.uses || []).includes('face'))) parts.push([images('', 'reference').length, 'general uploads']);
+  }
+  if (mine) parts.push([mine, 'uploaded for this photo']);
+  const look = (cat.looks || []).find(l => l.views.includes(v.key) && (cur.sheet || {})[l.key]);
+  if (look) parts.push([1, 'anatomy example']);
+  const shown = parts.filter(([n]) => n);
+  const total = shown.reduce((a, [n]) => a + n, 0);
+  return total ? `Sends ${total} photo${total === 1 ? '' : 's'}: ${shown.map(([n, l]) => `${n} ${l}`).join(', ')}.` : 'Sends no photos.';
+}
+function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; refErr = ''; renderViewPanel(); }
 document.addEventListener('click', () => { if (refPop) { refPop = false; renderViewPanel(); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && refPop) { refPop = false; renderViewPanel(); } });
 async function removeApproved() {
@@ -1934,11 +2320,23 @@ async function saveView(patch) {
   try { cur = (await api(`/api/characters/${cur.id}/views/${selView}`, {method: 'PUT', body: patch})).character; renderBody(); }
   catch (e) { say(e.message, 'err'); }
 }
-function toggleRef(id) {
+let refErr = '';
+async function toggleRef(id) {
   const v = viewDef(selView), st = vs(selView);
-  let ids = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
-  ids = ids.includes(id) ? ids.filter(i => i !== id) : ids.concat(id);
-  saveView({references: ids.map((i, n) => ({image_id: i, weight: 1 - n * 0.1}))});
+  const now = st.references ? st.references.map(r => r.image_id) : v.parents.map(p => (canonOf(p) || {}).id).filter(Boolean);
+  const ids = now.includes(id) ? now.filter(i => i !== id) : now.concat(id);
+  // With none chosen the photo would fall back to its defaults, so one stays.
+  if (!ids.length) { refErr = 'A photo needs at least one reference.'; return renderViewPanel(); }
+  const refs = ids.map((i, n) => ({image_id: i, weight: 1 - n * 0.1})), prev = st.references;
+  refErr = '';
+  if (cur.views && cur.views[selView]) cur.views[selView].references = refs;
+  renderViewPanel();
+  try { cur = (await api(`/api/characters/${cur.id}/views/${selView}`, {method: 'PUT', body: {references: refs}})).character; }
+  catch (e) {
+    if (cur.views && cur.views[selView]) cur.views[selView].references = prev;
+    refErr = e.message;
+  }
+  renderViewPanel();
 }
 // Seedream takes no denoise, so a crop view sends the parent's region itself,
 // padded and upscaled 2x, as its first reference.
@@ -1964,7 +2362,7 @@ async function useCrop(as) {
   } catch (e) { say(e.message, 'err'); }
 }
 async function submitView(key, n) {
-  const body = {view: key, batch: n || batch};
+  const body = {view: key, batch: n || batch, sfw_model: 'nano-banana-2'};
   if (key !== 'face_front' && vs(key).mode === 'crop') body.crop_b64 = await cropParent(key);
   return api('/api/characters/' + cur.id + '/generate', {body});
 }
@@ -1989,32 +2387,6 @@ async function queueViews(keys) {
   const ok = keys.length - failed.size;
   say(`${ok} of ${keys.length} generated — open each one and approve a photo to use it.`, errs.length ? 'err' : 'ok');
   if (errs.length) showGenError(errs.join(' '), () => queueViews([...failed].length ? [...failed] : keys));
-}
-// On the body profile every view counts; on Her photos the SFW/NSFW filter
-// decides, the same as the list beside the card.
-function remainingViews() {
-  return cat.views.filter(v => (step === 'body' || inFilter(v)) && ['not_started', 'outdated'].includes(vs(v.key).display));
-}
-function paintGenCard() {
-  const todo = remainingViews();
-  const all = cat.views.filter(v => ['not_started', 'outdated'].includes(vs(v.key).display)).length;
-  const total = todo.reduce((sum, v) => sum + tokensFor(imagesFor(v.key, batch), v.key), 0);
-  el('body-batch-chips').innerHTML = batchChips();
-  el('gen-left').textContent = todo.length
-    ? `Makes ${batch} option${batch === 1 ? '' : 's'} for each of these ${todo.length} view${todo.length === 1 ? '' : 's'}; you then pick and approve one per view.`
-      + (all > todo.length ? ` ${all - todo.length} more are hidden by the ${viewFilter} filter.` : '')
-    : all ? `Nothing left in the ${viewFilter} filter — switch it to see the other ${all}.` : 'Every view is generated.';
-  const names = todo.map(v => v.label);
-  el('gen-list').innerHTML = names.slice(0, 6).map(n => `<li>${esc(n)}</li>`).join('')
-    + (names.length > 6 ? `<li class="hint">+${names.length - 6} more</li>` : '');
-  el('gen-total').textContent = todo.length && cat.price_per_image ? `≈ ${total.toLocaleString()} tokens in total` : '';
-  el('gen-remaining').disabled = !todo.length;
-}
-function generateRemaining() {
-  queueViews(remainingViews().map(v => v.key));
-}
-function regenerateBranch() {
-  queueViews(cat.views.filter(inFilter).filter(v => vs(v.key).display === 'outdated').map(v => v.key));
 }
 // Acceptance is a per-viewer sign-off on this exact version; re-approving any
 // photo bumps the version and asks again.
@@ -2047,10 +2419,6 @@ function renderFinish() {
     ? `<div class="fin-linked">✓ Linked to ${esc(name(cur.persona))}</div>
        <button type="button" class="btn btn-primary" onclick="openPersona()">Open her persona \u2192</button>
        ${others.length ? `<details class="adv"><summary>Link a different persona</summary>${select}</details>` : ''}`
-    : !chatbotOn ? `<div class="mode-pick">
-        <div class="mode-opt mode-locked" aria-disabled="true"><strong>Create her persona <span class="sub-only-tag">Subscribers only</span></strong>
-          <span>Personas, chats and platforms come with a subscription. Her look and photos work on every plan.</span>
-          <a class="btn btn-secondary btn-sm" href="/billing" target="_top">See plans</a></div></div>`
     : `<div class="mode-pick">
         <button type="button" class="mode-opt" onclick="createPersona()"><strong>Create her persona</strong>
           <span>A new persona named after her, ready to set up her voice and chats.</span></button>
@@ -2062,7 +2430,7 @@ function renderFinish() {
 }
 async function createPersona() {
   try {
-    const d = await api(`/api/characters/${cur.id}/studio`, {body: {persona: true}});
+    const d = await api(`/api/characters/${cur.id}/studio`, {body: {}});
     cur.persona = d.slug;
     await loadPersonas();
     openPersona();
@@ -2085,7 +2453,7 @@ let finUrls = [];
 let pollTimer = null;
 function pollGenerating() {
   clearTimeout(pollTimer);
-  if ((step === 'body' || step === 'views') && !generating && Object.values(cur.views || {}).some(s => s.status === 'generating'))
+  if ((step === 'body' || isPhotos()) && !generating && Object.values(cur.views || {}).some(s => s.status === 'generating'))
     pollTimer = setTimeout(async () => { try { await api('/api/generate/jobs'); } catch (e) {} reload(); }, 5000);
 }
 async function runViewCheck(id) {
@@ -2101,11 +2469,15 @@ async function approveView(id, main, advance) {
     await approveImage(cur.id, id, main ? {main: true} : {}); await reload();
     const next = cur.status !== 'complete' && nextPhoto();
     if (advance && next) {
-      showFilterFor(next.key); render();
+      selView = next.key; render();
       return say(`Approved \u2713 Next: ${next.label}. Generate its options.`, 'ok');
     }
-    if (advance && required && cur.status === 'complete') { go('finish'); return say('Every required photo is approved \u2713', 'ok'); }
-    say(next ? `Approved. Press Continue for ${next.label}.` : 'Every required photo is approved. Press Continue to accept her.', 'ok');
+    if (advance && !next && stepDone(stepIdx()) && STEPS[stepIdx() + 1]) {
+      const to = STEPS[stepIdx() + 1];
+      go(to.key);
+      return say(`Step complete \u2713 Next: ${to.nav}.`, 'ok');
+    }
+    say(next ? `Approved. Press Continue for ${next.label}.` : 'Every photo in this step is approved. Press Continue.', 'ok');
     if (!el('vp-next').hidden) el('vp-next').scrollIntoView({block: 'nearest', behavior: 'smooth'});
   }
   catch (e) { say(e.message, 'err'); }
@@ -2166,7 +2538,7 @@ document.addEventListener('keydown', e => {
 function saveChState() {
   if (!cur || el('edit-view').hidden) return;
   try {
-    sessionStorage.setItem('ch-state:' + cur.id, JSON.stringify({step, selView,
+    sessionStorage.setItem('ch2-state:' + cur.id, JSON.stringify({step, selView,
       edits: dirty ? {sheet: cur.sheet, name: cur.name, age: cur.age, notes: cur.notes} : null}));
   } catch (e) {}
 }
