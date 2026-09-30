@@ -113,6 +113,9 @@ def test_prompts():
     check('nipples carry no body features',
           not any(CH.features()[k][1] == 'body' for k in CH.traits('nipples')))
     check('hands keep nails', 'nails' in CH.traits('hands'))
+    check('palms keep nails', 'nails' in CH.traits('hands_palms'))
+    check('hand and foot views are all optional and safe for work', all(
+        CH.view(k)['required_from'] is None and CH.view(k)['rating'] == 'sfw' for k in ('hands', 'hands_palms', 'feet', 'feet_soles')))
     for k in ('anus_closed', 'anus_open'):
         p = CH.build_view_prompt(k, FULL_SHEET, 31, True)
         check(f'{k} shows the vulva', 'vulva just below' in p

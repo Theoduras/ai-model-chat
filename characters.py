@@ -295,14 +295,22 @@ VIEWS = {
         dict(key='body_side', label='Full body, side', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              framing=('a full-body side view, standing perfectly straight and upright, head level, feet together, '
                       'wearing {outfit}'), uses=('body',)),
-        dict(key='hands', label='Hands', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
+        dict(key='hands', label='Hands, back of hand', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=('nails',),
-             framing=('a tight close-up of only her two hands, resting open palms down side by side on a plain surface, '
-                      'fingers and nails in sharp focus, wrists at the frame edge'), uses=('body',)),
-        dict(key='feet', label='Feet', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
+             framing=('a tight close-up of only her two hands, resting palms down side by side on a plain surface so '
+                      'the backs of the hands, fingers and nails are in sharp focus, wrists at the frame edge'), uses=('body',)),
+        dict(key='hands_palms', label='Hands, palms', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
+             zoom=True, body=('nails',),
+             framing=('a tight close-up of only her two open hands resting palms up side by side on a plain surface so '
+                      'the palms, fingers and fingertips are in sharp focus, wrists at the frame edge'), uses=('body',)),
+        dict(key='feet', label='Feet, top of foot', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
              zoom=True, body=(),
-             framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, '
-                      'toes and nails in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
+             framing=('a tight close-up of only her two bare feet standing side by side on a plain floor, seen from '
+                      'above so the tops of the feet, toes and nails are in sharp focus, ankles at the top edge of the frame'), uses=('body',)),
+        dict(key='feet_soles', label='Feet, soles', group='body', rating='sfw', required_from=None, parents=('body_front',), tier=1, mode='reference',
+             zoom=True, body=(),
+             framing=('a tight close-up of only the soles of her two bare feet, soles facing the camera side by side '
+                      'against a plain surface, soles and toes in sharp focus, ankles at the edge of the frame'), uses=('body',)),
         dict(key='breasts', label='Breasts (topless, front)', group='nsfw', rating='moderate', required_from='moderate',
              parents=('body_front',), tier=1, mode='reference', nocrop=True, zoom=True, body=('build',),
              framing=('a close-up of her bare breasts from the front, framed from the collarbones to just below the '
