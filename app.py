@@ -18188,7 +18188,8 @@ def api_fanvue_wish():
             cfg = {'enabled': bool(d.get('enabled')),
                    'price_sfw': max(FV_PRICE_FLOOR, int(d.get('price_sfw') or 0)),
                    'price_nsfw': max(FV_PRICE_FLOOR, int(d.get('price_nsfw') or 0)),
-                   'test_phrase': str(d.get('test_phrase') or '').strip()[:80]}
+                   'test_phrase': str(d.get('test_phrase') or '').strip()[:80],
+                   'lora': str(d.get('lora') or '').strip()[:120]}
         except (TypeError, ValueError):
             return jsonify({'ok': False, 'error': 'Prices must be numbers'}), 400
         _set_setting(f'fanvue_wish_{persona}', json.dumps(cfg))
@@ -21137,7 +21138,7 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
     try:
         with app.app_context():
             owner = wish['owner']
-            body = {'kind': 'image', 'batch': 1, 'model': 'seedream-4-5',
+            body = {'kind': 'image', 'batch': 1, 'model': 'z-image-turbo',
                     'rating': 'explicit' if wish['explicit'] else 'sfw',
                     'shot': 'nude' if wish['explicit'] else 'full',
                     'prompt': wish['scene'], 'clothing': wish['outfit']}
@@ -31814,6 +31815,8 @@ def _gen_spec(slug, body, user):
         # Seedream conditions on the reference inside the call it already bills.
         spec['explicit'] = imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
         _gen_identity_source(slug, body, spec)
+        if model == 'z-image-turbo':
+            spec['lora'] = _fv_wish_cfg(slug).get('lora') or ''
         return spec
 
     # ── Video ────────────────────────────────────────────────────────────────

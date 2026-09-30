@@ -78,6 +78,7 @@ RUNWARE_MODELS = {
     'seedream-5-pro': os.getenv('RW_MODEL_SEEDREAM_5PRO', 'bytedance:seedream@5.0-pro'),
     'nano-banana-pro': os.getenv('RW_MODEL_NANO_BANANA_PRO', 'google:4@2'),
     'nano-banana-2': os.getenv('RW_MODEL_NANO_BANANA_2', 'google:4@3'),
+    'z-image-turbo': os.getenv('RW_MODEL_ZIMAGE_TURBO', 'runware:z-image@turbo'),
 }
 
 # Google's image models, whatever Runware calls them, refuse explicit content
@@ -250,7 +251,10 @@ def preserves_source(job, model_key):
 EXPLICIT_MODEL = 'seedream-4-5'
 # Every image model that may run an explicit shot as asked. credits imports
 # this module, so this is a copy of its MODEL_RATINGS; test_tokens pins the two.
-EXPLICIT_MODELS = (EXPLICIT_MODEL,)
+EXPLICIT_MODELS = (EXPLICIT_MODEL, 'z-image-turbo')
+# Z-Image takes no reference photos: identity is a LoRA (the persona's, set in
+# the wish panel) and this one is stacked on explicit shots only. Empty = none.
+ZIMAGE_NSFW_LORA = os.getenv('RW_ZIMAGE_NSFW_LORA', '').strip()
 
 # Identity is one reference-conditioned call. `referenceImages` is the field
 # Seedream accepts; `seedImage` with a strength is refused by the architecture.
@@ -349,6 +353,7 @@ MODEL_PX = {
     'seedream-5-pro':  {'2k': (1664, 2432), '4k': (3072, 4096)},
     'nano-banana-pro': {'2k': (1696, 2528), '4k': (3392, 5096)},
     'nano-banana-2':   {'2k': (1696, 2528), '4k': (3392, 5096)},
+    'z-image-turbo':   {'2k': (1024, 1536)},
 }
 RESOLUTION_PX = {
     '2k': (1664, 2432),
@@ -386,6 +391,10 @@ def dimensions(model_key, resolution, aspect=None):
         return base
     if model_key in ('nano-banana-pro', 'nano-banana-2'):
         return GOOGLE_PX_2K[aspect]
+    if model_key == 'z-image-turbo':
+        rw, rh = (int(x) for x in aspect.split(':'))
+        scale = (base[0] * base[1] / (rw * rh)) ** 0.5
+        return (round(rw * scale / 64) * 64, round(rh * scale / 64) * 64)
     rw, rh = (int(x) for x in aspect.split(':'))
     budget = max(base[0] * base[1], SEEDREAM_MIN_PX)
     # The pair on the 64 grid closest to the shape that neither drops under
@@ -1710,7 +1719,12 @@ class RunwareProvider(Provider):
         refs = spec.get('reference_urls') or []
         if spec.get('reference_b64'):
             refs = [_data_uri(spec['reference_b64'], spec.get('reference_mime'))] + list(refs)
-        if refs:
+        if model_key == 'z-image-turbo':
+            loras = [spec.get('lora')] + ([ZIMAGE_NSFW_LORA] if spec.get('explicit') else [])
+            loras = [l for l in loras if l]
+            if loras:
+                task[_RW['lora']] = [{'model': l, 'weight': 1} for l in loras]
+        elif refs:
             task[REFERENCE_FIELD] = list(refs)[:MAX_REFERENCES]
 
         if spec.get('async_delivery'):
