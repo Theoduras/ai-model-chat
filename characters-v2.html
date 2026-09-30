@@ -1173,10 +1173,10 @@ const VIEW_HELP = {
   feet_soles: 'A close-up of the soles of her feet, built from the front photo. Approved together with the top of the foot.',
   breasts: 'A close-up of her bare breasts, built from the front body photo and your breast and nipple choices.',
   nipples: 'A macro crop of her nipples and areolae, cut from the breast photo.',
-  nude_front: 'Her full body from the front, topless (or nude at Explicit). Built from the front photo, breasts and nipples, and it shows the pubic hair you chose.',
+  nude_front: 'Her full body from the front, topless (or nude at Explicit). Built last, from the front photo, breasts and nipples and, at Explicit, the pubic and vagina photos, so the whole body already matches them.',
   rear_nude: 'Her full body from behind, topless (or nude at Explicit).',
-  pubic: 'A close-up of her pubic area, cut from the nude front photo, with the style you chose.',
-  vulva_closed: 'Explicit close-up of her vulva, closed, matching the example you picked and the pubic hair you chose.',
+  pubic: 'A close-up of her pubic area, built from the front body photo, with the style you chose. The vagina and the full nude are built from it.',
+  vulva_closed: 'Explicit close-up of her vulva, closed, built from the approved pubic photo so the hair matches, and from the example you picked.',
   vulva_open: 'Explicit close-up of her vulva, open. Built from the closed photo.',
   anus_closed: 'Explicit close-up from behind, closed, matching the example you picked.',
   anus_open: 'Explicit close-up from behind, open. Built from the rear nude photo.',
@@ -1273,8 +1273,8 @@ const ALL_STEPS = [
   {key: 'intimate', stage: 'intimate', nsfw: true, nav: 'Intimate details', title: 'How is she intimately?',
    sub: 'Breasts, nipples, pubic hair, vulva and anus. Choose everything here first: her intimate photos are generated from these choices, so nothing has to be redrawn later.'},
   {key: 'photos_intimate', stage: 'intimate', nsfw: true, nav: 'Intimate photos', title: 'Approve her intimate photos',
-   views: ['breasts', 'nipples', 'nude_front', 'rear_nude', 'pubic', 'vulva_closed', 'vulva_open', 'anus_closed', 'anus_open'],
-   sub: 'Each photo is built from the ones before it and from your intimate details. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
+   views: ['breasts', 'nipples', 'pubic', 'vulva_closed', 'vulva_open', 'nude_front', 'rear_nude', 'anus_closed', 'anus_open'],
+   sub: 'Each photo is built from the ones before it and from your intimate details: breasts and nipples first, then pubic area and vagina at Explicit, and the full nude last from all of them. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
    sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
 ];
@@ -2182,15 +2182,15 @@ function approveSelected() { if (vpPick.id) approveView(vpPick.id, false, true);
 const ANATOMY = {breasts: ['breasts', 'nipples'], nipples: ['nipples'], nude_front: ['pubic'], pubic: ['pubic'],
   vulva_closed: ['vulva'], vulva_open: ['vulva'], anus_closed: ['anus'], anus_open: ['anus']};
 function renderAnatomy(v, locked) {
-  const box = el('vp-anat'), groups = ANATOMY[v.key] || [];
+  const box = el('vp-anat'), groups = ANATOMY[v.key] || [], sheet = cur.sheet || {};
   const looks = (cat.looks || []).filter(l => l.views.includes(v.key));
-  const feats = cat.features.filter(f => groups.includes(f.group));
-  box.hidden = locked || (!looks.length && !feats.length);
+  // The choices are made in Intimate details; only a missing one is pointed at here.
+  const missing = looks.filter(l => !sheet[l.key]).map(l => l.label.toLowerCase())
+    .concat(groups.includes('pubic') && cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style ? ['pubic hair style'] : []);
+  box.hidden = locked || !missing.length;
   if (box.hidden) return (box.innerHTML = '');
-  const missing = looks.some(l => !(cur.sheet || {})[l.key]);
-  box.innerHTML = `<span class="dl">Before you generate: pick her ${esc(v.label.toLowerCase().split(' (')[0])}</span>
-    <p class="hint" style="margin:0;">${missing ? 'Pick the example first; this photo is made to match it.' : 'Sent with this photo and every photo built on it. Saved when you generate.'}</p>
-    <div class="fp-list">${lookPicker(looks)}${feats.map(featurePicker).join('')}</div>`;
+  box.innerHTML = `<span class="dl">Choose first: ${esc(missing.join(', '))}</span>
+    <p class="hint" style="margin:0;">This photo is made from that choice. <a href="#" onclick="go('intimate');return false;">Choose it in Intimate details</a>, then come back to generate.</p>`;
 }
 let refPop = false;
 function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; renderViewPanel(); }

@@ -321,23 +321,14 @@ VIEWS = {
              framing=('a macro close-up of her bare nipples and areolae, breast skin filling the frame, '
                       'nipple texture in sharp focus'),
              uses=('nipples',)),
-        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
-             parents=('body_front', 'breasts', 'nipples'), tier=2, mode='reference',
-             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
-             topless=('Topless full body, front', 'a full-body topless photo from head to feet wearing only plain panties, '
-                      'standing straight facing the camera, arms relaxed at her sides'),
-             uses=('body', 'breasts', 'nipples', 'pubic')),
-        dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
-             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',),
-             topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
-        dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from=None,
-             parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
+        dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
+             parents=('body_front',), tier=1, mode='reference', nocrop=True, zoom=True,
              body=('hips', 'thighs', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
                       'navel to the top of the thighs, pubic mound centred and in sharp focus'),
              uses=('pubic',)),
         dict(key='vulva_closed', label='Vagina, closed', group='nsfw', rating='explicit', required_from='explicit',
-             parents=('nude_front',), tier=2, mode='reference', zoom=True, body=('thighs',),
+             parents=('pubic', 'body_front'), tier=2, mode='reference', zoom=True, body=('thighs',),
              framing=('an explicit macro close-up of her vulva with labia closed, legs apart, the vulva centred and '
                       'filling the frame, inner thighs at the edges'),
              uses=('pubic', 'vulva')),
@@ -346,6 +337,15 @@ VIEWS = {
              framing=('an explicit macro close-up of her vulva with labia spread open by her fingers, the vulva centred '
                       'and filling the frame, only fingertips and inner thighs at the edges'),
              uses=('pubic', 'vulva')),
+        dict(key='nude_front', label='Nude full body, front', group='nsfw', rating='moderate', required_from='moderate',
+             parents=('body_front', 'breasts', 'nipples', 'pubic', 'vulva_closed'), tier=2, mode='reference',
+             framing='a full-body nude photo from head to feet, standing straight facing the camera, arms relaxed at her sides',
+             topless=('Topless full body, front', 'a full-body topless photo from head to feet wearing only plain panties, '
+                      'standing straight facing the camera, arms relaxed at her sides'),
+             uses=('body', 'breasts', 'nipples', 'pubic')),
+        dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
+             parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',),
+             topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
         dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from=None,
              parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
              framing=('an explicit macro close-up from behind while she bends forward, buttocks parted, her closed '
@@ -451,6 +451,15 @@ def parents(key, body_type='female'):
     return tuple(v['parents']) if v else ()
 
 
+def level_parents(v, level=None):
+    """The parents of a view that exist at `level`. The nude is built from the
+    pubic and vagina photos only where those are shown; at Topless it is not."""
+    ps = tuple(v['parents'])
+    if level is None:
+        return ps
+    return tuple(p for p in ps if (view(p) or {}).get('rating') is None or _rank(view(p)['rating']) <= _rank(level))
+
+
 def topo_order(body_type='female'):
     """View keys with every parent before its children."""
     done, out = set(), []
@@ -503,7 +512,7 @@ def catalogue(level, body_type='female'):
     groups = {g for g, lvl in GROUP_LEVEL.items() if _rank(lvl) <= _rank(level)}
     return {
         'level': level, 'levels': [{'key': k, 'label': l} for k, l in LEVELS],
-        'views': [dict(for_level(v, level), parents=list(v['parents']), uses=list(v['uses']), traits=traits(v['key'], body_type),
+        'views': [dict(for_level(v, level), parents=list(level_parents(v, level)), uses=list(v['uses']), traits=traits(v['key'], body_type),
                        required=bool(v['required_from'] and _rank(v['required_from']) <= _rank(level)))
                   for v in views_for_level(level, body_type)],
         'features': [{'key': k, 'label': lab, 'group': g, 'options': [o for o, _ in opts]}
@@ -878,15 +887,15 @@ def resolve_status(view, parents):
     return view['status']
 
 
-def resolve_all(rows, body_type='female'):
+def resolve_all(rows, body_type='female', level=None):
     """{key: display status} for rows keyed by view key. A view whose parent
-    has no row is locked."""
+    has no row is locked. Parents above `level` do not count."""
     out = {}
     for k in topo_order(body_type):
         if k not in rows:
             continue
         ps = [rows.get(p) or {'view_key': p, 'status': 'not_started', 'version': 0}
-              for p in parents(k, body_type)]
+              for p in level_parents(view(k, body_type), level)]
         out[k] = resolve_status(rows[k], ps)
     return out
 

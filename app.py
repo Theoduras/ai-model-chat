@@ -31425,7 +31425,7 @@ def _char_views_state(s, row):
                              else _char_view_fallback(s, row.id, cv.view_key))
     s.commit()
     dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
-    shown = CH.resolve_all(dicts, row.body_type)
+    shown = CH.resolve_all(dicts, row.body_type, row.nsfw_level)
     refs = {}
     ids = [cv.id for cv in rows.values()]
     for r in s.query(ViewReference).filter(ViewReference.view_id.in_(ids)).all() if ids else []:
@@ -32537,7 +32537,7 @@ def api_character_generate(char_id):
         rows, state = _char_views_state(s, row)
         shown = state[view_key]['display']
         if shown == 'locked':
-            waiting = [CH.view(d, row.body_type)['label'] for d in v['parents']
+            waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
                        if state.get(d, {}).get('status') != 'approved']
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if shown == 'generating':
@@ -32715,7 +32715,7 @@ def api_character_approve(char_id, img_id):
         canon = _char_canonicals(s, row.id)
         rows, state = _char_views_state(s, row)
         if state[img.view]['display'] == 'locked':
-            waiting = [CH.view(d, row.body_type)['label'] for d in v['parents']
+            waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
                        if state.get(d, {}).get('status') != 'approved']
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if img.view in CH.AGE_CHECKED_VIEWS:

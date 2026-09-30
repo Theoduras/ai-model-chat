@@ -46,13 +46,15 @@ def test_required_views():
     check('topless adds the back view', 'body_back' in top)
     check('back view walks right after the front, close-ups before the nude',
           [k for k in CH.required_views('explicit') if k != 'face_front'][:5]
-          == ['body_front', 'body_back', 'breasts', 'nipples', 'nude_front'])
+          == ['body_front', 'body_back', 'breasts', 'nipples', 'pubic'])
+    check('pubic and vagina come before the full nude',
+          all(CH.required_views('explicit').index(k) < CH.required_views('explicit').index('nude_front')
+              for k in ('pubic', 'vulva_closed')))
     check('breasts come from the dressed body, never cropped',
           CH.view('breasts')['parents'] == ('body_front',) and CH.view('breasts')['mode'] == 'reference')
     exp = set(CH.required_views('explicit'))
-    check('explicit requires the closed vulva', 'vulva_closed' in exp)
-    check('close-ups beyond the nude are optional extras',
-          not {'pubic', 'anus_closed', 'vulva_open', 'anus_open'} & exp)
+    check('explicit requires pubic and the closed vulva', {'pubic', 'vulva_closed'} <= exp)
+    check('the anus and open views are optional extras', not {'anus_closed', 'vulva_open', 'anus_open'} & exp)
     check('missing views', CH.missing_views('sfw', ['face_front']) == ['body_front'])
     check('catalogue cut to level', all(
         CH._rank(v['rating']) <= CH._rank('moderate') for v in CH.catalogue('moderate')['views']))
@@ -225,8 +227,10 @@ def test_view_tree():
         for p in v['parents']:
             check(f'{k} parent {p} exists', p in keys)
             check(f'{k} parent {p} comes first', order.index(p) < order.index(k))
+        for p in CH.level_parents(v, v['rating']):
             check(f'{k} parent {p} rated no higher', CH._rank(CH.view(p)['rating']) <= CH._rank(v['rating']))
-            if v['required_from']:
+        if v['required_from']:
+            for p in CH.level_parents(v, v['required_from']):
                 pr = CH.view(p)['required_from']
                 check(f'{k} parent {p} required no later',
                       pr and CH._rank(pr) <= CH._rank(v['required_from']))
@@ -368,6 +372,26 @@ def test_vulva_looks():
         CH.LOOK_FILES = saved
 
 
+def test_pubic_and_vulva_lead_to_the_nude():
+    def row(k, status, v=1):
+        return {'view_key': k, 'status': status, 'version': v, 'parent_versions': {}}
+    base = {k: row(k, 'approved') for k in ('face_front', 'body_front', 'breasts', 'nipples')}
+    for k in CH.topo_order():
+        base.setdefault(k, row(k, 'not_started', 0))
+    check('nude locked at explicit until pubic and vagina are approved',
+          CH.resolve_all(base, level='explicit')['nude_front'] == 'locked')
+    check('nude not held by them at topless', CH.resolve_all(base, level='moderate')['nude_front'] == 'not_started')
+    base['pubic'] = row('pubic', 'approved')
+    check('pubic alone is not enough', CH.resolve_all(base, level='explicit')['nude_front'] == 'locked')
+    base['vulva_closed'] = row('vulva_closed', 'approved')
+    check('pubic and vagina unlock the nude', CH.resolve_all(base, level='explicit')['nude_front'] == 'not_started')
+    check('the vagina is built from the pubic photo', 'pubic' in CH.view('vulva_closed')['parents'])
+    check('pubic is a reference view, not a crop of the nude', CH.view('pubic')['mode'] == 'reference')
+    check('catalogue hides explicit parents at topless',
+          next(v for v in CH.catalogue('moderate')['views'] if v['key'] == 'nude_front')['parents']
+          == ['body_front', 'breasts', 'nipples'])
+
+
 def test_face_angles_hang_off_the_face():
     check('every face angle is built from the face', all(
         CH.parents(k) == ('face_front',) for k in ('face_three_quarter', 'face_profile', 'face_smile')))
@@ -418,5 +442,6 @@ if __name__ == '__main__':
     test_presets()
     test_cup_in_body_photos()
     test_face_angles_hang_off_the_face()
+    test_pubic_and_vulva_lead_to_the_nude()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
