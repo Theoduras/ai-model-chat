@@ -18,7 +18,7 @@
       background:var(--surface, transparent); color:inherit; }
     .ud-upload-btn { padding:8px 12px; border-radius:8px; border:1px solid var(--border, #333);
       background:var(--surface, transparent); color:inherit; cursor:pointer; font-size:.9rem; }
-    .ud-upload-btn:hover { background:var(--surface); opacity: 0.8; }
+    .ud-upload-btn:hover { background:var(--hover, #222); }
     .ud-note { margin:0 0 14px; padding:10px 14px; border-radius:8px;
       border:1px solid var(--border, #333); font-size:.85rem; }
     .ud-grid { display:grid; grid-template-columns:repeat(auto-fill, minmax(190px, 1fr)); gap:14px; }
@@ -92,7 +92,6 @@ async function udPick(slug) {
   el('ud-grid').innerHTML = '';
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    // Allow both generated and uploaded sources for undressing
     const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && (m.source === 'generated' || m.source === 'uploaded'));
     el('ud-grid').innerHTML = rows.length ? rows.map(m => `
 ${udCard(m)}`).join('') : '<div class="ud-empty">No photos kept for this persona yet.</div>';
