@@ -91,17 +91,20 @@
     box.appendChild(yes); box.appendChild(no); g.appendChild(box); root.appendChild(g);
   }
 
-  // Square crop for an uploaded photo: drag to move, slider or wheel to zoom.
-  // cb gets a JPEG data URL of size x size, or nothing if the user cancels.
-  window.bioCrop = function (file, size, cb) {
-    var im = new Image(), V = 280, scale = 1, min = 1, x = 0, y = 0, drag = null;
+  // Crop for an uploaded photo: drag to move, slider or wheel to zoom. Square
+  // with a circle guide by default; ratio (width / height) makes it a frame,
+  // e.g. 9/16 for a phone-shaped background. cb gets a JPEG data URL `size`
+  // wide, or nothing if the user cancels.
+  window.bioCrop = function (file, size, cb, ratio) {
+    ratio = ratio || 1;
+    var im = new Image(), V = 280, H = 280, scale = 1, min = 1, x = 0, y = 0, drag = null;
     var ov = document.createElement('div');
     ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif';
     ov.innerHTML = '<div style="background:#1a1a1d;color:#fff;border-radius:18px;padding:18px;width:316px;max-width:100%;display:flex;flex-direction:column;gap:14px;align-items:center">' +
       '<b style="align-self:flex-start">Fit your photo</b>' +
-      '<div class="bc-v" style="width:' + V + 'px;height:' + V + 'px;max-width:100%;position:relative;overflow:hidden;border-radius:14px;background:#000;cursor:grab;touch-action:none">' +
+      '<div class="bc-v" style="width:' + (ratio < 1 ? 200 : V) + 'px;max-width:100%;position:relative;overflow:hidden;border-radius:14px;background:#000;cursor:grab;touch-action:none">' +
       '<img class="bc-i" alt="" style="position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none">' +
-      '<div style="position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.45);pointer-events:none"></div></div>' +
+      (ratio === 1 ? '<div style="position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.45);pointer-events:none"></div>' : '') + '</div>' +
       '<div style="display:flex;align-items:center;gap:10px;width:100%"><span>−</span><input class="bc-z" type="range" min="0" max="100" value="0" style="flex:1"><span>+</span></div>' +
       '<span style="font-size:12px;opacity:.7">Drag to move, zoom with the slider</span>' +
       '<div style="display:flex;gap:10px;align-self:stretch;justify-content:flex-end">' +
@@ -110,22 +113,22 @@
     var view = ov.querySelector('.bc-v'), img = ov.querySelector('.bc-i'), zoom = ov.querySelector('.bc-z');
     function clamp() {
       var w = im.width * scale, h = im.height * scale;
-      x = Math.min(0, Math.max(V - w, x)); y = Math.min(0, Math.max(V - h, y));
+      x = Math.min(0, Math.max(V - w, x)); y = Math.min(0, Math.max(H - h, y));
       img.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
     }
     function setScale(ns) {
       ns = Math.max(min, Math.min(min * 4, ns));
-      var cx = V / 2, cy = V / 2;
+      var cx = V / 2, cy = H / 2;
       x = cx - (cx - x) * ns / scale; y = cy - (cy - y) * ns / scale; scale = ns;
       zoom.value = Math.round((scale / min - 1) / 3 * 100); clamp();
     }
     function close(out) { document.body.removeChild(ov); URL.revokeObjectURL(im.src); cb(out); }
     im.onload = function () {
-      V = view.clientWidth;
-      view.style.height = V + 'px';
+      V = view.clientWidth; H = Math.round(V / ratio);
+      view.style.height = H + 'px';
       img.src = im.src;
-      min = scale = V / Math.min(im.width, im.height);
-      x = (V - im.width * scale) / 2; y = (V - im.height * scale) / 2; clamp();
+      min = scale = Math.max(V / im.width, H / im.height);
+      x = (V - im.width * scale) / 2; y = (H - im.height * scale) / 2; clamp();
     };
     view.onpointerdown = function (e) { drag = { px: e.clientX, py: e.clientY, x: x, y: y }; view.setPointerCapture(e.pointerId); view.style.cursor = 'grabbing'; };
     view.onpointermove = function (e) { if (!drag) return; x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; clamp(); };
@@ -135,8 +138,8 @@
     ov.querySelector('.bc-c').onclick = function () { close(null); };
     ov.querySelector('.bc-ok').onclick = function () {
       var c = document.createElement('canvas'), k = 1 / scale;
-      c.width = c.height = size;
-      c.getContext('2d').drawImage(im, -x * k, -y * k, V * k, V * k, 0, 0, size, size);
+      c.width = size; c.height = Math.round(size / ratio);
+      c.getContext('2d').drawImage(im, -x * k, -y * k, V * k, H * k, 0, 0, c.width, c.height);
       close(c.toDataURL('image/jpeg', 0.88));
     };
     document.body.appendChild(ov);
