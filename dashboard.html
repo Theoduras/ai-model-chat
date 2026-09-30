@@ -207,7 +207,7 @@
           <svg class="sb-ic-chat" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" width="16" height="16" aria-hidden="true"><path d="M4 5.5A2.5 2.5 0 0 1 6.5 3h11A2.5 2.5 0 0 1 20 5.5v8A2.5 2.5 0 0 1 17.5 16H10l-4.5 4v-4H6.5A2.5 2.5 0 0 1 4 13.5v-8Z" stroke-linejoin="round"/></svg>
           <span>Chat</span>
         </button>
-        <button type="button" class="sb-item" data-view="/embed-setup" data-sub-only data-search="link in bio linktree share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
+        <button type="button" class="sb-item" data-view="/embed-setup" data-search="link in bio linktree share link embed widget snippet chat bubble" onclick="openEmbedWidget(this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16" aria-hidden="true"><path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1" stroke-linecap="round" stroke-linejoin="round"/></svg>
           <span>Link in bio</span>
         </button>
@@ -815,6 +815,11 @@ async function init() {
   // restored view is known, so no intermediate screen is ever shown.
   if (!restoreView()) showPersonaBrowser();
   maybeStartTour();
+  // A page built on /free-link-in-bio before signing up: publish it now.
+  try {
+    if (JSON.parse(localStorage.getItem('bio_draft') || 'null')?.config)
+      openEmbedded('/embed-setup?persona=me&draft=1', document.querySelector('[data-view="/embed-setup"]'));
+  } catch (e) {}
 }
 
 function applyConnState(configured, authMode, masked) {
@@ -1418,13 +1423,12 @@ function openPlanner(navEl) {
 }
 
 function openEmbedWidget(navEl) {
-  if (needsPersona()) return;
   const slug = currentSlug;
   openEmbedded('/embed-setup' + (slug ? '?persona=' + encodeURIComponent(slug) : ''), navEl);
 }
 
 // Tools that read a persona; the account, team and admin pages do not.
-const PERSONA_PAGES = ['/chat', '/planner', '/embed-setup'];
+const PERSONA_PAGES = ['/chat', '/planner'];
 
 function openEmbedded(url, navEl) {
   if (PERSONA_PAGES.indexOf(url.split('?')[0]) !== -1 && needsPersona()) return;

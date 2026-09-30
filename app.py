@@ -2339,7 +2339,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # The chatbot side of the product, for plans without the `chatbot` capability
 # (Free is content creation only). These are not in _PAID_* because Demo, which
 # has the capability, must keep reaching them as it always has.
-_CHATBOT_PREFIXES = ('/planner', '/embed-setup', '/api/bio', '/api/growth', '/discord',
+_CHATBOT_PREFIXES = ('/planner', '/api/growth', '/discord',
                      '/instagram', '/tiktok', '/reddit', '/api/discord',
                      '/api/instagram', '/api/tiktok', '/api/reddit')
 _PERSONA_SUB_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)(?:/|$)')
@@ -7649,7 +7649,8 @@ def _bio_clean(cfg, slug):
     out['socials'] = socials
     blocks, seen = [], set()
     for b in (cfg.get('blocks') or [])[:60]:
-        if not isinstance(b, dict) or b.get('type') not in ('chat', 'link', 'header', 'text'):
+        if not isinstance(b, dict) or b.get('type') not in ('chat', 'link', 'header', 'text') \
+                or (b.get('type') == 'chat' and slug.startswith('acct-')):
             continue
         bid = re.sub(r'[^a-z0-9]', '', str(b.get('id') or '').lower())[:12] or secrets.token_hex(4)
         if bid in seen:
@@ -7682,12 +7683,20 @@ def _bio_clean(cfg, slug):
     return out
 
 
+def _bio_name(slug):
+    if slug.startswith('acct-'):
+        user = _current_user() or {}
+        return user.get('name') or (user.get('email') or '').split('@')[0] or 'me'
+    return load_persona_config(slug).get('name') or slug
+
+
 def _bio_default(slug):
-    pc = load_persona_config(slug)
-    return {'name': pc.get('name') or slug, 'bio': '', 'avatar': None, 'gate': 'off',
-            'socials': [], 'theme': dict(_BIO_DEFAULT_THEME),
-            'blocks': [{'id': 'chat', 'type': 'chat', 'title': 'Talk to me privately',
-                        'spotlight': True, 'adult': False, 'thumb': None, 'hidden': False}]}
+    # An account page has no persona behind it, so it has no chat to open.
+    chat = [] if slug.startswith('acct-') else [
+        {'id': 'chat', 'type': 'chat', 'title': 'Talk to me privately',
+         'spotlight': True, 'adult': False, 'thumb': None, 'hidden': False}]
+    return {'name': _bio_name(slug), 'bio': '', 'avatar': None, 'gate': 'off',
+            'socials': [], 'theme': dict(_BIO_DEFAULT_THEME), 'blocks': chat}
 
 
 def _bio_row(s, slug, create=False):
@@ -7695,7 +7704,7 @@ def _bio_row(s, slug, create=False):
     row = s.query(BioPage).filter(BioPage.slug == slug).first()
     if row or not create:
         return row
-    base = re.sub(r'[^a-z0-9_-]', '', (load_persona_config(slug).get('name') or slug).lower().replace(' ', '-'))[:24].strip('-_') or slug[:24].strip('-_')
+    base = re.sub(r'[^a-z0-9_-]', '', _bio_name(slug).lower().replace(' ', '-'))[:24].strip('-_') or slug[:24].strip('-_')
     base = base if len(base) >= 3 else (base + 'xxx')[:3]
     handle, n = base, 1
     while _bio_handle_error(handle, slug):
@@ -7715,7 +7724,8 @@ def _bio_public(row):
         if not i:
             return None
         return i['data'] if i['src'] == 'upload' else f'/api/personas/{row.slug}/media/{i["id"]}/image'
-    cfg['avatar_url'] = img(cfg.get('avatar')) or f'/api/personas/{row.slug}/avatar'
+    cfg['avatar_url'] = img(cfg.get('avatar')) or (
+        None if row.slug.startswith('acct-') else f'/api/personas/{row.slug}/avatar')
     cfg['theme']['bg_image_url'] = img(cfg['theme'].get('bg_image'))
     blocks = []
     for b in cfg.get('blocks', []):
@@ -7867,16 +7877,23 @@ def bio_click(handle, bid):
 
 
 def _bio_access(slug):
+    """(real slug, None) or (None, error response). 'me' is the caller's own
+    account page: every active plan has one, Free included, because Free has no
+    persona to hang a page on."""
     user = _current_user()
-    if not re.match(r'^[a-z0-9_-]+$', slug or '') or not _can_edit_persona(slug, user) \
-            or slug not in _all_persona_slugs():
-        return jsonify({'error': 'Persona not found'}), 404
-    return None
+    if not user or not _user_is_active(user):
+        return None, (jsonify({'error': 'Sign in required'}), 401)
+    if slug == 'me':
+        return 'acct-' + (user.get('workspace_id') or user['id']), None
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or slug.startswith('acct-') \
+            or not _can_edit_persona(slug, user) or slug not in _all_persona_slugs():
+        return None, (jsonify({'error': 'Persona not found'}), 404)
+    return slug, None
 
 
 @app.route('/api/bio/<slug>', methods=['GET'])
 def api_bio_get(slug):
-    denied = _bio_access(slug)
+    slug, denied = _bio_access(slug)
     if denied:
         return denied
     s = _db_session()
@@ -7893,7 +7910,7 @@ def api_bio_get(slug):
 
 @app.route('/api/bio/<slug>', methods=['POST'])
 def api_bio_save(slug):
-    denied = _bio_access(slug)
+    slug, denied = _bio_access(slug)
     if denied:
         return denied
     body = request.get_json(silent=True) or {}
@@ -7919,9 +7936,17 @@ def api_bio_save(slug):
     return jsonify({'ok': True, 'handle': handle, 'config': cfg})
 
 
+@app.route('/api/bio-handle')
+def api_bio_handle_public():
+    """The free tool's availability check. Signed out, so it only ever says
+    whether a name is free, never whose it is."""
+    err = _bio_handle_error((request.args.get('h') or '').strip().lower(), None)
+    return jsonify({'ok': not err, 'error': err})
+
+
 @app.route('/api/bio/<slug>/handle')
 def api_bio_handle(slug):
-    denied = _bio_access(slug)
+    slug, denied = _bio_access(slug)
     if denied:
         return denied
     handle = (request.args.get('h') or '').strip().lower()

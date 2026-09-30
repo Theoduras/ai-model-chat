@@ -1,0 +1,175 @@
+{% extends "tool.html" %}
+{% block style %}
+.wrap{max-width:1080px}
+.lb{display:grid;grid-template-columns:minmax(0,1fr) 330px;gap:28px;align-items:start}
+.lb .panel{margin-top:30px}
+.handle{display:flex;align-items:center;margin-top:7px;border:1px solid var(--field-border);border-radius:10px;background:var(--field);overflow:hidden}
+.handle span{padding-left:13px;color:var(--text-dim);font-size:14px;white-space:nowrap}
+.handle input{margin:0;border:0;background:transparent;padding-left:2px}
+.handle.good{border-color:#22c55e}.handle.bad{border-color:#ef4444}
+.msg{font-size:12px;margin-top:6px;color:var(--text-dim)}.msg.good{color:#22c55e}.msg.bad{color:#ef4444}
+.nets{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:8px;margin-top:10px}
+.nets button{aspect-ratio:1;border-radius:50%;border:2px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:transform .12s,box-shadow .12s}
+.nets button:hover,.nets button:focus-visible{transform:translateY(-2px) scale(1.08);box-shadow:0 6px 14px -6px rgba(0,0,0,.55)}
+.nets button.on{border-color:var(--text)}
+.nets svg{width:20px;height:20px}
+.soc,.lnk{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:8px}
+.soc .in{display:flex;align-items:center;border:1px solid var(--field-border);border-radius:10px;background:var(--field)}
+.soc .in span{padding-left:12px;color:var(--text-dim);font-size:13px;white-space:nowrap}
+.soc input,.lnk input{margin:0}.soc .in input{border:0;background:transparent;padding-left:2px}
+.lnk{grid-template-columns:1fr 1.3fr auto}
+.x{background:none;border:0;color:var(--text-dim);cursor:pointer;font-size:16px;padding:6px}
+.themes{display:flex;gap:10px;margin-top:10px;flex-wrap:wrap}
+.themes button{width:64px;height:64px;border-radius:14px;border:2px solid transparent;cursor:pointer;font-size:11px;font-weight:700;display:flex;align-items:flex-end;justify-content:center;padding-bottom:6px}
+.themes button.on{border-color:var(--accent)}
+.av{display:flex;align-items:center;gap:12px;margin-top:8px}
+.av img{width:56px;height:56px;border-radius:50%;object-fit:cover;background:var(--field)}
+.av label{margin:0}
+.phone{position:sticky;top:90px;width:330px;height:660px;border-radius:44px;padding:10px;background:#050406;box-shadow:0 20px 50px -20px #000,inset 0 0 0 2px #2b2530}
+.screen{height:100%;border-radius:35px;overflow-y:auto;scrollbar-width:none}
+.screen>.bio{min-height:100%}
+.save{width:100%;justify-content:center}
+@media (max-width:900px){.lb{grid-template-columns:1fr}.phone{position:static;margin:0 auto;width:100%;max-width:330px}.lnk{grid-template-columns:1fr auto}.lnk input:nth-child(2){grid-column:1}}
+{% endblock %}
+{% block sub %}Build your own link-in-bio page in a minute: your photo, your socials, your links, one
+  short link for your Instagram, TikTok or X bio. Free, and no Linktree branding.{% endblock %}
+{% block tool %}
+<div class="lb">
+  <div>
+    <section class="panel plain">
+      <h2>Your link</h2>
+      <div class="handle" id="hbox"><span>velvt.online/</span><input id="handle" maxlength="30" placeholder="yourname" autocomplete="off" spellcheck="false"></div>
+      <div class="msg" id="hmsg">Letters, numbers, - or _.</div>
+      <label for="name">Name</label><input id="name" maxlength="60" placeholder="Mia Rose">
+      <label for="bio">Short bio <span class="help">Optional.</span></label><input id="bio" maxlength="300" placeholder="Yoga at 7, coffee at 8, all yours after that">
+      <label>Photo</label>
+      <div class="av"><img id="avimg" alt=""><label class="btn ghost" style="margin:0">Upload<input type="file" accept="image/*" hidden id="avfile"></label></div>
+    </section>
+    <section class="panel plain">
+      <h2>Socials</h2>
+      <p>Tap a platform and type your username.</p>
+      <div class="nets" id="nets"></div>
+      <div id="socs"></div>
+    </section>
+    <section class="panel plain">
+      <h2>Buttons</h2>
+      <div id="links"></div>
+      <button class="btn ghost" type="button" id="addlink">+ Add button</button>
+    </section>
+    <section class="panel plain">
+      <h2>Look</h2>
+      <div class="themes" id="themes"></div>
+      <button class="btn save" type="button" id="save">Save &amp; publish my page</button>
+      <div class="msg" id="smsg">Free account needed to publish. Takes 30 seconds.</div>
+    </section>
+  </div>
+  <div class="phone"><div class="screen" id="preview"></div></div>
+</div>
+{% endblock %}
+{% block cta %}
+<h2>Want her to chat back too?</h2>
+<p>Velvetfunneler.com adds a "Chat with me" button to your page: an AI persona in your voice that replies
+  to every fan, around the clock, and offers your paid content at the right moment.</p>
+{% endblock %}
+{% block script %}
+<script src="/js/bio-render.js"></script>
+<script>
+const NETS = window.BIO_NETS;
+const THEMES = {
+  peach: { label: 'Peach', bg_type: 'gradient', bg1: '#ffe9dd', bg2: '#f2c7e3', text: '#4a2733', btn_bg: '#fff9f6', btn_text: '#4a2733', accent: '#8d3f5c', btn_style: 'fill', radius: 'round', avatar_shape: 'rounded', font_title: 'Caveat', font_body: 'DM Sans' },
+  velvet: { label: 'Night', bg_type: 'gradient', bg1: '#4a1530', bg2: '#0e070b', text: '#f7e8ef', btn_bg: '#ffffff', btn_text: '#fbeef3', accent: '#e0457e', btn_style: 'glass', radius: 'pill', avatar_shape: 'circle', font_title: 'Fraunces', font_body: 'DM Sans' },
+  poster: { label: 'Poster', bg_type: 'solid', bg1: '#f2ff5b', bg2: '#f2ff5b', text: '#111111', btn_bg: '#ffffff', btn_text: '#111111', accent: '#ff3d7f', btn_style: 'shadow', radius: 'square', avatar_shape: 'cover', font_title: 'Syne', font_body: 'DM Sans' },
+  noir: { label: 'Noir', bg_type: 'solid', bg1: '#0d0d0f', bg2: '#0d0d0f', text: '#f2f2f2', btn_bg: '#f2f2f2', btn_text: '#f2f2f2', accent: '#c9a45c', btn_style: 'outline', radius: 'round', avatar_shape: 'circle', font_title: 'Playfair Display', font_body: 'Inter' }
+};
+const S = { handle: '', name: '', bio: '', avatar: null, socials: [], links: [{ title: 'My exclusive page', url: '' }], theme: 'peach' };
+try { Object.assign(S, JSON.parse(localStorage.getItem('bio_draft') || '{}')); } catch (e) {}
+
+function userUrl(so) {
+  const n = NETS[so.net]; let u = (so.user || '').trim();
+  if (!n || !u) return '';
+  if (n.kind === 'url') return /^https?:\/\//i.test(u) ? u : 'https://' + u;
+  if (n.kind === 'email') return /^[^@\s\/]+@[^@\s\/]+\.[a-z]{2,}$/i.test(u) ? 'mailto:' + u : '';
+  u = u.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('?')[0].split('/').pop().replace(/^@/, '');
+  if (n.kind === 'phone') u = u.replace(/[^0-9]/g, '');
+  return /^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,60}$/.test(u) ? n.url.replace('{u}', u) : '';
+}
+function config() {
+  return {
+    name: S.name || 'Your name', bio: S.bio, avatar: S.avatar ? { src: 'upload', data: S.avatar } : null, gate: 'off',
+    socials: S.socials.map(so => ({ net: so.net, user: so.user, url: userUrl(so) })),
+    blocks: S.links.filter(l => l.title || l.url).map((l, i) => ({ id: 'l' + i, type: 'link', title: l.title, url: /^https?:\/\//.test(l.url) || !l.url ? l.url : 'https://' + l.url, hidden: false, spotlight: i === 0, adult: false, thumb: null })),
+    theme: Object.assign({ preset: S.theme, socials_pos: 'top', icon_color: 'brand', bg_image: null }, THEMES[S.theme])
+  };
+}
+function render() {
+  const c = config();
+  c.avatar_url = S.avatar || 'data:image/svg+xml;utf8,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 96 96"><rect width="96" height="96" fill="#d9c2cc"/><circle cx="48" cy="38" r="17" fill="#fff"/><path d="M16 92c4-20 18-28 32-28s28 8 32 28z" fill="#fff"/></svg>');
+  c.blocks.forEach(b => { b.href = '#'; });
+  renderBio($('preview'), c, { preview: true });
+  $('avimg').src = c.avatar_url;
+  try { localStorage.setItem('bio_draft', JSON.stringify(S)); } catch (e) {}
+}
+function lg(k) { const n = NETS[k], dark = parseInt(n.color.slice(1, 3), 16) * .299 + parseInt(n.color.slice(3, 5), 16) * .587 + parseInt(n.color.slice(5, 7), 16) * .114 > 158; return 'background:' + n.color + ';color:' + (dark ? '#111' : '#fff'); }
+function drawNets() {
+  $('nets').innerHTML = Object.keys(NETS).map(k => '<button type="button" title="' + esc(NETS[k].label) + '" data-k="' + k + '" style="' + lg(k) + '"' + (S.socials.some(s => s.net === k) ? ' class="on"' : '') + '>' + bioIcon(k) + '</button>').join('');
+  $('nets').querySelectorAll('button').forEach(b => b.onclick = () => {
+    if (!S.socials.some(s => s.net === b.dataset.k)) S.socials.push({ net: b.dataset.k, user: '' });
+    drawSocs(); const i = S.socials.findIndex(s => s.net === b.dataset.k); $('socs').querySelectorAll('input')[i].focus();
+  });
+}
+function drawSocs() {
+  $('socs').innerHTML = S.socials.map(so => { const n = NETS[so.net]; const pre = n.kind === 'user' ? n.url.replace('https://', '').replace('{u}', '') : '';
+    return '<div class="soc"><div class="in">' + (pre ? '<span>' + esc(pre) + '</span>' : '') + '<input value="' + esc(so.user) + '" placeholder="' + (n.kind === 'user' ? 'username' : n.kind === 'email' ? 'you@example.com' : n.kind === 'phone' ? 'phone with country code' : 'https://') + '" aria-label="' + esc(n.label) + '"></div><button class="x" type="button" aria-label="Remove">✕</button></div>'; }).join('');
+  $('socs').querySelectorAll('.soc').forEach((row, i) => {
+    row.querySelector('input').oninput = e => { S.socials[i].user = e.target.value; render(); };
+    row.querySelector('.x').onclick = () => { S.socials.splice(i, 1); drawSocs(); render(); };
+  });
+  drawNets(); render();
+}
+function drawLinks() {
+  $('links').innerHTML = S.links.map(l => '<div class="lnk"><input placeholder="Button text" maxlength="80" value="' + esc(l.title) + '"><input placeholder="https://" maxlength="1000" value="' + esc(l.url) + '"><button class="x" type="button" aria-label="Remove">✕</button></div>').join('');
+  $('links').querySelectorAll('.lnk').forEach((row, i) => {
+    const [t, u] = row.querySelectorAll('input');
+    t.oninput = () => { S.links[i].title = t.value; render(); };
+    u.oninput = () => { S.links[i].url = u.value; render(); };
+    row.querySelector('.x').onclick = () => { S.links.splice(i, 1); drawLinks(); render(); };
+  });
+}
+function drawThemes() {
+  $('themes').innerHTML = Object.keys(THEMES).map(k => { const t = THEMES[k];
+    return '<button type="button" data-k="' + k + '" style="background:' + (t.bg_type === 'gradient' ? 'linear-gradient(180deg,' + t.bg1 + ',' + t.bg2 + ')' : t.bg1) + ';color:' + t.text + '"' + (S.theme === k ? ' class="on"' : '') + '>' + t.label + '</button>'; }).join('');
+  $('themes').querySelectorAll('button').forEach(b => b.onclick = () => { S.theme = b.dataset.k; drawThemes(); render(); });
+}
+let ht, handleOk = false;
+function checkHandle() {
+  const h = $('handle').value.trim().toLowerCase(); S.handle = h; render();
+  clearTimeout(ht); $('hbox').className = 'handle';
+  if (!h) { $('hmsg').className = 'msg'; $('hmsg').textContent = 'Letters, numbers, - or _.'; handleOk = false; return; }
+  ht = setTimeout(async () => {
+    let r = { ok: false, error: 'Could not check right now.' };
+    try { r = await (await fetch('/api/bio-handle?h=' + encodeURIComponent(h))).json(); } catch (e) {}
+    handleOk = r.ok;
+    $('hbox').className = 'handle ' + (r.ok ? 'good' : 'bad');
+    $('hmsg').className = 'msg ' + (r.ok ? 'good' : 'bad');
+    $('hmsg').textContent = r.ok ? '✓ velvt.online/' + h + ' is free' : r.error;
+  }, 350);
+}
+$('handle').value = S.handle; $('name').value = S.name; $('bio').value = S.bio;
+$('handle').oninput = checkHandle;
+$('name').oninput = e => { S.name = e.target.value; if (!S.handle || S._auto) { S._auto = true; $('handle').value = e.target.value.toLowerCase().replace(/[^a-z0-9_-]+/g, '').slice(0, 30); checkHandle(); } render(); };
+$('bio').oninput = e => { S.bio = e.target.value; render(); };
+$('handle').addEventListener('input', () => { S._auto = false; });
+$('addlink').onclick = () => { S.links.push({ title: '', url: '' }); drawLinks(); $('links').querySelector('.lnk:last-child input').focus(); };
+$('avfile').onchange = e => {
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  bioCrop(f, 480, d => { if (d) { S.avatar = d; render(); } });
+};
+$('save').onclick = () => {
+  if (!handleOk) { $('smsg').className = 'msg bad'; $('smsg').textContent = 'Pick a link name that is free first.'; $('handle').focus(); return; }
+  S.config = config(); render();
+  location.href = SIGNUP;
+};
+drawSocs(); drawLinks(); drawThemes();
+if (S.handle) checkHandle();
+</script>
+{% endblock %}

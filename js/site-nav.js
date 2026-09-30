@@ -92,7 +92,8 @@
     ] },
     { group: 'Tools', items: [
       { href: '/ai-content-planner', label: 'AI content planner' },
-      { href: '/ai-image-generator', label: 'AI image generator', soon: true },
+      { href: '/ai-image-generator', label: 'AI image generator' },
+      { href: '/free-link-in-bio', label: 'Free link in bio' },
       { href: '/ai-chatter-earnings-calculator', label: 'Earnings calculator' },
       { href: '/chatter-cost-calculator', label: 'Chatter cost calculator' },
       { href: '/ppv-caption-generator', label: 'PPV caption generator' },

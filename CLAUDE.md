@@ -115,7 +115,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /{tool-slug}` | — | Free tools (`free_tools.TOOLS`); each CTA goes through its own `/signup-tool-…` link |
 | `POST /api/tools/generate` | JSON | Public PPV-caption / DM-opener generator (whitelisted input, rate-limited per IP) |
 | `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL; `/c/{handle}` is her chat without site nav or support bubble |
-| `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`) |
+| `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`). `me` is the caller's account page (`acct-<workspace>`), no chat button |
+| `GET /free-link-in-bio` | — | Free tool: build a bio page signed out; Save keeps it in `localStorage.bio_draft`, signup, and the dashboard publishes it via `/embed-setup?persona=me&draft=1` |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---
@@ -219,7 +220,7 @@ Stay completely in character. Never mention being an AI.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
   they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
 - **Free is the content-creation plan: characters, the studio and token
-  top-ups, nothing chatbot.** Its `chatbot` capability is False (True on every
+  top-ups and one link-in-bio page on the account, nothing chatbot.** Its `chatbot` capability is False (True on every
   other plan, admins and grandfathered accounts included) and `personas` is 0.
   `_require_entitlement` refuses chatbot work for it — persona writes, the
   planner, share link and the Discord/Instagram/TikTok/Reddit/growth surfaces in

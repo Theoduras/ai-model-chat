@@ -39,7 +39,7 @@
     '.bio-name{margin:4px 0 0;font-size:30px;line-height:1.1;text-align:center;word-break:break-word}' +
     '.bio-text{margin:0;text-align:center;font-size:15px;max-width:40ch;opacity:.85;white-space:pre-line}' +
     '.bio-soc{display:flex;flex-wrap:wrap;gap:16px;justify-content:center;margin:2px 0 6px}' +
-    '.bio-soc a{color:inherit;display:flex;opacity:.9}.bio-soc a:hover{opacity:1;transform:translateY(-1px)}.bio-soc svg{width:24px;height:24px}' +
+    '.bio-soc a{color:inherit;display:flex;opacity:.9;transition:transform .15s,opacity .15s}.bio-soc a:hover,.bio-soc a:focus-visible{opacity:1;transform:translateY(-2px) scale(1.1)}.bio-soc svg{width:24px;height:24px}' +
     '.bio-badge{width:38px;height:38px;border-radius:50%;display:flex;align-items:center;justify-content:center}.bio-soc .bio-badge svg{width:20px;height:20px}' +
     '.bio-bic{position:absolute;left:16px;top:50%;transform:translateY(-50%);display:flex}.bio-bic svg{width:24px;height:24px}' +
     '.bio-btn{width:100%;min-height:56px;display:flex;align-items:center;justify-content:center;gap:10px;padding:8px 52px;position:relative;text-decoration:none;font-weight:600;font-size:15.5px;text-align:center;border-radius:var(--bio-r);cursor:pointer;transition:transform .15s;border:0;font-family:inherit;background:var(--bio-bb);color:var(--bio-bt)}' +
@@ -90,6 +90,61 @@
     no.onclick = function () { g.remove(); if (!onYes) history.length > 1 ? history.back() : (location.href = 'about:blank'); };
     box.appendChild(yes); box.appendChild(no); g.appendChild(box); root.appendChild(g);
   }
+
+  // Crop for an uploaded photo: drag to move, slider or wheel to zoom. Square
+  // with a circle guide by default; ratio (width / height) makes it a frame,
+  // e.g. 9/16 for a phone-shaped background. cb gets a JPEG data URL `size`
+  // wide, or nothing if the user cancels.
+  window.bioCrop = function (file, size, cb, ratio) {
+    ratio = ratio || 1;
+    var im = new Image(), V = 280, H = 280, scale = 1, min = 1, x = 0, y = 0, drag = null;
+    var ov = document.createElement('div');
+    ov.style.cssText = 'position:fixed;inset:0;z-index:9999;background:rgba(0,0,0,.72);display:flex;align-items:center;justify-content:center;padding:16px;font-family:system-ui,sans-serif';
+    ov.innerHTML = '<div style="background:#1a1a1d;color:#fff;border-radius:18px;padding:18px;width:316px;max-width:100%;display:flex;flex-direction:column;gap:14px;align-items:center">' +
+      '<b style="align-self:flex-start">Fit your photo</b>' +
+      '<div class="bc-v" style="width:' + (ratio < 1 ? 200 : V) + 'px;max-width:100%;position:relative;overflow:hidden;border-radius:14px;background:#000;cursor:grab;touch-action:none">' +
+      '<img class="bc-i" alt="" style="position:absolute;left:0;top:0;transform-origin:0 0;user-select:none;-webkit-user-drag:none;max-width:none">' +
+      (ratio === 1 ? '<div style="position:absolute;inset:0;border-radius:50%;box-shadow:0 0 0 999px rgba(0,0,0,.45);pointer-events:none"></div>' : '') + '</div>' +
+      '<div style="display:flex;align-items:center;gap:10px;width:100%"><span>−</span><input class="bc-z" type="range" min="0" max="100" value="0" style="flex:1"><span>+</span></div>' +
+      '<span style="font-size:12px;opacity:.7">Drag to move, zoom with the slider</span>' +
+      '<div style="display:flex;gap:10px;align-self:stretch;justify-content:flex-end">' +
+      '<button type="button" class="bc-c" style="background:none;border:1px solid #555;color:#fff;border-radius:999px;padding:9px 16px;cursor:pointer">Cancel</button>' +
+      '<button type="button" class="bc-ok" style="background:#fff;border:0;color:#111;border-radius:999px;padding:9px 18px;font-weight:700;cursor:pointer">Use photo</button></div></div>';
+    var view = ov.querySelector('.bc-v'), img = ov.querySelector('.bc-i'), zoom = ov.querySelector('.bc-z');
+    function clamp() {
+      var w = im.width * scale, h = im.height * scale;
+      x = Math.min(0, Math.max(V - w, x)); y = Math.min(0, Math.max(H - h, y));
+      img.style.transform = 'translate(' + x + 'px,' + y + 'px) scale(' + scale + ')';
+    }
+    function setScale(ns) {
+      ns = Math.max(min, Math.min(min * 4, ns));
+      var cx = V / 2, cy = H / 2;
+      x = cx - (cx - x) * ns / scale; y = cy - (cy - y) * ns / scale; scale = ns;
+      zoom.value = Math.round((scale / min - 1) / 3 * 100); clamp();
+    }
+    function close(out) { document.body.removeChild(ov); URL.revokeObjectURL(im.src); cb(out); }
+    im.onload = function () {
+      V = view.clientWidth; H = Math.round(V / ratio);
+      view.style.height = H + 'px';
+      img.src = im.src;
+      min = scale = Math.max(V / im.width, H / im.height);
+      x = (V - im.width * scale) / 2; y = (H - im.height * scale) / 2; clamp();
+    };
+    view.onpointerdown = function (e) { drag = { px: e.clientX, py: e.clientY, x: x, y: y }; view.setPointerCapture(e.pointerId); view.style.cursor = 'grabbing'; };
+    view.onpointermove = function (e) { if (!drag) return; x = drag.x + e.clientX - drag.px; y = drag.y + e.clientY - drag.py; clamp(); };
+    view.onpointerup = view.onpointercancel = function () { drag = null; view.style.cursor = 'grab'; };
+    view.onwheel = function (e) { e.preventDefault(); setScale(scale * (e.deltaY < 0 ? 1.08 : 0.93)); };
+    zoom.oninput = function () { setScale(min * (1 + zoom.value / 100 * 3)); };
+    ov.querySelector('.bc-c').onclick = function () { close(null); };
+    ov.querySelector('.bc-ok').onclick = function () {
+      var c = document.createElement('canvas'), k = 1 / scale;
+      c.width = size; c.height = Math.round(size / ratio);
+      c.getContext('2d').drawImage(im, -x * k, -y * k, V * k, H * k, 0, 0, c.width, c.height);
+      close(c.toDataURL('image/jpeg', 0.88));
+    };
+    document.body.appendChild(ov);
+    im.src = URL.createObjectURL(file);
+  };
 
   window.renderBio = function (mount, cfg, opts) {
     opts = opts || {};
