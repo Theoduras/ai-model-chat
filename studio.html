@@ -3348,7 +3348,7 @@ function renderVault() {
       : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
     return [v.id, `
       <div class="vault-item${vaultPicked.has(v.id) ? ' selected' : ''}" data-id="${v.id}"
-           data-lb="${v.thumb}" data-kind="${v.kind}"${!clip && v.source === 'generated' ? ` data-undress="${v.id}"` : ''} onclick="vaultClick(this)">
+           data-lb="${v.thumb}" data-kind="${v.kind}"${!clip ? ` data-undress="${v.id}"` : ''} onclick="vaultClick(this)">
         ${thumb}${fv}
       </div>`];
   }), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
