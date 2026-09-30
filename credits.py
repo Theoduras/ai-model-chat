@@ -221,10 +221,10 @@ def cost_table():
 # are deliberately absent everywhere in this file: they are moderated and cannot
 # serve this feature, so nothing may offer them for an NSFW slot.
 MODEL_LABELS = {
-    'seedream-4-5': 'Seedream 4.5',
+    'seedream-4-5': 'Creative Pro',
     'seedream-5-pro': 'Seedream 5.0 Pro',
-    'nano-banana-pro': 'Nano Banana Pro',
-    'nano-banana-2': 'Nano Banana 2',
+    'nano-banana-pro': 'Ultra Realism',
+    'nano-banana-2': 'True Life',
     'wan-2-5': 'Wan 2.5',
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
@@ -239,6 +239,13 @@ MODEL_LABELS = {
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
 }
+MODEL_LABELS_NSFW = {'seedream-4-5': 'Creative Pro 18+ Full LoRA'}
+MODEL_TAGLINES = {
+    'seedream-4-5': 'Bold ideas, brought to life.',
+    'nano-banana-2': 'Real moments, made in seconds.',
+    'nano-banana-pro': 'Indistinguishable from reality.',
+}
+MODEL_TAGLINES_NSFW = {'seedream-4-5': 'Your character. Every scene. No limits.'}
 
 # Which ratings each model actually serves, measured against the provider rather
 # than assumed. The picker filters on this: a model that would be moved to
@@ -673,6 +680,9 @@ def price_table():
         'video_max_seconds': VIDEO_MAX_SECONDS,
         'addons': ADDON_PRICES,
         'labels': MODEL_LABELS,
+        'labels_nsfw': MODEL_LABELS_NSFW,
+        'taglines': MODEL_TAGLINES,
+        'taglines_nsfw': MODEL_TAGLINES_NSFW,
         'ratings': {m: list(r) for m, r in MODEL_RATINGS.items()},
         'resolutions': list(RESOLUTIONS),
         'video_resolutions': list(VIDEO_RESOLUTIONS),

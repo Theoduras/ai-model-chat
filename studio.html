@@ -1455,14 +1455,18 @@ function renderModelChips() {
     renderImageAspects();
   }
   const res = (el('gen-res') || {}).value || genPrices.defaults.resolution;
+  const nsfw = want === 'nsfw';
+  const label = m => (nsfw && (genPrices.labels_nsfw || {})[m]) || genPrices.labels[m] || m;
+  const tag = m => (nsfw && (genPrices.taglines_nsfw || {})[m]) || (genPrices.taglines || {})[m] || '';
   box.innerHTML = keys.map(m => {
     const price = (genPrices.images[m] || {})[res];
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             onclick="pickModel('${m}')">${esc(genPrices.labels[m] || m)}
+             onclick="pickModel('${m}')">${esc(label(m))}
+             ${tag(m) ? `<small><i>${esc(tag(m))}</i></small>` : ''}
              <small>${price === undefined ? '' : price + ' tokens'}</small></button>`;
   }).join('') || '<span class="hint">No model serves that rating.</span>';
   if (note) {
-    const only = genPrices.labels[keys[0]] || keys[0];
+    const only = label(keys[0]);
     note.textContent = keys.length === 1
       ? `${only} is the only model that serves ${want === 'nsfw' ? 'explicit' : 'safe'} work.`
       : 'Prices are per photo. Holding her face costs nothing on top.';
