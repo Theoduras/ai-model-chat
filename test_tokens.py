@@ -529,10 +529,12 @@ def test_clip_library_and_places():
     IG = A.imagegen
     check('clips are stored outside the staging sweep',
           A.VIDEO_SOURCE_PREFIX.startswith('kept/'))
-    check('the animate model is gone',
-          all('p-video-animate' not in m for m in CR.JOB_MODELS.values())
-          and 'p-video-animate' not in CR.VIDEO_PRICES
-          and 'p-video-animate' not in IG.RUNWARE_VIDEO_MODELS)
+    check('P-Video-Animate is only the explicit motion-clip Animate',
+          IG.EXPLICIT_MOTION_MODEL == 'p-video-animate'
+          and [j for j, m in CR.JOB_MODELS.items() if 'p-video-animate' in m] == ['animate']
+          and 'p-video-animate' in CR.VIDEO_PRICES)
+    check('Wan 2.2 Animate, not in the catalogue, is offered nowhere',
+          all('wan-2-2-animate' not in m for m in CR.JOB_MODELS.values()))
     check('Omni is a swap and reel option, not the default',
           'kling-3-0-omni' in CR.JOB_MODELS['swap'] and CR.DEFAULT_SWAP_MODEL != 'kling-3-0-omni'
           and IG.ref_cap('kling-3-0-omni') == 4)

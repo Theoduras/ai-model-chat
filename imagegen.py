@@ -107,16 +107,21 @@ RUNWARE_VIDEO_MODELS = {
     'wan-3-0': os.getenv('RW_MODEL_WAN_30', 'alibaba:wan@3.0'),
     # Kling motion control: her one photo performs the uploaded clip.
     'kling-2-6-mc': os.getenv('RW_MODEL_KLING_26_MC', 'klingai:kling-video@2.6-pro'),
-    # Open weights on Runware's own GPUs: Alibaba's hosted Wan 2.7 runs a
-    # content filter over the input clip (DataInspectionFailed), this does not.
+    # Not in Runware's catalogue (modelSearch lists no Wan 2.2 at all): the id
+    # is refused, so it is priced for past jobs but no longer offered.
     'wan-2-2-animate': os.getenv('RW_MODEL_WAN22_ANIMATE', 'runware:200@8'),
+    # Her photo performs the uploaded clip. Explicit clips go here because
+    # Alibaba's hosted Wan 2.7 filters the input clip (DataInspectionFailed).
+    # It was dropped once for crashing the provider worker in its safety check;
+    # a crash fails the job and refunds it, so it is back for this one job.
+    'p-video-animate': os.getenv('RW_MODEL_VIDEO_ANIMATE', 'prunaai:p-video@animate'),
     'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
     # Video edit: the clip and up to four photos, addressed in the prompt as
     # @Image1.. Id and fields are from public docs, not the live catalogue.
     'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@o3-pro'),
 }
 KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
-EXPLICIT_MOTION_MODEL = 'wan-2-2-animate'
+EXPLICIT_MOTION_MODEL = 'p-video-animate'
 # The safe-work models that take her photos as `inputs.referenceImages` beside
 # a prompt, so a reel or an animate can carry her character on them.
 REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
@@ -164,14 +169,14 @@ VIDEO_JOBS = {
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
     'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc',
-                        'ml-face-swap', 'wan-2-2-animate', 'wan-2-7',
+                        'ml-face-swap', 'wan-2-7',
                         'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
     'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                           'wan-2-2-animate'),
+                           'p-video-animate'),
                 'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
@@ -276,6 +281,8 @@ MODEL_VIDEO_FIELDS = {
     # `inputs.video`, where Wan calls the same thing a reference video: one is
     # the subject of the edit, the other is something to take guidance from,
     # and the models are right to spell them differently.
+    'p-video-animate': {'shape': 'replace', 'in_source': 'referenceVideos',
+                        'in_refs': 'referenceImages'},
     'p-video-replace': {'shape': os.getenv('RW_REPLACE_SHAPE', 'replace'),
                         'in_source': os.getenv('RW_REPLACE_VIDEO_KEY', 'video'),
                         'in_refs': os.getenv('RW_REPLACE_REF_KEY',
@@ -302,6 +309,7 @@ MAX_VIDEO_REFERENCES = 30
 # the provider charges for it.
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
+    'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
 }
 
 
@@ -446,7 +454,7 @@ def takes_aspect(model_key):
 
 # Takes any size, so the clip's own shape is kept and scaled to the rung the
 # creator picked and paid for, rather than run at whatever the phone filmed.
-RUNG_SCALED_MODELS = ('wan-2-2-animate',)
+RUNG_SCALED_MODELS = ('wan-2-2-animate', 'p-video-animate')
 _RUNG_SHORT_SIDE = {'480p': 480, '720p': 720, '1080p': 1080}
 
 # Wan 2.7 takes a fixed set of sizes and refuses anything else outright, so a
@@ -509,6 +517,7 @@ MODEL_VIDEO_SECONDS = {
     'minimax-h3-fast': (4, 15),
     'wan-3-0': (2, 15),
     'kling-2-6-mc': (1, 60),
+    'p-video-animate': (1, 60),
     'kling-3-0-mc': (1, 60),
     'kling-3-0-omni': (3, 15),
 }
@@ -541,7 +550,7 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+MODEL_REF_CAP = {'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'p-video-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
                  'kling-3-0-omni': 4}
 
 # The studio offers a handful of her views, not thirty, so a model that takes
@@ -615,8 +624,9 @@ def video_size(model_key, width=0, height=0, resolution=None, aspect=None):
         # to a multiple of 16, because a phone crop is any width it likes --
         # 406 is a real one -- and an encoder takes macroblocks or nothing.
         if w > 0 and h > 0:
-            if model_key in RUNG_SCALED_MODELS and resolution in _RUNG_SHORT_SIDE:
-                k = _RUNG_SHORT_SIDE[resolution] / float(min(w, h))
+            rung = rung_for(model_key, resolution)
+            if model_key in RUNG_SCALED_MODELS and rung in _RUNG_SHORT_SIDE:
+                k = _RUNG_SHORT_SIDE[rung] / float(min(w, h))
                 w, h = w * k, h * k
             return _macroblock(w), _macroblock(h)
         return fallback
@@ -1306,8 +1316,8 @@ def build_swap_prompt(motion='', preserve=False, roles=None, place='',
 
 
 def build_animate_prompt(motion=''):
-    """Wan 2.2 Animate in animate mode: the photo is her, her outfit and the
-    place, and the clip lends only its movement. The swap wording said the
+    """An explicit Animate with a motion clip: the photo is her, her outfit
+    and the place, and the clip lends only its movement. The swap wording said the
     opposite -- keep the clip's clothes and background -- which this mode
     does not do."""
     base = ('The woman in the reference image performs the movement of the '
@@ -1627,7 +1637,8 @@ _BAD_MODEL = "Invalid value for 'model'"
 
 
 # What to search the provider's catalogue for when it refuses one of our ids.
-MODEL_SEARCH_NAMES = {'wan-2-2-animate': ('wan animate', 'animate', 'wan2.2')}
+MODEL_SEARCH_NAMES = {'wan-2-2-animate': ('wan animate', 'animate', 'wan2.2'),
+                      'p-video-animate': ('p-video', 'animate')}
 
 
 def _bad_model_error(tasks, err):

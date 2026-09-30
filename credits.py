@@ -59,7 +59,7 @@ DEFAULT_VIDEO_DURATION = 5
 
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                'wan-2-2-animate')
+                'p-video-animate')
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -107,6 +107,9 @@ VIDEO_COST_USD_PER_SECOND = {
     'kling-2-6-mc': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
     # Wan 2.7's rows until Runware's own price is read off search_models().
     'wan-2-2-animate': {'480p': 0.10076, '720p': 0.10076, '1080p': 0.2519},
+    # From Runware's public page, as when it was first added. It has no 480p
+    # and runs 720p for one, so the two are priced alike.
+    'p-video-animate': {'480p': 0.03, '720p': 0.03, '1080p': 0.06},
     'kling-3-0-mc': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
     'kling-3-0-omni': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
 }
@@ -245,6 +248,7 @@ MODEL_LABELS = {
     'wan-3-0': 'Wan 3.0',
     'kling-2-6-mc': 'Kling 2.6 motion control',
     'wan-2-2-animate': 'Wan 2.2 Animate',
+    'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
 }
@@ -280,6 +284,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'wan-2-2-animate': ('sfw', 'nsfw'),
+    'p-video-animate': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a
     # crash whose own traceback could not be deserialized because the safety

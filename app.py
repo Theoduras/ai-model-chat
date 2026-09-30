@@ -31661,9 +31661,9 @@ def _clip_refs(slug, spec, job_id=''):
     return refs, roles
 
 
-def _is_wan_animate(job, spec):
-    """An explicit Animate with a motion clip: Wan 2.2 Animate in animate
-    mode, where the photo is her and the clip only moves her."""
+def _is_motion_animate(job, spec):
+    """An explicit Animate with a motion clip, where the photo is her and the
+    clip only moves her."""
     return (job == 'animate' and bool(spec.get('source_path'))
             and spec.get('model') == imagegen.EXPLICIT_MOTION_MODEL)
 
@@ -31677,7 +31677,7 @@ def _gen_video_prompt(slug, spec):
     motion = spec.get('motion', '') or spec.get('prompt_extra', '')
     char = spec.get('character')
     picked = spec.get('identity_media') or []
-    if _is_wan_animate(job, spec):
+    if _is_motion_animate(job, spec):
         return imagegen.build_animate_prompt(spec.get('prompt_extra') or motion)
     if job == 'swap' or (job == 'reel' and spec.get('source_path')):
         text = motion if job == 'swap' else (spec.get('prompt_extra') or motion)
@@ -34779,7 +34779,7 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'That uploaded clip is no longer there. Upload it again.')
                     call['source_url'] = url
-                    if _is_wan_animate(job, spec):
+                    if _is_motion_animate(job, spec):
                         # One image: the photo being animated, already in
                         # reference_b64. Her other references would displace it.
                         call['prompt'] = imagegen.build_animate_prompt(
