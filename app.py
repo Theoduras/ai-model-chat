@@ -13326,6 +13326,7 @@ def api_persona_media_list(slug):
                 'location': (o or {}).get('location', ''),
                 'lighting': (o or {}).get('lighting', ''),
                 'thumb': f'/api/personas/{slug}/media/{r.id}/image',
+                'source': getattr(r, 'source', '') or 'upload',
                 # Set on an extension: the clip it carries on from. There is no
                 # ffmpeg here to join the two, so the chain is the only thing
                 # that says these are one shot rather than two.
@@ -33823,6 +33824,64 @@ def api_generate_job():
     return _gen_submit(user, slug, spec, price)
 
 
+UNDRESS_PROMPT = (
+    'Edit the reference photo. Keep the exact same woman: same face, hair, skin, '
+    'body shape, pose, framing, lighting, camera angle and background. Only remove '
+    'all of her clothing, underwear and accessories worn on the body, so she is '
+    'fully nude. Realistic anatomy and skin where the clothes were. Change nothing else.')
+
+
+@app.route('/api/generate/undress', methods=['POST'])
+def api_generate_undress():
+    """One still taken to fully nude, as a Seedream 4.5 edit of itself.
+
+    Only a photo this platform generated for the persona is accepted, never an
+    upload: an upload could be anybody, and a generation is her character."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    slug = (body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    media_id = str(body.get('media') or '').strip()
+    from db import get_persona_media
+    s = _db_session()
+    try:
+        row = get_persona_media(s, media_id) if media_id else None
+        ok = (row is not None and row.slug == slug and (row.kind or 'image') == 'image'
+              and row.source == 'generated' and bool(row.gcs_path))
+        size = _undress_aspect(row) if ok else ''
+    finally:
+        s.close()
+    if not ok:
+        return jsonify({'ok': False,
+                        'error': 'Undress only works on photos generated here.'}), 400
+    spec = {'kind': 'image', 'slug': slug, 'job': '', 'undress': True,
+            'model': imagegen.EXPLICIT_MODEL, 'resolution': '2k', 'aspect': size,
+            'batch': 1, 'shot': 'nude', 'explicit': True,
+            'reference_media': media_id, 'addons': []}
+    return _gen_submit(user, slug, spec, CR.quote(spec))
+
+
+def _undress_aspect(row):
+    """The listed frame shape closest to the source, so the edit is not cropped."""
+    import io
+    from PIL import Image
+    try:
+        w, h = Image.open(io.BytesIO(storage.get(row.gcs_path))).size
+    except Exception:
+        return ''
+    def ratio(a):
+        x, y = a.split(':')
+        return int(x) / int(y)
+    return min(imagegen.IMAGE_ASPECTS, key=lambda a: abs(ratio(a) - w / h))
+
+
 def _gen_submit(user, slug, spec, price):
     """Reserve the credits, queue the job and start it -- in that order, so an
     unaffordable job never costs an API call. Shared by the studio and the
@@ -33893,7 +33952,11 @@ def _gen_start(job_id, slug, spec, workspace):
             if ref_b64:
                 call['reference_b64'] = ref_b64
                 call['reference_mime'] = ref_mime
-            if spec['kind'] == 'image' and spec.get('character_view'):
+            if spec.get('undress'):
+                call['prompt'] = UNDRESS_PROMPT
+                call['async_delivery'] = True
+                provider_job, result = provider.submit_image(call)
+            elif spec['kind'] == 'image' and spec.get('character_view'):
                 refs = _character_view_refs(spec['character_id'],
                                             spec['character_view'], spec.get('outfit_image'),
                                             spec.get('look'))

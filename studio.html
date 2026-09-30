@@ -714,8 +714,10 @@
          onclick="event.stopPropagation()"></video>
   <div id="gen-lb-actions" hidden onclick="event.stopPropagation()"
        style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px">
-    <button type="button" class="gen-keep" style="padding:10px 28px" onclick="lightboxKeep(true)">Keep</button>
-    <button type="button" class="gen-drop" style="padding:10px 28px" onclick="lightboxKeep(false)">Drop</button>
+    <button type="button" class="gen-keep" id="gen-lb-keep" style="padding:10px 28px" onclick="lightboxKeep(true)">Keep</button>
+    <button type="button" class="gen-drop" id="gen-lb-drop" style="padding:10px 28px" onclick="lightboxKeep(false)">Drop</button>
+    <button type="button" class="gen-drop" id="gen-lb-undress" style="padding:10px 28px" title="Fully nude version of this photo — 1 token"
+            onclick="undressMedia(lbItems[lbIdx].dataset.undress)">Undress</button>
   </div>
   <button type="button" class="gen-lb-nav gen-lb-prev" id="gen-lb-prev" aria-label="Previous"
           onclick="event.stopPropagation(); stepLightbox(-1)">‹</button>
@@ -1676,7 +1678,9 @@ function showLightbox() {
     player.src = clip ? src : '';
   }
   el('gen-lb-prev').hidden = el('gen-lb-next').hidden = lbItems.length < 2;
-  el('gen-lb-actions').hidden = !node.dataset.stagedId;
+  el('gen-lb-actions').hidden = !node.dataset.stagedId && !node.dataset.undress;
+  el('gen-lb-keep').hidden = el('gen-lb-drop').hidden = !node.dataset.stagedId;
+  el('gen-lb-undress').hidden = !node.dataset.undress;
   el('gen-lightbox').hidden = false;
 }
 
@@ -3108,7 +3112,7 @@ function renderGenStaging() {
         ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(['m:' + m.id, `
-        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}" onclick="openLightbox(this)">
+        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}"${clip ? '' : ` data-undress="${m.id}"`} onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           ${engine}
@@ -3116,6 +3120,7 @@ function renderGenStaging() {
             <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
             ${m.has_original ? `<button type="button" class="gen-drop" title="Switch between phone look and the unfiltered original" onclick="event.stopPropagation(); switchLook('${m.id}')">Look</button>` : ''}
+            ${clip ? '' : `<button type="button" class="gen-drop" title="Fully nude version of this photo — 1 token" onclick="event.stopPropagation(); undressMedia('${m.id}')">Undress</button>`}
           </div>
         </div>`]);
     });
@@ -3156,6 +3161,21 @@ async function keepGenerated(id, keep) {
     if (!d.ok) throw new Error(d.error || 'Could not save that');
     setGenStatus(keep ? '✓ Kept — it is in the vault now' : 'Dropped', keep ? true : null);
     await loadPersona();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+}
+
+async function undressMedia(id) {
+  if (!id) return;
+  try {
+    const res = await fetch('/api/generate/undress', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), media: id }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Undress failed');
+    setGenStatus(`Undressing — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It lands in your generations.`, null);
+    loadCredits();
+    pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
 }
 
@@ -3328,7 +3348,7 @@ function renderVault() {
       : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
     return [v.id, `
       <div class="vault-item${vaultPicked.has(v.id) ? ' selected' : ''}" data-id="${v.id}"
-           data-lb="${v.thumb}" data-kind="${v.kind}" onclick="vaultClick(this)">
+           data-lb="${v.thumb}" data-kind="${v.kind}"${!clip && v.source === 'generated' ? ` data-undress="${v.id}"` : ''} onclick="vaultClick(this)">
         ${thumb}${fv}
       </div>`];
   }), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
