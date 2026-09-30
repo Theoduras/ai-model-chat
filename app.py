@@ -7515,15 +7515,57 @@ _BIO_HANDLE_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$')
 _BIO_RESERVED = {'admin', 'support', 'velvetfunneler', 'velvetfunnel', 'help',
                  'login', 'register', 'api', 'www', 'official'}
 _BIO_IMG_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
-_BIO_SOCIALS = ('instagram', 'x', 'tiktok', 'telegram', 'fanvue', 'onlyfans',
-                'fansly', 'reddit', 'discord', 'youtube', 'twitch', 'snapchat',
-                'threads', 'spotify', 'amazon', 'email', 'website')
+# Username platforms build the link from a template, so what a creator types
+# can only ever become a profile on that platform. The editor's copy of this
+# table is window.BIO_NETS in js/bio-render.js.
+_BIO_SOCIALS = {
+    'instagram': 'https://instagram.com/{u}', 'tiktok': 'https://tiktok.com/@{u}',
+    'x': 'https://x.com/{u}', 'onlyfans': 'https://onlyfans.com/{u}',
+    'fanvue': 'https://fanvue.com/{u}', 'fansly': 'https://fansly.com/{u}',
+    'telegram': 'https://t.me/{u}', 'snapchat': 'https://snapchat.com/add/{u}',
+    'reddit': 'https://reddit.com/user/{u}', 'threads': 'https://threads.net/@{u}',
+    'youtube': 'https://youtube.com/@{u}', 'twitch': 'https://twitch.tv/{u}',
+    'kick': 'https://kick.com/{u}', 'facebook': 'https://facebook.com/{u}',
+    'pinterest': 'https://pinterest.com/{u}', 'bluesky': 'https://bsky.app/profile/{u}',
+    'patreon': 'https://patreon.com/{u}', 'throne': 'https://throne.com/{u}',
+    'discord': 'https://discord.gg/{u}', 'whatsapp': 'https://wa.me/{u}',
+    'email': 'mailto:{u}', 'spotify': '', 'amazon': '', 'website': '',
+}
+_BIO_USER_RE = re.compile(r'^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,60}$')
+
+
+def _bio_social(so):
+    """{net, user} or a legacy {net, url} → {net, user, url}, or None."""
+    net = so.get('net')
+    if net not in _BIO_SOCIALS:
+        return None
+    tpl = _BIO_SOCIALS[net]
+    user = str(so.get('user') or '').strip()[:200]
+    if not tpl:
+        url = _bio_url(user or so.get('url'))
+        return {'net': net, 'user': url, 'url': url} if url else None
+    if not user and so.get('url'):
+        user = str(so['url'])
+    if net == 'email':
+        user = user.removeprefix('mailto:')
+        ok = re.match(r'^[^@\s/]+@[^@\s/]+\.[a-z]{2,}$', user, re.I)
+    else:
+        # A pasted profile link or "@name" still means the name.
+        user = re.sub(r'^https?://', '', user, flags=re.I).rstrip('/').split('?')[0]
+        user = user.rsplit('/', 1)[-1].lstrip('@')
+        if net == 'whatsapp':
+            user = re.sub(r'[^0-9]', '', user)
+        ok = _BIO_USER_RE.match(user)
+    if not ok:
+        return None
+    return {'net': net, 'user': user, 'url': tpl.replace('{u}', urllib.parse.quote(user, safe='@.'))}
 _BIO_CHOICES = {
     'bg_type': ('solid', 'gradient', 'image'),
     'btn_style': ('fill', 'glass', 'outline', 'shadow'),
     'radius': ('square', 'round', 'pill'),
     'avatar_shape': ('circle', 'rounded', 'cover'),
     'socials_pos': ('top', 'bottom'),
+    'icon_color': ('text', 'brand'),
     'gate': ('off', 'button', 'page'),
     'font_title': ('Caveat', 'Fraunces', 'Syne', 'DM Sans', 'Playfair Display',
                    'Bebas Neue', 'Pacifico', 'Space Mono'),
@@ -7535,7 +7577,7 @@ _BIO_DEFAULT_THEME = {
     'bg_image': None, 'text': '#4a2733', 'btn_bg': '#fff9f6', 'btn_text': '#4a2733',
     'accent': '#8d3f5c', 'btn_style': 'fill', 'radius': 'round',
     'avatar_shape': 'rounded', 'font_title': 'Caveat', 'font_body': 'DM Sans',
-    'socials_pos': 'top',
+    'socials_pos': 'top', 'icon_color': 'text',
 }
 
 
@@ -7600,12 +7642,10 @@ def _bio_clean(cfg, slug):
            'avatar': _bio_image(cfg.get('avatar'), vault),
            'gate': cfg.get('gate') if cfg.get('gate') in _BIO_CHOICES['gate'] else 'off'}
     socials = []
-    for so in (cfg.get('socials') or [])[:17]:
-        if isinstance(so, dict) and so.get('net') in _BIO_SOCIALS:
-            url = _bio_url(('mailto:' + s(so.get('url'), 200).removeprefix('mailto:'))
-                           if so['net'] == 'email' else so.get('url'))
-            if url:
-                socials.append({'net': so['net'], 'url': url})
+    for so in (cfg.get('socials') or [])[:24]:
+        clean = _bio_social(so) if isinstance(so, dict) else None
+        if clean:
+            socials.append(clean)
     out['socials'] = socials
     blocks, seen = [], set()
     for b in (cfg.get('blocks') or [])[:60]:

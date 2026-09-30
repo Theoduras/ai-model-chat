@@ -65,7 +65,20 @@
     .preset i { display: block; width: 100%; height: 12px; }
     .av-pick { display: flex; gap: 12px; align-items: center; }
     .av-pick img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--surface); }
-    .soc-row { display: grid; grid-template-columns: 110px minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+    .netgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
+    .netgrid button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text-2); font: inherit; font-size: .72rem; font-weight: 600; cursor: pointer; }
+    .netgrid button:hover { border-color: var(--text-muted); color: var(--text); }
+    .netgrid button.used { opacity: .45; }
+    .netgrid .lg { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .netgrid .lg svg, .soc-row .lg svg { width: 18px; height: 18px; }
+    .soc-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: var(--surface); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 8px 10px; }
+    .soc-row .lg { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
+    .soc-row .in { display: flex; align-items: center; border: 1px solid var(--border); border-radius: var(--r-sm); background: var(--bg); overflow: hidden; min-width: 0; }
+    .soc-row .in span { padding: 0 0 0 10px; color: var(--text-muted); font-size: .82rem; white-space: nowrap; }
+    .soc-row .in input { flex: 1; min-width: 60px; border: 0 !important; background: transparent !important; padding: 8px 10px 8px 2px !important; font-size: .85rem !important; outline: none; }
+    .soc-row .ok { font-size: .72rem; margin-top: 3px; display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .soc-row .tools { display: flex; gap: 2px; }
+    .soc-row .tools button { background: none; border: 0; color: var(--text-muted); cursor: pointer; padding: 3px 5px; }
     .phone { width: 320px; max-width: 100%; height: 640px; border-radius: 44px; padding: 10px; background: #050406; box-shadow: 0 20px 50px -20px #000, inset 0 0 0 2px #2b2530; flex: none; }
     .screen { height: 100%; border-radius: 35px; overflow-y: auto; scrollbar-width: none; }
     .screen > .bio { min-height: 100%; }
@@ -81,7 +94,7 @@
     .es-snippet { min-height: 108px; resize: vertical; }
     [data-tab] { display: flex; flex-direction: column; gap: 18px; }
     @media (max-width: 980px) { .lb { grid-template-columns: 1fr; overflow-y: auto; } .lb-main, .lb-side { overflow: visible; } .lb-side { border-left: 0; border-top: 1px solid var(--border); } .savebar { position: fixed; left: 0; right: 0; bottom: 0; margin: 0; } }
-    @media (max-width: 560px) { .lb-main { padding: 16px 14px 90px; } .blk { grid-template-columns: 16px 40px minmax(0, 1fr); } .blk .meta { grid-column: 2 / -1; flex-direction: row; justify-content: space-between; align-items: center; } .soc-row { grid-template-columns: 90px minmax(0, 1fr) auto; } }
+    @media (max-width: 560px) { .lb-main { padding: 16px 14px 90px; } .blk { grid-template-columns: 16px 40px minmax(0, 1fr); } .blk .meta { grid-column: 2 / -1; flex-direction: row; justify-content: space-between; align-items: center; } }
   </style>
 <link rel="stylesheet" href="/css/site-nav.css">
 <script src="/js/site-nav.js" defer></script>
@@ -137,6 +150,14 @@
       </div>
       <div id="blocks" style="display:flex; flex-direction:column; gap:10px;"></div>
       <div class="card">
+        <span class="lbl">Social icons</span>
+        <span class="hint">Tap a platform and type your username. The link is made for you.</span>
+        <div class="netgrid" id="netgrid"></div>
+        <div id="socials" style="display:flex; flex-direction:column; gap:8px;"></div>
+        <div class="row"><span class="hint">Show icons</span><span id="socpos" class="row"></span>
+          <span class="hint" style="margin-left:8px;">Colour</span><span id="iconcol" class="row"></span></div>
+      </div>
+      <div class="card">
         <span class="lbl">18+ content</span>
         <div class="row" id="gate-opts"></div>
         <span class="hint" id="gate-hint"></span>
@@ -149,12 +170,6 @@
         <div class="av-pick"><img id="av-img" alt=""><div class="row"><button class="chip" onclick="pickImage('avatar')">Change</button><button class="chip" onclick="setImage('avatar', null)">Use her persona picture</button></div></div>
         <div class="field full" style="margin:0;"><label>Name</label><input id="p-name" maxlength="60" oninput="cfg.name=this.value; preview()"></div>
         <div class="field full" style="margin:0;"><label>Bio</label><textarea id="p-bio" maxlength="300" rows="3" oninput="cfg.bio=this.value; preview()"></textarea></div>
-      </div>
-      <div class="card">
-        <span class="lbl">Social icons</span>
-        <div id="socials" style="display:flex; flex-direction:column; gap:8px;"></div>
-        <div class="row"><button class="chip" onclick="addSocial()">+ Add icon</button>
-          <span class="hint">Position</span><span id="socpos" class="row"></span></div>
       </div>
     </section>
 
@@ -237,7 +252,6 @@ var PRESETS = {
 };
 var FONTS_T = ['Caveat', 'Fraunces', 'Syne', 'DM Sans', 'Playfair Display', 'Bebas Neue', 'Pacifico', 'Space Mono'];
 var FONTS_B = ['DM Sans', 'Inter', 'Lora', 'Space Mono', 'Nunito'];
-var NETS = { instagram: 'Instagram', x: 'X', tiktok: 'TikTok', telegram: 'Telegram', fanvue: 'Fanvue', onlyfans: 'OnlyFans', fansly: 'Fansly', reddit: 'Reddit', discord: 'Discord', youtube: 'YouTube', twitch: 'Twitch', snapchat: 'Snapchat', threads: 'Threads', spotify: 'Spotify', amazon: 'Amazon wishlist', email: 'Email', website: 'Website' };
 
 var slug = '', cfg = null, data = null, handleOk = true, dirty = false, pickTarget = null, dragIdx = null, handleTimer = null;
 
@@ -264,6 +278,7 @@ function preview() {
   c.avatar_url = imgUrl(cfg.avatar) || '/api/personas/' + slug + '/avatar';
   c.theme.bg_image_url = imgUrl(cfg.theme.bg_image);
   c.blocks.forEach(function (b) { b.thumb_url = imgUrl(b.thumb); });
+  c.socials = cfg.socials.map(function (so) { return { net: so.net, url: socialUrl(so) }; });
   renderBio($('preview'), c, { preview: true });
   $('av-img').src = c.avatar_url;
   touch();
@@ -328,22 +343,68 @@ function renderGate() {
   $('gate-hint').textContent = { off: 'Buttons marked 18+ open without a question.', button: 'Visitors confirm they are 18 before an 18+ button opens.', page: 'Visitors confirm they are 18 before they see the page.' }[cfg.gate];
 }
 
-// ── Profile tab ──
+// ── Social icons ──
+var NETS = window.BIO_NETS;
+var PH = { user: 'username', phone: 'phone number with country code', email: 'you@example.com', url: 'https://' };
+function lg(net) { var n = NETS[net]; return '<span class="lg" style="background:' + n.color + ';color:' + (parseInt(n.color.slice(1, 3), 16) * .299 + parseInt(n.color.slice(3, 5), 16) * .587 + parseInt(n.color.slice(5, 7), 16) * .114 > 158 ? '#111' : '#fff') + '">' + bioIcon(net) + '</span>'; }
+function cleanUser(net, v) {
+  var k = NETS[net].kind; v = (v || '').trim();
+  if (k === 'url') return v;
+  if (k === 'email') return v.replace(/^mailto:/, '');
+  v = v.replace(/^https?:\/\//i, '').replace(/\/+$/, '').split('?')[0];
+  v = v.split('/').pop().replace(/^@/, '');
+  return k === 'phone' ? v.replace(/[^0-9]/g, '') : v;
+}
+function socialUrl(so) {
+  var n = NETS[so.net], u = cleanUser(so.net, so.user != null ? so.user : so.url);
+  if (!n || !u) return '';
+  if (n.kind === 'url') return /^[a-z]+:\/\//i.test(u) ? u : 'https://' + u;
+  if (n.kind === 'email') return /^[^@\s\/]+@[^@\s\/]+\.[a-z]{2,}$/i.test(u) ? 'mailto:' + u : '';
+  return /^(?=.*[A-Za-z0-9])[A-Za-z0-9._-]{1,60}$/.test(u) ? n.url.replace('{u}', u) : '';
+}
+function renderNetGrid() {
+  var used = cfg.socials.map(function (so) { return so.net; });
+  $('netgrid').innerHTML = Object.keys(NETS).map(function (k) {
+    return '<button type="button" data-net="' + k + '"' + (used.indexOf(k) >= 0 ? ' class="used"' : '') + '>' + lg(k) + esc(NETS[k].label) + '</button>';
+  }).join('');
+  $('netgrid').querySelectorAll('button').forEach(function (b) { b.onclick = function () { addSocial(b.dataset.net); }; });
+}
 function renderSocials() {
   var box = $('socials'); box.innerHTML = '';
-  cfg.socials.forEach(function (s, i) {
+  cfg.socials.forEach(function (so, i) {
+    if (!NETS[so.net]) return;
+    if (so.user == null) so.user = cleanUser(so.net, so.url);
+    var n = NETS[so.net], prefix = n.kind === 'user' ? n.url.replace(/^https:\/\//, '').replace('{u}', '') : n.kind === 'phone' ? '+' : '';
     var row = document.createElement('div'); row.className = 'soc-row';
-    row.innerHTML = '<select>' + Object.keys(NETS).map(function (k) { return '<option value="' + k + '"' + (k === s.net ? ' selected' : '') + '>' + NETS[k] + '</option>'; }).join('') + '</select>' +
-      '<input maxlength="200" placeholder="' + (s.net === 'email' ? 'you@example.com' : 'https://') + '" value="' + esc((s.url || '').replace(/^mailto:/, '')) + '">' +
-      '<button class="chip" title="Remove">✕</button>';
-    row.children[0].onchange = function () { s.net = this.value; preview(); renderSocials(); };
-    row.children[1].oninput = function () { s.url = this.value; preview(); };
-    row.children[2].onclick = function () { cfg.socials.splice(i, 1); renderSocials(); preview(); };
+    row.innerHTML = lg(so.net) + '<div style="min-width:0"><div class="in">' + (prefix ? '<span>' + esc(prefix) + '</span>' : '') +
+      '<input maxlength="200" placeholder="' + PH[n.kind] + '" value="' + esc(so.user) + '" aria-label="' + esc(n.label) + '"></div><span class="ok"></span></div>' +
+      '<div class="tools"><button title="Move up">↑</button><button title="Move down">↓</button><button title="Remove">✕</button></div>';
+    var inp = row.querySelector('input'), ok = row.querySelector('.ok');
+    var check = function () {
+      var url = socialUrl(so);
+      ok.className = 'ok msg ' + (url ? 'good' : so.user ? 'bad' : '');
+      ok.textContent = url ? '✓ ' + url.replace(/^(https:\/\/|mailto:)/, '') : so.user ? 'Check the ' + (n.kind === 'user' ? 'username' : n.kind) : '';
+    };
+    inp.oninput = function () { so.user = inp.value; check(); preview(); };
+    inp.onblur = function () { so.user = cleanUser(so.net, inp.value); inp.value = so.user; check(); };
+    var t = row.querySelectorAll('.tools button');
+    t[0].onclick = function () { moveSocial(i, i - 1); };
+    t[1].onclick = function () { moveSocial(i, i + 1); };
+    t[2].onclick = function () { cfg.socials.splice(i, 1); renderSocials(); preview(); };
+    check();
     box.appendChild(row);
   });
+  renderNetGrid();
   chips('socpos', [['top', 'Under bio'], ['bottom', 'At the bottom']], cfg.theme.socials_pos, function (v) { cfg.theme.socials_pos = v; renderSocials(); preview(); });
+  chips('iconcol', [['text', 'Match text'], ['brand', 'Brand colours']], cfg.theme.icon_color || 'text', function (v) { cfg.theme.icon_color = v; renderSocials(); preview(); });
 }
-function addSocial() { var used = cfg.socials.map(function (s) { return s.net; }); var net = Object.keys(NETS).find(function (k) { return used.indexOf(k) < 0; }) || 'website'; cfg.socials.push({ net: net, url: '' }); renderSocials(); preview(); }
+function moveSocial(a, b) { if (b < 0 || b >= cfg.socials.length) return; var x = cfg.socials.splice(a, 1)[0]; cfg.socials.splice(b, 0, x); renderSocials(); preview(); }
+function addSocial(net) {
+  var have = cfg.socials.findIndex(function (so) { return so.net === net; });
+  if (have < 0) { cfg.socials.push({ net: net, user: '' }); have = cfg.socials.length - 1; renderSocials(); preview(); }
+  var inp = $('socials').querySelectorAll('input')[have];
+  if (inp) { inp.focus(); inp.scrollIntoView({ block: 'nearest' }); }
+}
 
 // ── Style tab ──
 function renderStyle() {
