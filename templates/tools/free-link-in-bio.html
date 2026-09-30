@@ -9,7 +9,8 @@
 .handle.good{border-color:#22c55e}.handle.bad{border-color:#ef4444}
 .msg{font-size:12px;margin-top:6px;color:var(--text-dim)}.msg.good{color:#22c55e}.msg.bad{color:#ef4444}
 .nets{display:grid;grid-template-columns:repeat(auto-fill,minmax(44px,1fr));gap:8px;margin-top:10px}
-.nets button{aspect-ratio:1;border-radius:50%;border:2px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0}
+.nets button{aspect-ratio:1;border-radius:50%;border:2px solid transparent;cursor:pointer;display:flex;align-items:center;justify-content:center;padding:0;transition:transform .12s,box-shadow .12s}
+.nets button:hover,.nets button:focus-visible{transform:translateY(-2px) scale(1.08);box-shadow:0 6px 14px -6px rgba(0,0,0,.55)}
 .nets button.on{border-color:var(--text)}
 .nets svg{width:20px;height:20px}
 .soc,.lnk{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px;align-items:center;margin-top:8px}
@@ -160,11 +161,8 @@ $('bio').oninput = e => { S.bio = e.target.value; render(); };
 $('handle').addEventListener('input', () => { S._auto = false; });
 $('addlink').onclick = () => { S.links.push({ title: '', url: '' }); drawLinks(); $('links').querySelector('.lnk:last-child input').focus(); };
 $('avfile').onchange = e => {
-  const f = e.target.files[0]; if (!f) return; const im = new Image();
-  im.onload = () => { const s = Math.min(1, 480 / Math.max(im.width, im.height)), c = document.createElement('canvas');
-    c.width = Math.round(im.width * s); c.height = Math.round(im.height * s); c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
-    S.avatar = c.toDataURL('image/jpeg', .85); render(); };
-  im.src = URL.createObjectURL(f);
+  const f = e.target.files[0]; e.target.value = ''; if (!f) return;
+  bioCrop(f, 480, d => { if (d) { S.avatar = d; render(); } });
 };
 $('save').onclick = () => {
   if (!handleOk) { $('smsg').className = 'msg bad'; $('smsg').textContent = 'Pick a link name that is free first.'; $('handle').focus(); return; }

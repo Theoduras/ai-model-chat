@@ -67,7 +67,9 @@
     .av-pick img { width: 64px; height: 64px; border-radius: 50%; object-fit: cover; background: var(--surface); }
     .netgrid { display: grid; grid-template-columns: repeat(auto-fill, minmax(92px, 1fr)); gap: 8px; }
     .netgrid button { display: flex; flex-direction: column; align-items: center; gap: 6px; padding: 10px 4px; border: 1px solid var(--border); border-radius: var(--r-md); background: var(--surface); color: var(--text-2); font: inherit; font-size: .72rem; font-weight: 600; cursor: pointer; }
-    .netgrid button:hover { border-color: var(--text-muted); color: var(--text); }
+    .netgrid button { transition: transform .12s, border-color .12s; }
+    .netgrid button:hover { border-color: var(--text-muted); color: var(--text); transform: translateY(-2px); }
+    .netgrid button:hover .lg { box-shadow: 0 4px 12px -4px rgba(0,0,0,.5); }
     .netgrid button.used { opacity: .45; }
     .netgrid .lg { width: 34px; height: 34px; border-radius: 50%; display: flex; align-items: center; justify-content: center; }
     .netgrid .lg svg, .soc-row .lg svg { width: 18px; height: 18px; }
@@ -461,7 +463,13 @@ function setImage(target, img, i) {
 function uploadImage(input) {
   var file = input.files[0]; input.value = '';
   if (!file) return;
-  var max = pickTarget.target === 'bg' ? 1280 : pickTarget.target === 'avatar' ? 480 : 200;
+  var tgt = pickTarget;
+  if (tgt.target !== 'bg') {
+    $('modal').hidden = true;
+    bioCrop(file, tgt.target === 'avatar' ? 480 : 200, function (d) { if (d) setImage(tgt.target, { src: 'upload', data: d }, tgt.i); });
+    return;
+  }
+  var max = 1280;
   var im = new Image();
   im.onload = function () {
     var s = Math.min(1, max / Math.max(im.width, im.height));
