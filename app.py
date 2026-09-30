@@ -18475,7 +18475,7 @@ def _fv_ensure_webhook(persona, force=False):
         # detail keeps only Fanvue's "message" ("Bad Request"); the field
         # errors that say what was wrong are in the rest of the body.
         try:
-            body_text = (e.read() or b'').decode(errors='ignore')[:300]
+            body_text = (e.read() or b'').decode(errors='ignore')[:400]
         except Exception:
             body_text = ''
         made, why = None, body_text or _fv_error_text(e)
@@ -18492,9 +18492,10 @@ def _fv_ensure_webhook(persona, force=False):
                 refused, wanted = [drop], rest
                 break
         if made is None:
+            # Fanvue's reason first: a long prefix pushed it out of view.
             _fv_trace(persona, 'error',
-                      f'webhook subscription refused for {url} '
-                      f'({len(wanted)} events: {", ".join(wanted)}) — {why}')
+                      f'webhook subscription refused — Fanvue said: '
+                      f'{why.replace(chr(10), " ")} — url {url}, {len(wanted)} events')
             _set_setting(_fv_hook_key(persona), json.dumps(
                 dict(stored, url=url, last_error=why[:300], tried=wanted)))
             return {'ok': False, 'reason': why, 'url': url, 'tried': wanted}
