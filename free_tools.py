@@ -36,6 +36,12 @@ TOOLS = [
      'title': 'Free DM Opener Generator for New Subscribers',
      'description': 'Get five first messages for new subscribers, written in '
                     'your vibe, that start a real conversation.'},
+    {'slug': 'free-link-in-bio', 'track': 'tool-link-in-bio',
+     'name': 'Free link in bio',
+     'blurb': 'Your own link-in-bio page with socials and buttons.',
+     'title': 'Free Link in Bio Page for Creators (No Linktree Branding)',
+     'description': 'Build a link-in-bio page with your photo, socials and link '
+                    'buttons in a minute. Free, with a short link for your bio.'},
     {'slug': 'webhook-signature-simulator', 'track': '',
      'name': 'Webhook signature simulator',
      'blurb': 'Generate and verify HMAC-SHA256 webhook signatures.',

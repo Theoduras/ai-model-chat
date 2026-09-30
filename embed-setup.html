@@ -122,7 +122,7 @@
         <button class="on" data-for="links">Links</button>
         <button data-for="profile">Profile</button>
         <button data-for="style">Style</button>
-        <button data-for="embed">Embed</button>
+        <button data-for="embed" id="tab-embed">Embed</button>
       </div>
     </div>
 
@@ -322,7 +322,7 @@ function renderBlocks() {
     if (b.hidden) row.style.opacity = '.55';
     box.appendChild(row);
   });
-  $('add-chat').hidden = cfg.blocks.some(function (b) { return b.type === 'chat'; });
+  $('add-chat').hidden = slug === 'me' || cfg.blocks.some(function (b) { return b.type === 'chat'; });
 }
 function addBlock(type) {
   var b = { id: uid(), type: type, hidden: false };
@@ -534,9 +534,24 @@ async function loadPersona(s) {
   if (!r.ok) { $('save-msg').textContent = data.error || 'Could not load'; return; }
   cfg = data.config;
   $('handle').value = data.handle;
+  $('tab-embed').hidden = s === 'me';
+  var draft = importDraft();
+  if (draft) { cfg = draft.config; $('handle').value = draft.handle || data.handle; }
   $('p-name').value = cfg.name || ''; $('p-bio').value = cfg.bio || '';
   renderBlocks(); renderGate(); renderSocials(); renderStyle(); renderStats(); renderSnippet(); showLink(); checkHandle(); preview();
   dirty = false; $('save-msg').textContent = '';
+  if (draft) save();
+}
+
+// A page built on the free tool (/free-link-in-bio) before signing up waits in
+// localStorage; it becomes this page the first time the editor opens with it.
+function importDraft() {
+  if (new URLSearchParams(location.search).get('draft') !== '1') return null;
+  var d = null;
+  try { d = JSON.parse(localStorage.getItem('bio_draft') || 'null'); localStorage.removeItem('bio_draft'); } catch (e) {}
+  if (!d || !d.config) return null;
+  if (slug === 'me') d.config.blocks = d.config.blocks.filter(function (b) { return b.type !== 'chat'; });
+  return d;
 }
 
 $('tabs').onclick = function (e) {
@@ -551,9 +566,11 @@ window.addEventListener('beforeunload', function (e) { if (dirty) { e.preventDef
   var wanted = new URLSearchParams(location.search).get('persona') || '';
   var sel = $('persona');
   try {
-    var list = await (await fetch('/api/personas', { headers: { Accept: 'application/json' } })).json();
-    if (!Array.isArray(list) || !list.length) { sel.innerHTML = '<option value="">No personas yet</option>'; return; }
+    var list = [];
+    try { list = await (await fetch('/api/personas', { headers: { Accept: 'application/json' } })).json(); } catch (e) {}
+    list = [{ slug: 'me', name: 'My page' }].concat(Array.isArray(list) ? list : []);
     sel.innerHTML = list.map(function (p) { return '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>'; }).join('');
+    sel.value = list.length > 1 ? list[1].slug : 'me';
     if (wanted && list.some(function (p) { return p.slug === wanted; })) sel.value = wanted;
     loadPersona(sel.value);
   } catch (e) {
