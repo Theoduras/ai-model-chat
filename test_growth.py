@@ -322,9 +322,30 @@ week = G.plan_week(pstart, 7)
 check('a slot per platform per day at the cadence', len(week) == 45, len(week))
 check('slots come out in time order',
       all(week[i]['at'] <= week[i + 1]['at'] for i in range(len(week) - 1)))
-check('the hours are the cadence hours',
-      all((s['at'] - pstart) % 86400 // 3600 in G.WEEKLY_CADENCE[s['platform']]['hours']
-          for s in week))
+def _et(ts):
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+    return datetime.fromtimestamp(ts, ZoneInfo(G.US_TZ))
+def _in_window(s):
+    t = _et(s['at'])
+    pool = G.US_WINDOWS[s['platform']]['end' if t.weekday() >= 5 else 'week']
+    return any(lo <= t.hour < hi for lo, hi in pool)
+check('every post lands in a US window for its channel', all(_in_window(s) for s in week),
+      [(s['platform'], _et(s['at']).strftime('%a %H:%M')) for s in week if not _in_window(s)])
+for plat in G.WEEKLY_CADENCE:
+    clocks = [_et(s['at']).strftime('%H:%M') for s in week if s['platform'] == plat]
+    check(plat + ' never posts at the same time twice', len(clocks) == len(set(clocks)), clocks)
+check('the same week plans the same way twice',
+      [s['at'] for s in G.plan_week(pstart, 7, seed='a')] == [s['at'] for s in G.plan_week(pstart, 7, seed='a')])
+check('another week does not repeat the times',
+      [s['at'] % 86400 for s in G.plan_week(pstart, 7, seed='a')]
+      != [s['at'] % 86400 for s in G.plan_week(pstart, 7, seed='b')])
+cw = G.plan_week(pstart, 7, platforms=['x', 'instagram'], counts={'x': 3, 'instagram': 5})
+check('counts set the posts per channel',
+      sum(s['platform'] == 'x' for s in cw) == 3 and sum(s['platform'] == 'instagram' for s in cw) == 5,
+      len(cw))
+check('a zero count is no posts', G.plan_week(pstart, 7, platforms=['x'], counts={'x': 0}) == [])
+check('counts spread over the week', len({s['day'] for s in cw if s['platform'] == 'instagram'}) == 5)
 check('a week starts on the day it is given',
       min(s['at'] for s in week) >= pstart)
 check('and ends inside it', max(s['at'] for s in week) < pstart + 7 * 86400)
