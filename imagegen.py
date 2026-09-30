@@ -1178,6 +1178,45 @@ def _roles_sentence(roles, at_images=False):
     return text[0].upper() + text[1:] + '. All the images of her are the same woman.'
 
 
+def _omni_swap_prompt(motion, roles, place):
+    """Omni links its inputs only by tag: untagged, it follows the place line
+    and leaves the person in the clip as she was. Each photo is named for what
+    it is, so an outfit or a room is never read as more of her."""
+    tag = {r: f'@Image{n}' for n, r in reversed(list(enumerate(roles, 1)))}
+    her = ' and '.join(f'@Image{n}' for n, r in enumerate(roles, 1)
+                       if r not in ('outfit', 'location')) or '@Image1'
+    place = place.strip().rstrip('.')
+    if 'location' in tag or place:
+        where = (f"the place shown in {tag['location']}" if 'location' in tag
+                 else 'a different place')
+        scene = ('Keep the original motion, timing and camera movement exactly as '
+                 f'they are in @Video1, but set the scene in {where}'
+                 + (f': {place[0].lower() + place[1:]}.' if place else '.'))
+    else:
+        scene = ('Keep the original motion, framing, pacing, lighting and '
+                 'background exactly as they are in @Video1.')
+    if 'outfit' in tag:
+        outfit = (f"She wears exactly the outfit shown in {tag['outfit']}, with the "
+                  'same garments, colours, fabric, fit, length and every detail, '
+                  'instead of the clothing in @Video1. Do not add, remove or '
+                  'restyle any piece of it.')
+    else:
+        outfit = 'Keep the clothing from @Video1.'
+    identity = (IDENTITY_CLAUSE
+                .replace('The woman in the reference images', f'The woman in {her}')
+                .replace(' as it appears in the references.', ' as it appears.')
+                .replace(' Keep the clothing from the video.', ''))
+    motion = motion.strip().rstrip('.')
+    if motion and motion[0].islower():
+        motion = 'She ' + motion
+    return ' '.join(part for part in (
+        f'Edit @Video1: replace the woman in @Video1 with the woman shown in {her}, '
+        'keeping her face and body exactly as in those images.',
+        scene, outfit, identity, _roles_sentence(roles, True).replace(
+            ' All the images of her are the same woman.', ''),
+        motion + '.' if motion else '') if part)
+
+
 def build_swap_prompt(motion='', preserve=False, roles=None, place='',
                       at_images=False):
     """Instruction text for an edit, not for a still coming to life: the model
@@ -1195,14 +1234,7 @@ def build_swap_prompt(motion='', preserve=False, roles=None, place='',
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
     if at_images:
-        # Omni links its inputs only by tag: untagged, it follows the place
-        # line and leaves the person in the clip as she was.
-        tags = ', '.join(f'@Image{n}' for n, r in enumerate(roles or [], 1)
-                         if r not in ('outfit', 'location')) or '@Image1'
-        base = (f'Edit @Video1: replace the woman in @Video1 with the woman shown '
-                f'in {tags}, keeping her face and body exactly as in those images. '
-                'Keep the original motion, framing, pacing and lighting exactly as '
-                'they are in @Video1.')
+        return _omni_swap_prompt(motion, roles or [], place)
     new_place = bool(place.strip()) or 'location' in (roles or [])
     if new_place:
         clip = '@Video1' if at_images else 'the video'
