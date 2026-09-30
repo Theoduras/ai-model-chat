@@ -31328,9 +31328,14 @@ def _char_submit(call):
         return provider_job, result, model
 
 
-def _char_model(v):
-    # Google refuses nudity, so only safe-work views go to Nano Banana Pro.
-    return CHAR_SFW_MODEL if v.get('rating') == 'sfw' else CHAR_MODEL
+CHAR_SFW_CHOICES = ('nano-banana-pro', 'nano-banana-2')
+
+
+def _char_model(v, sfw_model=None):
+    # Google refuses nudity, so only safe-work views go to Nano Banana.
+    if v.get('rating') != 'sfw':
+        return CHAR_MODEL
+    return sfw_model if sfw_model in CHAR_SFW_CHOICES else CHAR_SFW_MODEL
 CHAR_RESOLUTION = '4k'
 # Cropped parents for crop views, held from submit until the job sends them.
 _CHAR_CROPS = {}
@@ -31963,6 +31968,7 @@ def api_characters_catalogue():
         level = 'sfw'
     return jsonify(dict(CH.catalogue(level), ok=True,
                         price_per_image=CR.image_price(CHAR_SFW_MODEL, CHAR_RESOLUTION),
+                        price_per_image_nb2=CR.image_price('nano-banana-2', CHAR_RESOLUTION),
                         price_per_image_nsfw=CR.image_price(CHAR_MODEL, CHAR_RESOLUTION)))
 
 
@@ -32568,7 +32574,7 @@ def api_character_generate(char_id):
         key = row.key
     finally:
         s.close()
-    specs = [{'kind': 'image', 'slug': key, 'job': '', 'model': _char_model(v),
+    specs = [{'kind': 'image', 'slug': key, 'job': '', 'model': _char_model(v, body.get('sfw_model')),
               'resolution': CHAR_RESOLUTION, 'batch': batch, 'addons': [],
               'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
               'rating': v['rating'], 'character_id': char_id,
