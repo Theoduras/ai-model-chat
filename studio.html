@@ -1231,14 +1231,7 @@ function videoModels() {
   }
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const rt = (genPrices && genPrices.video_ratings) || {};
-  let serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
-  if (genJob === 'reel') {
-    // Only what can run with what is set up: a clip-only model needs a clip,
-    // and a clip takes only the models that use one.
-    const ok = m => genDrive ? (CLIP_MODELS.includes(m) || m === 'wan-2-7')
-      : !CLIP_MODELS.includes(m) && (!reelChar() || REF_VIDEO_MODELS.includes(m));
-    serves = serves.filter(ok);
-  }
+  const serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
   return serves.length ? serves : list;
 }
 
@@ -1313,9 +1306,6 @@ function videoModelChips(box, note) {
       ? `${videoLabel(offered[0])} is the only model that serves ` +
         `${want === 'nsfw' ? 'explicit' : 'safe'} clips.`
       : 'Priced by the second, so a longer clip costs proportionally more.';
-    if (genJob === 'reel' && !genDrive) {
-      note.textContent += ' Pick or upload a clip below to also use Replace, Kling and Omni.';
-    }
   }
 }
 
