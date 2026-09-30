@@ -23,6 +23,7 @@
       border:1px solid var(--border, #333); background:var(--surface, transparent); }
     .ud-card img { display:block; width:100%; aspect-ratio:3/4; object-fit:cover; }
     .ud-card .btn { position:absolute; left:8px; right:8px; bottom:8px; }
+    .ud-pending { display:flex; align-items:center; justify-content:center; aspect-ratio:3/4; font-size:.85rem; color:var(--text-muted); padding:8px; text-align:center; }
     .ud-empty { color:var(--text-muted); font-size:.9rem; padding:40px 0; text-align:center; }
   </style>
 </head>
@@ -71,25 +72,49 @@ async function udPick(slug) {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
     const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && m.source === 'generated');
     el('ud-grid').innerHTML = rows.length ? rows.map(m => `
-      <div class="ud-card">
-        <img src="${esc(m.thumb)}" loading="lazy" alt="">
-        <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button>
-      </div>`).join('') : '<div class="ud-empty">No generated photos kept for this persona yet.</div>';
+${udCard(m)}`).join('') : '<div class="ud-empty">No generated photos kept for this persona yet.</div>';
     note('');
   } catch (e) { note('Could not load the gallery.'); }
 }
 
+function udCard(m) {
+  return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="">
+    <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button></div>`;
+}
+
 async function udGo(id) {
+  const slug = udSlug;
+  const grid = el('ud-grid');
+  const empty = grid.querySelector('.ud-empty');
+  if (empty) empty.remove();
+  const pending = document.createElement('div');
+  pending.className = 'ud-card ud-pending';
+  pending.innerHTML = '<span>Generating…</span>';
+  grid.prepend(pending);
+  const fail = msg => { pending.className = 'ud-card ud-pending'; pending.innerHTML = '<span>' + esc(msg) + '</span>'; };
   try {
     const res = await fetch('/api/generate/undress', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: udSlug, media: id }),
+      body: JSON.stringify({ persona: slug, media: id }),
     });
     const d = await res.json();
-    note(d.ok ? 'Undressing — ' + d.tokens + ' token' + (d.tokens === 1 ? '' : 's')
-                + '. The result lands in Studio → generations for you to keep.'
-              : (d.error || 'Undress failed.'));
-  } catch (e) { note('Undress failed.'); }
+    if (!d.ok) return fail(d.error || 'Undress failed.');
+    note('Undressing — ' + d.tokens + ' token' + (d.tokens === 1 ? '' : 's') + '.');
+    let job = d.result || {};
+    for (let i = 0; i < 90 && job.status !== 'done' && job.status !== 'failed' && !(job.media || []).length; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      job = await (await fetch('/api/generate/job/' + encodeURIComponent(d.job))).json();
+      job = job.job || job;
+    }
+    const m = (job.media || [])[0];
+    if (job.status === 'failed' || !m) return fail(job.error || 'Still generating — check Studio → generations.');
+    await fetch('/api/generate/keep', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ keep: true, media_ids: [m.id] }),
+    });
+    pending.outerHTML = udCard({ id: m.id, thumb: m.url });
+    note('Done — added to this page.');
+  } catch (e) { fail('Undress failed.'); }
 }
 udInit();
 </script>
