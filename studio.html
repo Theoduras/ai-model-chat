@@ -214,6 +214,16 @@
     .gen-outfit-add { width: 60px; height: 78px; border: 1px dashed var(--border); border-radius: var(--r-md, 8px);
       background: none; color: var(--text-2); font-size: 0.72rem; cursor: pointer; }
     .gen-outfit-add:hover, .gen-outfit:hover { border-color: var(--accent-line); }
+    .gen-more { min-width: 54px; min-height: 72px; padding: 4px 6px; border: 1px dashed var(--border);
+      border-radius: var(--r-md, 8px); background: none; color: var(--text-2); font-size: 0.72rem;
+      line-height: 1.25; cursor: pointer; }
+    .gen-more:hover { border-color: var(--accent-line); color: var(--text); }
+    .gen-outfits .gen-more { width: 60px; height: 78px; }
+    .gen-staging > .gen-more, .vault-grid > .gen-more { aspect-ratio: 3/4; }
+    .gen-clipph { display: grid; place-items: center; width: 100%; height: 100%; border-radius: inherit;
+      background: #111; color: var(--text-3, #777); font-size: 1.1rem; }
+    .gen-cliptile .gen-dur { position: absolute; left: 3px; bottom: 3px; font-size: 11px; background: #000a;
+      padding: 0 4px; border-radius: 4px; }
     .gen-check { display: flex; gap: 8px; align-items: center; font-size: 0.82rem; }
     .gen-check input { accent-color: var(--accent); width: 16px; height: 16px; }
     .gen-file input[type="file"] { display: none; }
@@ -507,7 +517,7 @@
                  onchange="uploadSwapSource(this.files[0])"></label>
           <span class="gen-uploaded" id="gen-swap-upl"></span></div>
         <div id="gen-swap-have" class="gen-stackform" style="display:none">
-          <video id="gen-swap-player" controls muted playsinline
+          <video id="gen-swap-player" controls muted playsinline preload="metadata"
                  class="gen-clip"></video>
           <span class="hint" id="gen-swap-meta"></span>
         </div>
@@ -594,7 +604,7 @@
           <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0], 'drive')"></label>
           <span class="gen-uploaded" id="gen-drive-upl"></span></div>
-        <video id="gen-drive-player" controls muted playsinline class="gen-clip" style="display:none"></video>
+        <video id="gen-drive-player" controls muted playsinline preload="metadata" class="gen-clip" style="display:none"></video>
         <div class="gen-clip-extras" style="display:none">
           <label class="gen-f"><span>Change the place (optional)</span>
             <input type="text" class="gen-clip-place" maxlength="200" oninput="delete this.dataset.auto; queueVideoPrompt()"
@@ -980,14 +990,37 @@ function renderIdentitySrc() {
 
 let genOutfits = [], genOutfit = '';
 
+// Long lists draw a page at a time, with a button for the next page. The count
+// survives re-renders, so an opened list stays open, and the picked item is
+// always drawn even when it sits past the cap.
+const genShown = {}, genCapRender = {};
+
+function capItems(key, items, step, isPicked, render) {
+  genCapRender[key] = render;
+  const n = Math.max(step, genShown[key] || 0);
+  const shown = items.slice(0, n).concat(isPicked ? items.slice(n).filter(isPicked) : []);
+  const rest = items.length - n;
+  const more = rest > 0
+    ? `<button type="button" class="gen-more" onclick="showMore('${key}', ${step})">Show ${Math.min(step, rest)} more<br>(${rest} left)</button>`
+    : n > step && items.length > step
+      ? `<button type="button" class="gen-more" onclick="showMore('${key}', 0)">Show fewer</button>` : '';
+  return { items: shown, more };
+}
+
+function showMore(key, step) {
+  genShown[key] = step ? Math.max(step, genShown[key] || 0) + step : 0;
+  (genCapRender[key] || (() => {}))();
+}
+
 function renderOutfits() {
-  el('gen-outfits').innerHTML = genOutfits.map(o => `
+  const { items, more } = capItems('outfits', genOutfits, 10, o => o.id === genOutfit, renderOutfits);
+  el('gen-outfits').innerHTML = items.map(o => `
     <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${o.id === genOutfit}"
           title="Wear this outfit" onclick="pickOutfit('${o.id}')">
       <img src="${esc(o.url)}" alt="Outfit">
       <button type="button" class="x" aria-label="Remove outfit"
         onclick="event.stopPropagation(); deleteOutfit('${o.id}')">&times;</button>
-    </span>`).join('') +
+    </span>`).join('') + more +
     `<button type="button" class="gen-outfit-add" onclick="el('gen-outfit-file').click()">+ Upload</button>` +
     `<button type="button" class="gen-outfit-add" onclick="openVaultPick('outfits')">From vault</button>`;
   document.querySelectorAll('.gen-clip-outfits').forEach(b => { b.innerHTML = el('gen-outfits').innerHTML; });
@@ -1049,13 +1082,14 @@ async function deleteOutfit(id) {
 let genLocations = [], genLocation = '';
 
 function renderLocations() {
-  el('gen-locations').innerHTML = genLocations.map(o => `
+  const { items, more } = capItems('locations', genLocations, 10, o => o.id === genLocation, renderLocations);
+  el('gen-locations').innerHTML = items.map(o => `
     <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${o.id === genLocation}"
           title="Shoot here" onclick="pickLocation('${o.id}')">
       <img src="${esc(o.url)}" alt="Location">
       <button type="button" class="x" aria-label="Remove location"
         onclick="event.stopPropagation(); deleteLocation('${o.id}')">&times;</button>
-    </span>`).join('') +
+    </span>`).join('') + more +
     `<button type="button" class="gen-outfit-add" onclick="el('gen-location-file').click()">+ Upload</button>` +
     `<button type="button" class="gen-outfit-add" onclick="openVaultPick('locations')">From vault</button>`;
   document.querySelectorAll('.gen-clip-locations').forEach(b => { b.innerHTML = el('gen-locations').innerHTML; });
@@ -1156,21 +1190,56 @@ async function loadClips() {
   renderClipLib();
 }
 
+// A tile is only ever a still: the chosen clip plays in the player below, and
+// a strip of live video elements is what made this panel heavy.
 function renderClipLib() {
+  const seen = [];
   document.querySelectorAll('.gen-cliplib').forEach(box => {
     const into = box.dataset.into;
     const cur = (into === 'drive' ? genDrive : genSwap) || {};
-    box.innerHTML = genClips.map(c => `
-      <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${c.id === cur.id}"
+    const { items, more } = capItems('clips-' + into, genClips, 8, c => c.id === cur.id, renderClipLib);
+    seen.push(...items.map(c => c.id));
+    keyedRender(box, items.map(c => [c.id, `
+      <span class="gen-outfit gen-cliptile" role="button" tabindex="0" aria-pressed="${c.id === cur.id}"
             title="${c.seconds}s, ${c.resolution}" onclick="pickClip('${c.id}', '${into}')">
-        ${c.poster_url ? `<img src="${esc(c.poster_url)}" alt="Clip">`
-          : `<video src="${esc(c.url)}#t=0.5" preload="metadata" muted playsinline
-                    style="width:100%;height:100%;object-fit:cover;border-radius:inherit;pointer-events:none"></video>`}
-        <b style="position:absolute;left:3px;bottom:3px;font-size:11px;background:#000a;padding:0 4px;border-radius:4px">${c.seconds}s</b>
+        ${c.poster_url ? `<img loading="lazy" decoding="async" src="${esc(c.poster_url)}" alt="Clip">`
+          : `<span class="gen-clipph" aria-hidden="true">&#9654;</span>`}
+        <b class="gen-dur">${c.seconds}s</b>
         <button type="button" class="x" aria-label="Delete clip"
           onclick="event.stopPropagation(); deleteClip('${c.id}')">&times;</button>
-      </span>`).join('') || '<span class="hint">No clips yet.</span>';
+      </span>`]).concat(more ? [['more', more]] : []),
+      '<span class="hint">No clips yet.</span>');
   });
+  backfillPosters(seen);
+}
+
+// Clips uploaded before the studio grabbed a frame have no poster. Each one on
+// screen has a frame read and saved once, one at a time, so the library is
+// plain images from then on. A clip this browser cannot decode keeps the
+// placeholder rather than being retried on every render.
+const posterTried = new Set();
+let posterBusy = false;
+
+async function backfillPosters(ids) {
+  if (posterBusy) return;
+  const c = genClips.find(x => ids.includes(x.id) && !x.poster_url && !posterTried.has(x.id));
+  if (!c) return;
+  posterBusy = true;
+  posterTried.add(c.id);
+  try {
+    const frame = await clipFrame(inlineSrc(c.url), 0.5, 360);
+    if (frame) {
+      const res = await fetch(c.url.replace(/\/file$/, '/poster'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ poster: frame }),
+      });
+      const d = await res.json();
+      if (d.ok) c.poster_url = d.poster_url;
+    }
+  } catch (e) { /* the placeholder stays */ }
+  posterBusy = false;
+  renderClipLib();
+  syncClipPlayers();
 }
 
 function pickClip(id, into) {
@@ -1256,12 +1325,29 @@ function syncClipExtras() {
   const motionRow = el('gen-swap-motion-row');
   if (motionRow) motionRow.style.display = KLING_MC.includes(m) ? 'none' : '';
   const pl = el('gen-drive-player');
-  if (pl) {
-    pl.style.display = genDrive && genJob !== 'swap' ? '' : 'none';
-    if (genDrive && pl.src !== genDrive.url) pl.src = genDrive.url || '';
-  }
+  if (pl) pl.style.display = genDrive && genJob !== 'swap' ? '' : 'none';
+  syncClipPlayers();
   renderClipLib();
   renderClipLines();
+}
+
+// The attribute, not `.src`: the property reads back absolute, so comparing it
+// with our relative route reloaded the clip on every render.
+function setClipPlayer(pl, c) {
+  if (!pl) return;
+  const poster = (c && c.poster_url) || '';
+  if ((pl.getAttribute('poster') || '') !== poster) {
+    if (poster) pl.setAttribute('poster', poster); else pl.removeAttribute('poster');
+  }
+  const want = (c && c.url) || '';
+  if ((pl.getAttribute('src') || '') === want) return;
+  if (want) pl.src = want;
+  else { pl.removeAttribute('src'); pl.load(); }
+}
+
+function syncClipPlayers() {
+  setClipPlayer(el('gen-drive-player'), genJob !== 'swap' ? genDrive : null);
+  setClipPlayer(el('gen-swap-player'), genSwap);
 }
 
 function clipExtrasPayload() {
@@ -1764,7 +1850,8 @@ function openZoom(btn, ev) {
 }
 function addZoomButtons() {
   document.querySelectorAll('.gen-outfit, .anim-pick').forEach(it => {
-    if (it.querySelector(':scope > .gen-zoom-btn') || !it.querySelector('img')) return;
+    if (it.querySelector(':scope > .gen-zoom-btn') || !it.querySelector('img')
+        || it.classList.contains('gen-cliptile')) return;
     const b = document.createElement('span');
     b.className = 'gen-zoom-btn'; b.setAttribute('role', 'button');
     b.title = 'View full size'; b.textContent = '\u2922';
@@ -2541,9 +2628,8 @@ function renderSwapForm() {
     'Uploaded clips are kept for reuse until you delete them, and never reach a fan.';
   const have = el('gen-swap-have');
   have.style.display = genSwap ? 'flex' : 'none';
+  syncClipPlayers();
   if (!genSwap) return;
-  const player = el('gen-swap-player');
-  if (player.src !== genSwap.url) player.src = genSwap.url || '';
   const total = swapPrice();
   const cash = cashFor(total);
   const trimmed = swapSeconds() < genSwap.seconds
@@ -2590,6 +2676,12 @@ async function uploadSwapSource(file, into) {
   try {
     const form = new FormData();
     form.append('file', file);
+    // The local file is same-origin, so its frame is readable here and saves
+    // the library decoding the clip later just to draw a thumbnail.
+    const local = URL.createObjectURL(file);
+    const poster = await clipFrame(local, 0.5, 360);
+    URL.revokeObjectURL(local);
+    if (poster) form.append('poster', poster);
     const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-source',
                             { method: 'POST', body: form });
     // A body too large for the host never reaches Flask, so the reply is not
@@ -3220,7 +3312,8 @@ function renderGenStaging() {
         </div>`]);
     });
   });
-  keyedRender(box, cards, '<p class="hint gen-empty">Your generations land here. Nothing here reaches a fan until you keep it.</p>');
+  const { items, more } = capItems('staging', cards, 12, null, renderGenStaging);
+  keyedRender(box, items.concat(more ? [['more', more]] : []), '<p class="hint gen-empty">Your generations land here. Nothing here reaches a fan until you keep it.</p>');
   if (window.StudioWizard) StudioWizard.refresh();
 }
 
@@ -3289,11 +3382,12 @@ function renderAnimPhotos() {
   if (!photos.some(v => v.id === genAnimPick)) {
     genAnimPick = photos.length ? photos[0].id : '';
   }
-  box.innerHTML = photos.length ? photos.map(v => `
+  const { items, more } = capItems('anim', photos, 12, v => v.id === genAnimPick, renderAnimPhotos);
+  box.innerHTML = photos.length ? items.map(v => `
     <button type="button" class="anim-pick" aria-pressed="${v.id === genAnimPick}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickAnimPhoto('${v.id}')">
-      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('') + more
     : '<span class="hint">Keep a photo first — a clip starts from one.</span>';
 }
 
@@ -3313,12 +3407,13 @@ function renderReelPhotos() {
   const box = el('gen-reel-photo');
   if (!box) return;
   const photos = animPhotos();
-  box.innerHTML = photos.length ? photos.map(v => `
+  const { items, more } = capItems('reel', photos, 12, v => v.id === genReelPick, renderReelPhotos);
+  box.innerHTML = photos.length ? items.map(v => `
     <button type="button" class="anim-pick" aria-pressed="${v.id === genReelPick}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickReelPhoto('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`
+    + more + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`
     : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>'
       + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`;
 }
@@ -3350,11 +3445,13 @@ function renderExtendClips() {
   if (!clips.some(v => v.id === genExtendClip)) {
     genExtendClip = clips.length ? clips[0].id : '';
   }
-  keyedRender(box, clips.map(v => [v.id, `
+  const { items, more } = capItems('extend', clips, 6, v => v.id === genExtendClip, renderExtendClips);
+  keyedRender(box, items.map(v => [v.id, `
     <button type="button" class="anim-pick" aria-pressed="${v.id === genExtendClip}"
             title="${esc(v.outfit || v.purpose || 'kept clip')}"
             onclick="pickExtendClip('${v.id}')">
-      <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`]),
+      <video src="${inlineSrc(v.thumb)}" muted playsinline preload="metadata"></video></button>`])
+      .concat(more ? [['more', more]] : []),
     '<span class="hint">Keep a clip first — an extension carries on from one.</span>');
   const player = el('gen-extend-player');
   const chosen = clips.find(v => v.id === genExtendClip);
@@ -3374,18 +3471,25 @@ function pickExtendClip(id) {
 // ffmpeg on the server, so this is the only place the last frame of a clip can
 // be got at — the same canvas trick the swap panel already uses to measure an
 // upload before sending it.
-function clipFrame(src, at) {
+function clipFrame(src, at, max = 1280) {
   return new Promise((resolve) => {
     const v = document.createElement('video');
     v.preload = 'auto';
     v.muted = true;
     v.playsInline = true;
     let done = false;
-    const give = (out) => { if (!done) { done = true; resolve(out); } };
+    // Dropping the source stops the download: the frame is all that was wanted.
+    const give = (out) => {
+      if (done) return;
+      done = true;
+      resolve(out);
+      v.removeAttribute('src');
+      v.load();
+    };
     const grab = () => {
       try {
         const canvas = document.createElement('canvas');
-        const scale = Math.min(1, 1280 / Math.max(v.videoWidth || 1, v.videoHeight || 1));
+        const scale = Math.min(1, max / Math.max(v.videoWidth || 1, v.videoHeight || 1));
         canvas.width = Math.max(16, Math.round((v.videoWidth || 720) * scale));
         canvas.height = Math.max(16, Math.round((v.videoHeight || 1280) * scale));
         canvas.getContext('2d').drawImage(v, 0, 0, canvas.width, canvas.height);
@@ -3395,8 +3499,8 @@ function clipFrame(src, at) {
     v.onloadedmetadata = () => {
       // A seek exactly to the duration lands past the last frame on most
       // decoders and paints nothing, so it stops just short of the end.
-      const want = at === 'last'
-        ? Math.max(0, (v.duration || 0) - 0.08) : 0;
+      const end = Math.max(0, (v.duration || 0) - 0.08);
+      const want = at === 'last' ? end : typeof at === 'number' ? Math.min(at, end) : 0;
       v.currentTime = want;
     };
     v.onseeked = grab;
@@ -3411,11 +3515,12 @@ function renderSceneRefs() {
   if (!box) return;
   const photos = animPhotos();
   genSceneRefs = genSceneRefs.filter(id => photos.some(v => v.id === id));
-  box.innerHTML = photos.length ? photos.map(v => `
+  const { items, more } = capItems('scene', photos, 12, v => genSceneRefs.includes(v.id), renderSceneRefs);
+  box.innerHTML = photos.length ? items.map(v => `
     <button type="button" class="anim-pick" aria-pressed="${genSceneRefs.includes(v.id)}"
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="toggleSceneRef('${v.id}')">
-      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
+      <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('') + more
     : '<span class="hint">Keep a photo of the scene or outfit first.</span>';
 }
 
@@ -3430,7 +3535,8 @@ function renderVault() {
   const grid = el('vault-grid');
   if (!grid) return;
   vaultPicked = new Set([...vaultPicked].filter(id => mediaVault.some(v => v.id === id)));
-  keyedRender(grid, mediaVault.map(v => {
+  const { items, more } = capItems('vault', mediaVault, 24, v => vaultPicked.has(v.id), renderVault);
+  keyedRender(grid, items.map(v => {
     const clip = isClip(v.kind);
     const parent = v.parent_media
       ? `<span class="vault-kind gen-tl"
@@ -3446,7 +3552,7 @@ function renderVault() {
            data-lb="${v.thumb}" data-kind="${v.kind}"${!clip ? ` data-undress="${v.id}"` : ''} onclick="vaultClick(this)">
         ${thumb}${fv}
       </div>`];
-  }), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
+  }).concat(more ? [['more', more]] : []), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
   el('vault-count').textContent = mediaVault.length ? `(${mediaVault.length})` : '';
   renderVaultTools();
 }

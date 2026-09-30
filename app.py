@@ -32313,9 +32313,7 @@ def api_persona_video_source(slug):
                     # The rung the swap will actually be run and billed at, not
                     # the file's own, so the studio quotes what it charges.
                     'resolution': _video_rung(height, width),
-                    'url': storage.signed_url(path) or '',
-                    'poster_url': (storage.signed_url(poster_path) or '')
-                                  if poster_path else ''})
+                    **_video_source_urls(slug, source_id, poster_path)})
 
 
 @app.route('/api/personas/<slug>/video-sources', methods=['GET'])
@@ -32337,15 +32335,10 @@ def api_persona_video_sources(slug):
         for r in rows:
             if (r.mime or '').startswith('audio/') != audio:
                 continue
-            try:
-                url = storage.signed_url(r.gcs_path) or ''
-                poster = (storage.signed_url(r.poster_gcs_path) or '') if r.poster_gcs_path else ''
-            except Exception:
-                url = poster = ''
             out.append({'id': r.id, 'source': r.id, 'seconds': int(r.seconds or 0),
                         'width': int(r.width or 0), 'height': int(r.height or 0),
                         'resolution': _video_rung(int(r.height or 0), int(r.width or 0)),
-                        'url': url, 'poster_url': poster})
+                        **_video_source_urls(slug, r.id, r.poster_gcs_path)})
         return jsonify({'ok': True, 'sources': out})
     finally:
         s.close()
@@ -32374,6 +32367,132 @@ def api_persona_video_source_delete(slug, source_id):
         s.delete(row)
         s.commit()
         return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+def _video_source_urls(slug, source_id, poster_path):
+    """Our own routes rather than signed URLs: a list of sixty clips would
+    otherwise sign 120 URLs per load, and where signing fails the studio got an
+    empty string and drew nothing at all. The routes redirect when they can."""
+    base = f'/api/personas/{slug}/video-sources/{source_id}'
+    return {'url': base + '/file', 'poster_url': base + '/poster' if poster_path else ''}
+
+
+def _owned_video_source(slug, source_id):
+    """The row, or a Flask reply refusing the request."""
+    blocked = _require_admin()
+    if blocked:
+        return None, blocked
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or (mine is not None and slug not in mine):
+        return None, (jsonify({'ok': False, 'error': 'Not your persona'}), 403)
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = s.query(VideoSource).filter_by(id=source_id, slug=slug).first()
+        if not row:
+            return None, (jsonify({'ok': False, 'error': 'Not found'}), 404)
+        s.expunge(row)
+        return row, None
+    finally:
+        s.close()
+
+
+VIDEO_RANGE_CHUNK = 8 << 20
+
+
+def _serve_stored_ranged(path, mime, size=0):
+    """Stream a stored object through the app, honouring Range. A video
+    element will not seek a reply without it, and a frame grab needs only the
+    header and the first frame, not a 200MB download. A 206 may return less
+    than was asked for, so each answer is capped and the browser asks again."""
+    headers = {'Accept-Ranges': 'bytes', 'Cache-Control': 'private, max-age=300'}
+    m = re.match(r'^bytes=(\d*)-(\d*)$', (request.headers.get('Range') or '').strip())
+    if not m or not (m.group(1) or m.group(2)):
+        return app.response_class(storage.get(path), mimetype=mime, headers=headers)
+    size = size or storage.size_of(path)
+    if m.group(1):
+        start = int(m.group(1))
+        end = int(m.group(2)) if m.group(2) else size - 1
+    else:
+        start, end = max(0, size - int(m.group(2))), size - 1
+    if not size or start >= size or end < start:
+        return app.response_class('', status=416,
+                                  headers={'Content-Range': f'bytes */{size}'})
+    end = min(end, size - 1, start + VIDEO_RANGE_CHUNK - 1)
+    data = storage.read_range(path, start, end - start + 1)
+    headers['Content-Range'] = f'bytes {start}-{start + len(data) - 1}/{size}'
+    return app.response_class(data, status=206, mimetype=mime, headers=headers)
+
+
+def _serve_stored(path, mime, size=0):
+    """Redirect to a signed URL where one can be minted, so the bytes skip the
+    app; otherwise, or with `?inline=1`, serve them here. Inline is for the
+    studio's poster grab: a canvas fed a cross-origin video is tainted."""
+    try:
+        url = None if request.args.get('inline') else storage.signed_url(path)
+        if url:
+            resp = redirect(url)
+            ttl = max(storage.signed_url_ttl() - 300, 0)
+            resp.headers['Cache-Control'] = f'private, max-age={ttl}'
+            return resp
+        return _serve_stored_ranged(path, mime, size)
+    except Exception:
+        logger.exception('could not serve stored object %s', path)
+        return ('', 502)
+
+
+@app.route('/api/personas/<slug>/video-sources/<source_id>/file')
+def api_persona_video_source_file(slug, source_id):
+    row, refused = _owned_video_source(slug, source_id)
+    if refused:
+        return refused
+    return _serve_stored(row.gcs_path, row.mime or 'video/mp4', int(row.size_bytes or 0))
+
+
+VIDEO_POSTER_MAX_BYTES = 1024 * 1024
+
+
+@app.route('/api/personas/<slug>/video-sources/<source_id>/poster', methods=['GET', 'POST'])
+def api_persona_video_source_poster(slug, source_id):
+    """GET serves the clip's preview frame. POST {poster: data:image/...} sets
+    it for a clip uploaded before the studio grabbed one, so a library of old
+    clips gets thumbnails once instead of decoding every clip on every visit."""
+    row, refused = _owned_video_source(slug, source_id)
+    if refused:
+        return refused
+    if request.method == 'GET':
+        if not row.poster_gcs_path:
+            return ('', 404)
+        return _serve_stored(row.poster_gcs_path, storage.mime_of(row.poster_gcs_path))
+    poster = str((request.get_json(silent=True) or {}).get('poster') or '')
+    head, _, b64 = poster.partition(',')
+    mime = head.split(';')[0].replace('data:', '').lower()
+    if mime not in ('image/jpeg', 'image/png', 'image/webp'):
+        return jsonify({'ok': False, 'error': 'Send the frame as a JPEG.'}), 400
+    import base64
+    try:
+        data = base64.b64decode(b64, validate=False)
+    except Exception:
+        return jsonify({'ok': False, 'error': 'That frame did not decode.'}), 400
+    if not data or len(data) > VIDEO_POSTER_MAX_BYTES:
+        return jsonify({'ok': False, 'error': 'That frame is too large.'}), 413
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        live = s.query(VideoSource).filter_by(id=source_id, slug=slug).first()
+        if not live:
+            return jsonify({'ok': False, 'error': 'Not found'}), 404
+        old = live.poster_gcs_path
+        live.poster_gcs_path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+        s.commit()
+        if old:
+            storage.delete(old)
+        return jsonify({'ok': True, **_video_source_urls(slug, source_id, live.poster_gcs_path)})
+    except Exception as e:
+        logger.exception('video poster save failed slug=%s', slug)
+        return jsonify({'ok': False, 'error': str(e)[:200] or 'save failed'}), 502
     finally:
         s.close()
 
