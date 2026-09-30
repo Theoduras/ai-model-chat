@@ -13,6 +13,11 @@
   <style>
     .ud-scroll { flex:1; min-height:0; overflow-y:auto; }
     .ud-wrap { max-width:1280px; margin:0 auto; padding:22px 24px 80px; }
+    .ud-intro { margin-bottom:16px; }
+    .ud-intro h2 { margin:0 0 6px; font-size:1.15rem; }
+    .ud-intro .hint { margin:0 0 12px; color:var(--text-muted); font-size:.9rem; max-width:720px; }
+    .ud-card .ud-acts { position:absolute; top:6px; right:6px; display:flex; gap:6px; }
+    .ud-card .ud-acts a, .ud-card .ud-acts button { padding:4px 8px; border-radius:6px; border:0; background:rgba(0,0,0,.65); color:#fff; font-size:.75rem; cursor:pointer; text-decoration:none; }
     .ud-bar { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin-bottom:14px; }
     .ud-bar select { padding:8px 10px; border-radius:8px; border:1px solid var(--border, #333);
       background:var(--surface, transparent); color:inherit; }
@@ -40,19 +45,16 @@
   <h1>Undress</h1>
   <div style="display:flex; align-items:center; gap:16px;">
     <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
-    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
 <div class="ud-scroll"><div class="ud-wrap">
-  <div class="ud-bar">
-    <label for="ud-persona">Persona</label>
-    <select id="ud-persona" onchange="udPick(this.value)"></select>
-    
+  <div class="ud-intro">
+    <h2>Undress any photo</h2>
+    <p class="hint">Upload an image, then click <b>Undress</b> on it and we generate an undressed version. Each undress costs <b>1 token</b>. Photos here are private to your account; download or delete them any time.</p>
     <label class="ud-upload-btn">
       Upload Photo
       <input type="file" id="ud-upload-input" accept="image/*" style="display:none;" onchange="udUpload(this)">
     </label>
-    <span style="color:var(--text-muted); font-size:.85rem">1 token per photo. Uploads and generated photos are listed.</span>
   </div>
   <div class="ud-note" id="ud-note" hidden></div>
   <div class="ud-grid" id="ud-grid"></div>
@@ -61,11 +63,14 @@
   <button class="x" onclick="udClose()" aria-label="Close">×</button>
   <button class="nav" style="left:14px" onclick="udStep(-1)" aria-label="Previous">‹</button>
   <img id="ud-lb-img" alt="">
-  <button class="btn btn-secondary" style="padding:10px 28px" onclick="udGo(udLbId())">Undress</button>
+  <div style="display:flex; gap:10px">
+    <button class="btn btn-secondary" style="padding:10px 28px" onclick="udGo(udLbId())">Undress</button>
+    <a class="btn btn-secondary" style="padding:10px 20px" id="ud-lb-dl" download>Download</a>
+    <button class="btn btn-secondary" style="padding:10px 20px" onclick="udDel(udLbId())">Delete</button>
+  </div>
   <button class="nav" style="right:14px" onclick="udStep(1)" aria-label="Next">›</button>
 </div>
 <script>
-let udSlug = '';
 function el(id) { return document.getElementById(id); }
 function esc(s) {
   return String(s == null ? '' : s).replace(/[&<>"']/g,
@@ -73,35 +78,32 @@ function esc(s) {
 }
 function note(msg) { const n = el('ud-note'); n.textContent = msg || ''; n.hidden = !msg; }
 async function udInit() {
-  let list = [];
-  try { list = await (await fetch('/api/personas')).json(); } catch (e) {}
-  if (!Array.isArray(list) || !list.length) { note('No personas yet — create one in the dashboard first.'); return; }
-  el('ud-persona').innerHTML = list.map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('');
-  const wanted = new URLSearchParams(location.search).get('persona') || '';
-  udPick(list.some(p => p.slug === wanted) ? wanted : list[0].slug);
-}
-async function udPick(slug) {
-  udSlug = slug;
-  el('ud-persona').value = slug;
-  el('ud-grid').innerHTML = '';
   try {
-    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    // Removed source restriction so uploaded (and any other) images can be undressed
-    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image');
-    el('ud-grid').innerHTML = rows.length ? rows.map(m => `
-${udCard(m)}`).join('') : '<div class="ud-empty">No photos kept for this persona yet.</div>';
-    note('');
-  } catch (e) { note('Could not load the gallery.'); }
+    const d = await (await fetch('/api/undress/photos')).json();
+    const rows = d.photos || [];
+    el('ud-grid').innerHTML = rows.length ? rows.map(udCard).join('') : '<div class="ud-empty">No photos yet. Upload one to start.</div>';
+  } catch (e) { note('Could not load your photos.'); }
 }
 function udCard(m) {
-  return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="" data-id="${esc(m.id)}" onclick="udOpen(this)" style="cursor:zoom-in">
+  return `<div class="ud-card" data-card="${esc(m.id)}"><img src="${esc(m.url)}" loading="lazy" alt="" data-id="${esc(m.id)}" onclick="udOpen(this)" style="cursor:zoom-in">
+    <div class="ud-acts"><a href="${esc(m.url)}" download="photo-${esc(m.id)}.png" title="Download">Download</a><button type="button" onclick="udDel('${esc(m.id)}')">Delete</button></div>
     <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button></div>`;
+}
+async function udDel(id) {
+  if (!id || !confirm('Delete this photo?')) return;
+  try {
+    const d = await (await fetch('/api/undress/photos/' + encodeURIComponent(id), { method: 'DELETE' })).json();
+    if (!d.ok) return note(d.error || 'Delete failed.');
+    const c = document.querySelector('[data-card="' + id + '"]');
+    if (c) c.remove();
+    udClose();
+    if (!el('ud-grid').children.length) el('ud-grid').innerHTML = '<div class="ud-empty">No photos yet. Upload one to start.</div>';
+  } catch (e) { note('Delete failed.'); }
 }
 async function udUpload(input) {
   const file = input.files && input.files[0];
-  input.value = ''; 
+  input.value = '';
   if (!file) return;
-  if (!udSlug) return note('Please select a persona first.');
   const grid = el('ud-grid');
   const empty = grid.querySelector('.ud-empty');
   if (empty) empty.remove();
@@ -112,25 +114,16 @@ async function udUpload(input) {
   try {
     const fd = new FormData();
     fd.append('file', file);
-    fd.append('persona', udSlug);
-    const res = await fetch('/api/media/upload', {
-      method: 'POST',
-      body: fd
-    });
-    const d = await res.json();
-    if (!d.ok) {
-      pending.innerHTML = `<span>${esc(d.error || 'Upload failed.')}</span>`;
-      return;
-    }
+    const d = await (await fetch('/api/media/upload', { method: 'POST', body: fd })).json();
+    if (!d.ok) { pending.innerHTML = `<span>${esc(d.error || 'Upload failed.')}</span>`; return; }
     pending.outerHTML = udCard(d.media);
-    note('Upload complete.');
+    note('Upload complete. Click Undress on it.');
   } catch (e) {
     pending.innerHTML = '<span>Upload error.</span>';
   }
 }
 async function udGo(id) {
-  const slug = udSlug;
-  const grid = el('ud-grid');
+    const grid = el('ud-grid');
   const empty = grid.querySelector('.ud-empty');
   if (empty) empty.remove();
   const pending = document.createElement('div');
@@ -141,7 +134,7 @@ async function udGo(id) {
   try {
     const res = await fetch('/api/generate/undress', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug, media: id }),
+      body: JSON.stringify({ media: id }),
     });
     const d = await res.json();
     if (!d.ok) return fail(d.error || 'Undress failed.');
@@ -158,7 +151,7 @@ async function udGo(id) {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ keep: true, media_ids: [m.id] }),
     });
-    pending.outerHTML = udCard({ id: m.id, thumb: m.url });
+    pending.outerHTML = udCard({ id: m.id, url: m.url });
     note('Done — added to this page.');
   } catch (e) { fail('Undress failed.'); }
 }
@@ -170,6 +163,7 @@ function udShow() {
   const i = udImgs()[udIdx];
   if (!i) return udClose();
   el('ud-lb-img').src = i.src;
+  const dl = el('ud-lb-dl'); dl.href = i.src; dl.download = 'photo-' + i.dataset.id + '.png';
   el('ud-lb').classList.add('on');
 }
 function udStep(d) { const n = udImgs().length; if (n) { udIdx = (udIdx + d + n) % n; udShow(); } }

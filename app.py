@@ -929,9 +929,8 @@ def api_media_upload():
 
     persona_slug = request.form.get('persona')
     if not persona_slug:
-        return jsonify({'error': 'Persona slug required'}), 400
-
-    if not _can_edit_persona(persona_slug, user):
+        persona_slug = _undress_slug(user)
+    elif not _can_edit_persona(persona_slug, user):
         return jsonify({'error': 'Access denied'}), 403
 
     if 'file' not in request.files:
@@ -33912,11 +33911,11 @@ def api_generate_undress():
         return blocked
     user = _current_user()
     body = request.get_json(silent=True) or {}
-    slug = (body.get('persona') or '').strip().lower()
+    slug = (body.get('persona') or '').strip().lower() or _undress_slug(user)
     if not re.match(r'^[a-z0-9_-]+$', slug or ''):
         return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
     mine = owned_slugs()
-    if mine is not None and slug not in mine:
+    if mine is not None and slug not in mine and slug != _undress_slug(user):
         return jsonify({'ok': False, 'error': 'Not your persona'}), 403
     media_id = str(body.get('media') or '').strip()
     from db import get_persona_media
@@ -33924,7 +33923,7 @@ def api_generate_undress():
     try:
         row = get_persona_media(s, media_id) if media_id else None
         ok = (row is not None and row.slug == slug and (row.kind or 'image') == 'image'
-                            and row.source in ('generated', 'uploaded') and bool(row.gcs_path))
+                            and row.source in ('generated', 'upload', 'uploaded') and bool(row.gcs_path))
         size = _undress_aspect(row) if ok else ''
     finally:
         s.close()
@@ -33936,6 +33935,48 @@ def api_generate_undress():
             'batch': 1, 'shot': 'nude', 'explicit': True,
             'reference_media': media_id, 'addons': []}
     return _gen_submit(user, slug, spec, CR.quote(spec))
+
+
+def _undress_slug(user):
+    """Where the Undress page keeps a creator's photos: the account, not a persona."""
+    return 'acct-' + (user.get('workspace_id') or user['id'])
+
+
+@app.route('/api/undress/photos')
+def api_undress_photos():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _undress_slug(_current_user())
+    from db import SessionLocal, list_persona_media
+    s = SessionLocal()
+    try:
+        rows = [m for m in list_persona_media(s, slug)
+                if (m.kind or 'image') == 'image' and m.approved and m.gcs_path]
+        out = [{'id': m.id, 'url': f'/api/personas/{slug}/media/{m.id}/image'}
+               for m in reversed(rows)]
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'photos': out})
+
+
+@app.route('/api/undress/photos/<media_id>', methods=['DELETE'])
+def api_undress_photo_delete(media_id):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _undress_slug(_current_user())
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    try:
+        row = get_persona_media(s, media_id)
+        if not row or row.slug != slug:
+            return jsonify({'ok': False, 'error': 'Not found'}), 404
+        _gen_drop_media(s, row)
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True})
 
 
 def _undress_aspect(row):
@@ -34699,7 +34740,8 @@ def api_generate_keep():
     try:
         for mid in ids:
             row = get_persona_media(s, mid)
-            if not row or (mine is not None and row.slug not in mine):
+            if not row or (mine is not None and row.slug not in mine
+                           and row.slug != _undress_slug(user)):
                 continue
             if keep:
                 try:
