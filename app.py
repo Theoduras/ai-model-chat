@@ -21138,7 +21138,7 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
     try:
         with app.app_context():
             owner = wish['owner']
-            body = {'kind': 'image', 'batch': 1, 'model': 'z-image-turbo',
+            body = {'kind': 'image', 'batch': 1, 'model': 'seedream-4-5',
                     'rating': 'explicit' if wish['explicit'] else 'sfw',
                     'shot': 'nude' if wish['explicit'] else 'full',
                     'prompt': wish['scene'], 'clothing': wish['outfit']}
