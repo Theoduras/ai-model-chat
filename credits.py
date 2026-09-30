@@ -42,7 +42,9 @@ TOKEN_COST_USD = 0.04
 MIN_MARGIN_MULTIPLE = 2.25
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
-                'nano-banana-pro', 'nano-banana-2', 'z-image-turbo')
+                'nano-banana-pro', 'nano-banana-2')
+# z-image-turbo is parked until its LoRA identity works: its rows below stay,
+# and unparking is adding it back here and to imagegen.EXPLICIT_MODELS.
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is

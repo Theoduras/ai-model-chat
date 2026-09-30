@@ -251,7 +251,7 @@ def preserves_source(job, model_key):
 EXPLICIT_MODEL = 'seedream-4-5'
 # Every image model that may run an explicit shot as asked. credits imports
 # this module, so this is a copy of its MODEL_RATINGS; test_tokens pins the two.
-EXPLICIT_MODELS = (EXPLICIT_MODEL, 'z-image-turbo')
+EXPLICIT_MODELS = (EXPLICIT_MODEL,)
 # Z-Image takes no reference photos: identity is a LoRA (the persona's, set in
 # the wish panel) and this one is stacked on explicit shots only. Empty = none.
 ZIMAGE_NSFW_LORA = os.getenv('RW_ZIMAGE_NSFW_LORA', '').strip()
