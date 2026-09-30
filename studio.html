@@ -1188,8 +1188,9 @@ function syncClipExtras() {
     box.style.display = place && mine ? '' : 'none';
     box.querySelectorAll('.gen-clip-photos').forEach(r => { r.style.display = photos ? '' : 'none'; });
     box.querySelectorAll('.gen-place-note').forEach(n => {
-      n.textContent = photos ? 'The photo is read into the line above and also sent as the background.'
-        : 'The photo is read into the line above; this engine only takes the words.';
+      n.textContent = (photos ? 'The photo is read into the line above and also sent as the background.'
+        : 'The photo is read into the line above; this engine only takes the words.')
+        + ' Use a photo of the room without people in it — a person in it can end up in the clip.';
     });
   });
   document.querySelectorAll('.gen-kling-hint').forEach(h => { h.style.display = KLING_MC.includes(m) ? '' : 'none'; });

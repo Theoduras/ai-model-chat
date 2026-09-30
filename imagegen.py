@@ -1178,6 +1178,17 @@ def _roles_sentence(roles, at_images=False):
     return text[0].upper() + text[1:] + '. All the images of her are the same woman.'
 
 
+_OMNI_ROLE = {'face': 'shows her face (identity)',
+              'body': 'shows her full body (identity)',
+              'outfit': 'is for the outfit only',
+              'location': 'is for the location only'}
+
+
+def _omni_roles(roles):
+    return ' '.join(f'@Image{n} {_OMNI_ROLE.get(r, "shows her (identity)")}.'
+                    for n, r in enumerate(roles, 1))
+
+
 def _omni_swap_prompt(motion, roles, place):
     """Omni links its inputs only by tag: untagged, it follows the place line
     and leaves the person in the clip as she was. Each photo is named for what
@@ -1195,11 +1206,17 @@ def _omni_swap_prompt(motion, roles, place):
     else:
         scene = ('Keep the original motion, framing, pacing, lighting and '
                  'background exactly as they are in @Video1.')
+    if 'location' in tag:
+        scene += (f" Take only the room and background from {tag['location']}; "
+                  f"ignore any person in it — nobody from {tag['location']} "
+                  'appears in the clip.')
     if 'outfit' in tag:
         outfit = (f"She wears exactly the outfit shown in {tag['outfit']}, with the "
                   'same garments, colours, fabric, fit, length and every detail, '
                   'instead of the clothing in @Video1. Do not add, remove or '
-                  'restyle any piece of it.')
+                  f"restyle any piece of it. Take only the clothing from {tag['outfit']}"
+                  ' — not the person wearing it, her face, hair, body or the '
+                  'background.')
     else:
         outfit = 'Keep the clothing from @Video1.'
     identity = (IDENTITY_CLAUSE
@@ -1212,8 +1229,7 @@ def _omni_swap_prompt(motion, roles, place):
     return ' '.join(part for part in (
         f'Edit @Video1: replace the woman in @Video1 with the woman shown in {her}, '
         'keeping her face and body exactly as in those images.',
-        scene, outfit, identity, _roles_sentence(roles, True).replace(
-            ' All the images of her are the same woman.', ''),
+        scene, outfit, identity, _omni_roles(roles),
         motion + '.' if motion else '') if part)
 
 
