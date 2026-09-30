@@ -31397,6 +31397,12 @@ def _gen_spec(slug, body, user):
     spec.update({
         'scene': scene if scene in imagegen.SCENES else '',
         'location': location if imagegen.SCENES.get(location, ('',))[0] == 'sfw' else '',
+        # Typed by the creator in place of a pick. Only an explicit studio may
+        # type the act; a safe one never sends it.
+        'location_text': '' if location in imagegen.SCENES
+                         else re.sub(r'\s+', ' ', str(body.get('location_text') or '')).strip()[:120],
+        'scene_text': '' if level == 'sfw' or scene in imagegen.SCENES
+                      else re.sub(r'\s+', ' ', str(body.get('scene_text') or '')).strip()[:160],
         'style': (body.get('style') or '').strip().lower(),
         'camera': (body.get('camera') or '').strip().lower(),
         'lighting': (body.get('lighting') or '').strip().lower(),
@@ -32673,6 +32679,7 @@ def _gen_image_prompt(slug, spec, has_reference):
         zoom=spec.get('zoom', ''),
         location_ref=(('second-to-last' if spec.get('outfit_ref') else 'last')
                       if spec.get('location_ref') else ''),
+        location_text=spec.get('location_text', ''), scene_text=spec.get('scene_text', ''),
         banned=banned, age=age)
 
 
@@ -33815,17 +33822,23 @@ def api_generate_direction():
     scene = str(body.get('scene') or '').strip().lower()
     if scene not in imagegen.SCENES:
         scene = ''
-    spicy = CH.job_level(shot, scene) != 'sfw'
+    # A typed act stays off Google: it only ever reaches the built-in line.
+    scene_text = str(body.get('scene_text') or '').strip()[:160]
+    spicy = CH.job_level(shot, scene) != 'sfw' or bool(scene_text)
     expression = str(body.get('expression') or '').strip().lower()
+    location_text = str(body.get('location_text') or '').strip()[:120]
+    if scene_text:
+        return jsonify({'ok': True, 'source': 'auto', 'direction': scene_text[:300]})
     if body.get('mode') == 'auto':
         return jsonify({'ok': True, 'source': 'auto', 'direction': imagegen.doing_from_choices(
             shot, scene, str(body.get('location') or '').strip().lower(),
-            str(body.get('style') or '').strip().lower(), expression)})
+            str(body.get('style') or '').strip().lower(), expression,
+            location_text=location_text)})
     cfg = _persona_config(slug) or {}
     clothing = str(body.get('clothing') or '').strip()[:200]
     place = imagegen.SCENES.get(str(body.get('location') or '').strip().lower(), ('', ''))
     what = ', '.join(filter(None, (
-        place[1] if place[0] == 'sfw' else '',
+        place[1] if place[0] == 'sfw' else (f'in {location_text}' if location_text else ''),
         '' if spicy else imagegen.SHOT_FRAMING.get(shot, ''),
         '' if spicy else imagegen.SCENES.get(scene, ('', ''))[1],
         imagegen.STYLES.get(str(body.get('style') or ''), ''),
@@ -33859,7 +33872,8 @@ def api_generate_direction():
         logger.warning('direction suggestion failed: %s', str(e)[:200])
     return jsonify({'ok': True, 'source': 'built-in', 'direction': imagegen.doing_from_choices(
         shot, scene, str(body.get('location') or '').strip().lower(),
-        str(body.get('style') or '').strip().lower(), expression)})
+        str(body.get('style') or '').strip().lower(), expression,
+        location_text=location_text)})
 
 
 @app.route('/api/generate/job', methods=['POST'])

@@ -914,14 +914,16 @@ _DOING_SHOT = {'portrait': 'looking into the camera', 'closeup': 'looking into t
                'mirror': 'taking a mirror selfie'}
 
 
-def doing_from_choices(shot, scene='', location='', style='', expression='', rng=None):
+def doing_from_choices(shot, scene='', location='', style='', expression='', rng=None,
+                       location_text=''):
     """A short line for what she is doing that says only what the dropdowns
     already say ("taking a pov selfie in the kitchen, kissy pout"). Anything
     above safe-for-work keeps the built-in pose text, which is scene-specific."""
     if SHOT_LEVEL.get(shot, 'sfw') != 'sfw' or SCENES.get(scene, ('sfw',))[0] != 'sfw':
         return pick_direction(shot, scene, rng)
     verb = _DOING_STYLE.get(style) or _DOING_SHOT.get(shot) or 'posing'
-    place = SCENES.get(location or scene, ('', ''))[1]
+    place = SCENES.get(location or scene, ('', ''))[1] or (
+        f'in {location_text}' if location_text else '')
     mood = (EXPRESSIONS.get(expression) or ('', ''))[0].lower() if expression != 'auto' else ''
     return ', '.join(b for b in (' '.join(b for b in (verb, place) if b), mood) if b)
 
@@ -1025,7 +1027,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
                  banned=(), age=None, quality='', clothing='', features='',
                  expression='', smudges=False, location='', zoom='',
-                 location_ref=''):
+                 location_ref='', location_text='', scene_text=''):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -1038,7 +1040,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     outfit = outfit or {}
     clothing = (clothing or outfit.get('clothing') or '').strip().rstrip('.')
     level = SHOT_LEVEL.get(shot, 'sfw')
-    scene_row = SCENES.get(scene, ('sfw', ''))
+    scene_row = ('explicit', scene_text) if scene_text else SCENES.get(scene, ('sfw', ''))
     intimate = level != 'sfw' or scene_row[0] != 'sfw'
 
     zoomed = zoom_text(zoom)
@@ -1047,13 +1049,16 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                or SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait']))
     where = (clothing and SCENES_BARE.get(scene)) or scene_row[1]
     place = SCENES.get(location, ('', ''))[1] if SCENES.get(location, ('',))[0] == 'sfw' else ''
+    if location_text and not place:
+        place = (location_text if re.match(r'(in|at|on|by|inside|outside|near|under)\b',
+                                           location_text, re.I) else 'in ' + location_text)
     if location_ref:
         # The creator's own photo of the place wins over every dropdown.
         place = ''
         where = ('' if scene_row[0] == 'sfw'
                  else SCENES_ACTION.get(scene) or SCENES_BARE.get(scene) or where)
     if place:
-        act = '' if scene in ('', location) else (SCENES_ACTION.get(scene) or where)
+        act = scene_text or ('' if scene in ('', location) else (SCENES_ACTION.get(scene) or where))
         where = ', '.join(b for b in (place, act) if b)
     if not where and outfit.get('location'):
         where = f"in {outfit['location']}"

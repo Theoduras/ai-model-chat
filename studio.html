@@ -172,7 +172,7 @@
     .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
     .gen-q-row b { font-family: var(--display); font-size: 1.05rem; color: var(--text); }
 
-    .gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 10px; }
+    .gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 12px 10px; }
     .gen-form > .hint { grid-column: 1 / -1; }
     .gen-stackform { display: flex; flex-direction: column; gap: 12px; }
     .gen-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -180,6 +180,20 @@
     body.page-dashboard .gen-f select, body.page-dashboard .gen-f input[type="text"],
     body.page-dashboard .gen-f textarea { font-size: 0.84rem; padding: 9px 12px; }
     body.page-dashboard .gen-f select { padding-right: 32px; }
+    .gen-f > label, .gen-lbl label { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
+    .gen-form > .gen-wide { grid-column: 1 / -1; }
+    .gen-form > .gen-f > span:not(.hint), .gen-form > .gen-f > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    #gen-direction-btn { align-self: stretch; padding: 0 14px; white-space: nowrap; }
+    .gen-lbl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    .gen-tag-nsfw { font-style: normal; font-size: 0.62rem; font-weight: 700; letter-spacing: .04em;
+      color: var(--accent); border: 1px solid var(--accent-line); border-radius: 999px; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
+    .gen-info { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); background: var(--panel);
+      color: var(--text-2); border-radius: 999px; padding: 3px 9px 3px 4px; font-family: var(--font); font-size: 0.7rem; cursor: pointer;
+      transition: border-color .15s, color .15s; }
+    .gen-info span { width: 15px; height: 15px; border-radius: 50%; border: 1px solid currentColor; display: grid; place-items: center;
+      font-size: 0.6rem; font-weight: 700; font-style: italic; font-family: Georgia, serif; line-height: 1; }
+    .gen-info:hover, .gen-info[aria-expanded="true"] { border-color: var(--accent-line); color: var(--text); }
+    .gen-f .note-box { font-size: 0.76rem; padding: 10px 12px; }
     .gen-group { display: flex; flex-direction: column; gap: 10px; padding-top: 12px; border-top: 1px solid var(--border-soft); }
     .gen-group:first-child { border-top: 0; padding-top: 0; }
     .gen-group h3 { margin: 0; font-size: 0.7rem; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); }
@@ -372,11 +386,23 @@
         <section class="gen-group">
           <h3>The shot</h3>
           <div class="gen-form">
-            <label class="gen-f"><span>Where is she</span>
-              <select id="gen-scene"></select></label>
-            <label class="gen-f" id="gen-scene-nsfw-wrap" hidden><span>What is happening (NSFW)</span>
-              <select id="gen-scene-nsfw"></select></label>
-            <label class="gen-f"><span>What kind of content</span>
+            <div class="gen-f gen-wide"><label for="gen-scene">Where is she</label>
+              <select id="gen-scene"></select>
+              <input type="text" id="gen-location-text" maxlength="120" hidden
+                     placeholder="a rooftop bar in Tokyo at dusk" aria-label="Your own location"></div>
+            <div class="gen-f gen-wide" id="gen-scene-nsfw-wrap" hidden>
+              <div class="gen-lbl"><label for="gen-scene-nsfw">What is happening <em class="gen-tag-nsfw">18+</em></label>
+                <button type="button" class="gen-info" aria-expanded="false" aria-controls="gen-scene-nsfw-help"
+                        onclick="const o = this.getAttribute('aria-expanded') !== 'true'; this.setAttribute('aria-expanded', o); el('gen-scene-nsfw-help').hidden = !o;">
+                  <span aria-hidden="true">i</span> What is this?</button></div>
+              <div class="note-box" id="gen-scene-nsfw-help" hidden>
+                Sets <b>what she is doing</b> in an explicit shot — the act or pose. It is added on top of
+                “Where is she”, not instead of it. Leave it on <b>—</b> for a photo with no explicit action,
+                or pick <b>Write your own…</b> to describe it in your words.</div>
+              <select id="gen-scene-nsfw"></select>
+              <input type="text" id="gen-scene-text" maxlength="160" hidden
+                     placeholder="describe what she is doing" aria-label="Your own action"></div>
+            <label class="gen-f"><span>Content type</span>
               <select id="gen-shot" onchange="genQuote()"></select></label>
             <label class="gen-f"><span>Style</span>
               <select id="gen-style"></select></label>
@@ -737,7 +763,29 @@ function esc(s){ return (s||'').replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','
 // Where she is: an NSFW place, when one is picked, wins over the safe one.
 function genScene() {
   const n = el('gen-scene-nsfw');
-  return (n && !el('gen-scene-nsfw-wrap').hidden && n.value) || (el('gen-scene') || {}).value || '';
+  const v = (n && !el('gen-scene-nsfw-wrap').hidden && n.value) || genLocationKey();
+  return v === CUSTOM ? '' : v;
+}
+// "Write your own…" in either dropdown: the typed words go instead of a key.
+const CUSTOM = '__custom';
+function genLocationKey() {
+  const v = (el('gen-scene') || {}).value || '';
+  return v === CUSTOM ? '' : v;
+}
+function genTyped() {
+  const loc = (el('gen-scene') || {}).value === CUSTOM && !genLocation;
+  const act = genRating === 'nsfw' && !el('gen-scene-nsfw-wrap').hidden
+    && el('gen-scene-nsfw').value === CUSTOM;
+  return {
+    location_text: loc ? el('gen-location-text').value.trim() : '',
+    scene_text: act ? el('gen-scene-text').value.trim() : '',
+  };
+}
+function syncCustomFields() {
+  const loc = el('gen-scene').value === CUSTOM;
+  el('gen-location-text').hidden = !loc;
+  el('gen-location-text').disabled = !!genLocation;
+  el('gen-scene-text').hidden = el('gen-scene-nsfw').value !== CUSTOM;
 }
 
 function slug(){ const v = (el('persona')||{}).value || ''; return /^(char|own):/.test(v) ? '' : v; }
@@ -1012,6 +1060,7 @@ function renderLocations() {
     `<button type="button" class="gen-outfit-add" onclick="openVaultPick('locations')">From vault</button>`;
   document.querySelectorAll('.gen-clip-locations').forEach(b => { b.innerHTML = el('gen-locations').innerHTML; });
   el('gen-scene').disabled = !!genLocation;
+  syncCustomFields();
   el('gen-location-note').textContent = genLocation
     ? 'Using your photo of the place — “Where is she” is off while it is picked.'
     : 'A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.';
@@ -1845,12 +1894,15 @@ function renderGenForm() {
     // The scene list arrives gated to this persona already; the rating toggle
     // only hides the explicit half, and picking a scene never touches the shot.
     scene.innerHTML = `<option value="">Anywhere</option>` +
-      genScenes.filter(sc => sc.level === 'sfw').map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('');
+      genScenes.filter(sc => sc.level === 'sfw').map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('') +
+      opt(CUSTOM, 'Write your own…', keep);
     const nsfw = el('gen-scene-nsfw'), keepN = nsfw.value;
     const explicit = genRating === 'nsfw' ? genScenes.filter(sc => sc.level !== 'sfw') : [];
     nsfw.innerHTML = `<option value="">—</option>` +
-      explicit.map(sc => opt(sc.key, prettyKey(sc.key), keepN)).join('');
-    el('gen-scene-nsfw-wrap').hidden = !explicit.length;
+      explicit.map(sc => opt(sc.key, prettyKey(sc.key), keepN)).join('') +
+      opt(CUSTOM, 'Write your own…', keepN);
+    el('gen-scene-nsfw-wrap').hidden = genRating !== 'nsfw';
+    syncCustomFields();
   }
   fillVocab('gen-style', genStyles);
   fillVocab('gen-camera', genCameras);
@@ -2593,7 +2645,7 @@ let genWritten = null;
 function promptChoices() {
   return {
     persona: slug(), rating: genRating, model: el('gen-model').value,
-    shot: el('gen-shot').value, scene: genScene(), location: (el('gen-scene') || {}).value || '',
+    shot: el('gen-shot').value, scene: genScene(), location: genLocationKey(), ...genTyped(),
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
@@ -2640,10 +2692,9 @@ let genPromptSeq = 0, genPromptTimer = null;
 async function autoWritePrompt() {
   const ta = el('gen-prompt');
   if (!ta || !slug() || genMake !== 'image') return;
-  const pristine = !ta.value.trim() || (genWritten && ta.value === genWritten.prompt);
-  if (!pristine) { checkPromptStale(); return; }
   const seq = ++genPromptSeq;
   const choices = promptChoices();
+  if (genWritten && genWritten.choices === JSON.stringify(choices)) return;
   try {
     const res = await fetch('/api/generate/prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -2651,11 +2702,42 @@ async function autoWritePrompt() {
     });
     const d = await res.json();
     if (!d.ok || seq !== genPromptSeq) return;
-    if (ta.value.trim() && !(genWritten && ta.value === genWritten.prompt)) return;
-    ta.value = d.prompt;
+    const mine = ta.value;
+    const edited = mine.trim() && !(genWritten && mine === genWritten.prompt);
+    ta.value = edited && genWritten ? mergePrompt(genWritten.prompt, d.prompt, mine) : d.prompt;
     genWritten = { choices: JSON.stringify(choices), prompt: d.prompt };
-    el('gen-write-note').textContent = 'Follows your choices — edit it and it stays as you wrote it.';
+    el('gen-write-note').textContent = edited
+      ? 'Your edits are kept — new choices are added in.'
+      : 'Follows your choices — your own edits stay when a choice changes.';
   } catch (e) {}
+}
+
+// A three-way merge by sentence: what the choices dropped since the last build
+// leaves her text, what they added goes in where the old one sat, and every
+// word she wrote herself stays.
+function splitSentences(t) {
+  return (t.match(/[^.!?]+[.!?]*/g) || []).map(x => x.trim()).filter(Boolean);
+}
+function mergePrompt(base, next, mine) {
+  const b = splitSentences(base), n = splitSentences(next);
+  const out = splitSentences(mine);
+  const gone = b.filter(x => !n.includes(x));
+  const added = n.filter(x => !b.includes(x));
+  const slots = [];
+  gone.forEach(x => {
+    const i = out.indexOf(x);
+    if (i >= 0) { slots.push(i); out[i] = null; }
+  });
+  added.forEach(x => {
+    if (out.includes(x)) return;
+    let at = slots.length ? slots.shift() : -1;
+    if (at >= 0) { out[at] = x; return; }
+    const ni = n.indexOf(x);
+    const prev = n.slice(0, ni).reverse().find(p => out.includes(p));
+    at = prev ? out.indexOf(prev) + 1 : (ni === 0 ? 0 : out.length);
+    out.splice(at, 0, x);
+  });
+  return out.filter(x => x !== null).join(' ');
 }
 
 // The clip's prompt, shown the way the job builds it. Same rule as a still's:
@@ -2738,9 +2820,10 @@ function checkPromptStale() {
 }
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
+  if (['gen-scene', 'gen-scene-nsfw'].includes(id)) syncCustomFields();
   if (['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-camera', 'gen-lighting',
        'gen-expression', 'gen-zoom', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction',
-       'gen-ref', 'gen-model'].includes(id)) { checkPromptStale(); queueAutoPrompt(); }
+       'gen-ref', 'gen-model', 'gen-location-text', 'gen-scene-text'].includes(id)) { checkPromptStale(); queueAutoPrompt(); }
 }));
 
 // The direction fills itself in from the shot and scene, and only while it
@@ -2753,7 +2836,7 @@ function directionChoices() {
     persona: slug(), rating: genRating, shot: el('gen-shot').value,
     scene: (genLocation && ((genScenes.find(x => x.key === genScene()) || {}).level === 'sfw'))
       ? '' : genScene(),
-    location: genLocation ? '' : (el('gen-scene') || {}).value || '',
+    location: genLocation ? '' : genLocationKey(), ...genTyped(),
     style: el('gen-style').value, expression: el('gen-expression').value,
     clothing: el('gen-clothing').value.trim(),
   };
@@ -2807,7 +2890,8 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'gen-direction') delete e.target.dataset.auto;
 });
 document.addEventListener('change', e => {
-  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-expression'].includes(e.target.id)) return;
+  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-expression',
+                     'gen-location-text', 'gen-scene-text'].includes(e.target.id)) return;
   refreshShot();
 });
 
@@ -2957,7 +3041,7 @@ async function runGeneration() {
         prompt: el('gen-prompt').value.trim(),
         prompt_mode: el('gen-prompt').value.trim() ? 'full' : '',
         negative: el('gen-negative').value.trim(),
-        scene: genScene(), location: (el('gen-scene') || {}).value || '',
+        scene: genScene(), location: genLocationKey(), ...genTyped(),
         style: el('gen-style').value,
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,
