@@ -34231,7 +34231,7 @@ def api_generate_models():
     if blocked:
         return blocked
     query = (request.args.get('q') or '').strip()
-    category = (request.args.get('category') or 'video').strip() or None
+    category = (request.args.get('category') or '').strip() or None
     try:
         return jsonify({'ok': True, 'query': query,
                         'models': imagegen.search_models(query, category)})

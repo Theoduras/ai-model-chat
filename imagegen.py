@@ -560,7 +560,11 @@ def video_seconds(model_key, seconds):
     return max(lo, min(hi, int(seconds or 0) or lo))
 
 
-def search_models(query, category='video', limit=20):
+RUNWARE_SEARCH_CATEGORIES = ('checkpoint', 'lora', 'lycoris', 'controlnet',
+                             'vae', 'embeddings')
+
+
+def search_models(query, category=None, limit=20):
     """Ask the provider which models it has, by name.
 
     Every model id in this file was read off documentation; three of them were
@@ -572,7 +576,9 @@ def search_models(query, category='video', limit=20):
             'taskUUID': str(uuid.uuid4()),
             'search': str(query or '')[:80],
             'limit': max(1, min(int(limit or 20), 50))}
-    if category:
+    # Runware's categories are model kinds, not media: 'video' is not one, and
+    # sending it filtered every answer away. Anything else searches everything.
+    if category in RUNWARE_SEARCH_CATEGORIES:
         task['category'] = category
     rows = provider._send([task])
     out = []
@@ -1621,7 +1627,7 @@ _BAD_MODEL = "Invalid value for 'model'"
 
 
 # What to search the provider's catalogue for when it refuses one of our ids.
-MODEL_SEARCH_NAMES = {'wan-2-2-animate': 'wan animate'}
+MODEL_SEARCH_NAMES = {'wan-2-2-animate': ('wan animate', 'animate', 'wan2.2')}
 
 
 def _bad_model_error(tasks, err):
@@ -1635,13 +1641,15 @@ def _bad_model_error(tasks, err):
     said = ', '.join(f"{a!r} ({names[a]})" if a in names else repr(a) for a in sent) or 'none'
     found = ''
     keys = [names[a] for a in sent if a in names]
+    hits = []
     if keys:
-        query = MODEL_SEARCH_NAMES.get(keys[0]) or keys[0].replace('-', ' ')
-        category = 'video' if keys[0] in RUNWARE_VIDEO_MODELS else 'image'
-        try:
-            hits = search_models(query, category, limit=5)
-        except Exception:
-            hits = []
+        for query in MODEL_SEARCH_NAMES.get(keys[0]) or (keys[0].replace('-', ' '),):
+            try:
+                hits = search_models(query, limit=5)
+            except Exception:
+                hits = []
+            if hits:
+                break
         if hits:
             found = (' Runware lists: ' + '; '.join(
                 f"{h['air']} ({h['name']})" if h['name'] else h['air'] for h in hits) + '.')
