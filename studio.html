@@ -1041,7 +1041,9 @@ function renderClipLib() {
     box.innerHTML = genClips.map(c => `
       <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${c.id === cur.id}"
             title="${c.seconds}s, ${c.resolution}" onclick="pickClip('${c.id}', '${into}')">
-        ${c.poster_url ? `<img src="${esc(c.poster_url)}" alt="Clip">` : ''}
+        ${c.poster_url ? `<img src="${esc(c.poster_url)}" alt="Clip">`
+          : `<video src="${esc(c.url)}#t=0.5" preload="metadata" muted playsinline
+                    style="width:100%;height:100%;object-fit:cover;border-radius:inherit;pointer-events:none"></video>`}
         <b style="position:absolute;left:3px;bottom:3px;font-size:11px;background:#000a;padding:0 4px;border-radius:4px">${c.seconds}s</b>
         <button type="button" class="x" aria-label="Delete clip"
           onclick="event.stopPropagation(); deleteClip('${c.id}')">&times;</button>
@@ -1311,6 +1313,9 @@ function videoModelChips(box, note) {
       ? `${videoLabel(offered[0])} is the only model that serves ` +
         `${want === 'nsfw' ? 'explicit' : 'safe'} clips.`
       : 'Priced by the second, so a longer clip costs proportionally more.';
+    if (genJob === 'reel' && !genDrive) {
+      note.textContent += ' Pick or upload a clip below to also use Replace, Kling and Omni.';
+    }
   }
 }
 
