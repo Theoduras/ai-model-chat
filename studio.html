@@ -1265,6 +1265,9 @@ async function deleteClip(id) {
 // prompt from what is picked; a replace works on a clip it was handed.
 function engineUses(field, m) {
   const kling = KLING_MC.includes(m);
+  // One image, which is her, her outfit and the place: only the clip's movement
+  // is taken, so a place or an outfit photo would change nothing.
+  if (m === 'wan-2-2-animate' && genJob === 'animate' && ['place', 'photos'].includes(field)) return false;
   const clipModel = CLIP_MODELS.includes(m);
   const haveClip = genJob === 'swap' ? !!genSwap : !!genDrive;
   switch (field) {
@@ -2019,12 +2022,20 @@ function renderImageRes() {
 // promise the clip will not keep.
 function aspectModel() {
   return genMake === 'swap' ? swapModel()
-    : genJob === 'reel' ? videoModelNow() : videoModel();
+    : genJob === 'reel' ? videoModelNow() : animateEngine();
 }
 
 // The model this form will actually run, after the server's own moves.
 function engineModel() {
-  return genJob === 'swap' ? swapModel() : genJob === 'reel' ? videoModelNow() : videoModel();
+  return genJob === 'swap' ? swapModel() : genJob === 'reel' ? videoModelNow() : animateEngine();
+}
+
+// An Animate with a motion clip runs where the server sends it, whatever the
+// picker says: Wan 2.7 for safe work, Wan 2.2 Animate for explicit.
+function animateEngine() {
+  if (genJob !== 'animate' || !genDrive || !genPrices) return videoModel();
+  return (genRating === 'sfw' ? genPrices.video_edit_model
+    : genPrices.explicit_motion_model) || videoModel();
 }
 
 function aspectOffered() {
@@ -2594,8 +2605,7 @@ function videoModelNow() {
     if (reelChar() && !REF_VIDEO_MODELS.includes(m)) return 'wan-2-7';
     return m;
   }
-  return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
-                  : videoModel();
+  return animateEngine();
 }
 
 function videoSecondsNow() {
@@ -3218,7 +3228,7 @@ async function jobPayload() {
     reference_media: animPhoto(),
     motion: (el('gen-video-motion') || {}).value || '',
     source: genDrive ? genDrive.id : '',
-  });
+  }, genDrive ? clipExtrasPayload() : {});
 }
 
 async function runVideoJob() {

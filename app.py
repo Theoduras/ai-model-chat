@@ -31720,6 +31720,13 @@ def _clip_refs(slug, spec, job_id=''):
     return refs, roles
 
 
+def _is_wan_animate(job, spec):
+    """An explicit Animate with a motion clip: Wan 2.2 Animate in animate
+    mode, where the photo is her and the clip only moves her."""
+    return (job == 'animate' and bool(spec.get('source_path'))
+            and spec.get('model') == imagegen.EXPLICIT_MOTION_MODEL)
+
+
 def _gen_video_prompt(slug, spec):
     """The words a clip job would be sent with, built the way the submit path
     builds them, for the studio's Advanced panel. The images it names come
@@ -31729,6 +31736,8 @@ def _gen_video_prompt(slug, spec):
     motion = spec.get('motion', '') or spec.get('prompt_extra', '')
     char = spec.get('character')
     picked = spec.get('identity_media') or []
+    if _is_wan_animate(job, spec):
+        return imagegen.build_animate_prompt(spec.get('prompt_extra') or motion)
     if job == 'swap' or (job == 'reel' and spec.get('source_path')):
         text = motion if job == 'swap' else (spec.get('prompt_extra') or motion)
         if not imagegen.locks_identity(model):
@@ -34281,7 +34290,7 @@ def api_generate_models():
     if blocked:
         return blocked
     query = (request.args.get('q') or '').strip()
-    category = (request.args.get('category') or 'video').strip() or None
+    category = (request.args.get('category') or '').strip() or None
     try:
         return jsonify({'ok': True, 'query': query,
                         'models': imagegen.search_models(query, category)})
@@ -34829,18 +34838,24 @@ def _gen_start(job_id, slug, spec, workspace):
                         raise imagegen.GenerationError(
                             'That uploaded clip is no longer there. Upload it again.')
                     call['source_url'] = url
-                    refs, roles = _clip_refs(slug, spec, job_id)
-                    call['prompt'] = imagegen.build_swap_prompt(
-                        motion if job == 'swap'
-                        else (spec.get('prompt_extra') or motion),
-                        preserve=imagegen.preserves_source(
-                            'swap', spec.get('model')),
-                        roles=roles if imagegen.locks_identity(
-                            spec.get('model')) else None,
-                        place=spec.get('place') or '',
-                        at_images=imagegen.uses_at_images(spec.get('model')))
-                    if refs:
-                        call['reference_urls'] = refs
+                    if _is_wan_animate(job, spec):
+                        # One image: the photo being animated, already in
+                        # reference_b64. Her other references would displace it.
+                        call['prompt'] = imagegen.build_animate_prompt(
+                            spec.get('prompt_extra') or motion)
+                    else:
+                        refs, roles = _clip_refs(slug, spec, job_id)
+                        call['prompt'] = imagegen.build_swap_prompt(
+                            motion if job == 'swap'
+                            else (spec.get('prompt_extra') or motion),
+                            preserve=imagegen.preserves_source(
+                                'swap', spec.get('model')),
+                            roles=roles if imagegen.locks_identity(
+                                spec.get('model')) else None,
+                            place=spec.get('place') or '',
+                            at_images=imagegen.uses_at_images(spec.get('model')))
+                        if refs:
+                            call['reference_urls'] = refs
                 if spec.get('video_prompt'):
                     call['prompt'] = _gen_own_video_prompt(spec)
                 provider_job, result = provider.submit_video(call)
