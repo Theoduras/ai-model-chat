@@ -1120,6 +1120,7 @@ function render() {
   renderFrame();
   decorateInfo();
   maybeTour();
+  autoDerive();
 }
 // ── Help (the i icons) ──────────────────────────────────────────────────────
 const HELP = {
@@ -1172,7 +1173,7 @@ const VIEW_HELP = {
   feet: 'A close-up of the tops of her bare feet, built from the front photo.',
   feet_soles: 'A close-up of the soles of her feet, built from the front photo. Approved together with the top of the foot.',
   breasts: 'A close-up of her bare breasts, built from the front body photo and your breast and nipple choices.',
-  nipples: 'A macro crop of her nipples and areolae, cut from the breast photo.',
+  nipples: 'A close-up of her nipples and areolae, cut automatically from her approved breasts photo. There is nothing to generate or choose.',
   nude_front: 'Her full body from the front, topless (or nude at Explicit). Built last, from the front photo, breasts and nipples and, at Explicit, the pubic and vagina photos, so the whole body already matches them.',
   rear_nude: 'Her full body from behind, topless (or nude at Explicit).',
   pubic: 'A close-up of her pubic area, built from the front body photo, with the style you chose. The vagina and the full nude are built from it.',
@@ -1274,7 +1275,7 @@ const ALL_STEPS = [
    sub: 'Breasts, nipples, pubic hair, vulva and anus. Choose everything here first: her intimate photos are generated from these choices, so nothing has to be redrawn later.'},
   {key: 'photos_intimate', stage: 'intimate', nsfw: true, nav: 'Intimate photos', title: 'Approve her intimate photos',
    views: ['breasts', 'nipples', 'pubic', 'vulva_closed', 'vulva_open', 'nude_front', 'rear_nude', 'anus_closed', 'anus_open'],
-   sub: 'Each photo is built from the ones before it and from your intimate details: breasts and nipples first, then pubic area and vagina at Explicit, and the full nude last from all of them. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
+   sub: 'Each photo is built from the ones before it and from your intimate details: breasts first (her nipples are cut from that photo automatically), then pubic area and vagina at Explicit, and the full nude last from all of them. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
    sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
 ];
@@ -1293,8 +1294,12 @@ const isPhotos = () => !!(curStep() && curStep().views);
 const stepViews = t => t.views.map(viewDef).filter(Boolean);
 const stepOfView = key => STEPS.find(x => x.views && x.views.includes(key));
 // A photo step is optional when none of its photos is required at her level.
-const reqViews = t => stepViews(t).filter(v => v.required);
-const stepOptional = t => !!t.views && !reqViews(t).length;
+// A derived view is cut from its parent's photo by the page itself, so it is
+// never listed or chosen; it only gates what is built from it.
+const DERIVED = {nipples: 'breasts'};
+const listedViews = t => stepViews(t).filter(v => !DERIVED[v.key]);
+const reqViews = t => listedViews(t).filter(v => v.required);
+const stepOptional = t => !!t.views && !stepViews(t).some(v => v.required);
 const seenChoice = k => PageWizard.seen(setupKey()).includes(k);
 let guided = false, showDone = false;
 const setupKey = () => 'character:' + cur.id;
@@ -1377,6 +1382,8 @@ function stepWhy(i) {
     const vws = reqViews(t), left = vws.filter(v => vs(v.key).status !== 'approved');
     // An optional photo being open never holds Continue; the next required one does.
     if (left.length) return `Approve ${left[0].label} to continue (${vws.length - left.length} of ${vws.length} required).`;
+    const wait = stepViews(t).find(v => DERIVED[v.key] && v.required && vs(v.key).status !== 'approved');
+    if (wait) return derivedFailed.has(wait.key) ? `Her ${wait.label.toLowerCase()} could not be prepared \u2014 press Retry.` : `Preparing her ${wait.label.toLowerCase()} from her ${viewDef(DERIVED[wait.key]).label.toLowerCase().split(' (')[0]} photo\u2026`;
   }
   if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
@@ -1456,7 +1463,7 @@ const RAIL_ICON = {approved: '\u2713', review: '\u25cf', generating: '\u25cf', o
 function railPhotos(i) {
   const t = STEPS[i];
   if (!t || !t.views) return '';
-  const rows = stepViews(t).map(v => {
+  const rows = listedViews(t).map(v => {
     const d = vs(v.key).display;
     return `<button type="button" class="ob-rsub ${d}${selView === v.key && step === t.key ? ' on' : ''}" onclick="openView('${v.key}')">
       <span class="ob-rsub-i">${RAIL_ICON[d] || '\u25cb'}</span><span class="ob-rsub-t">${esc(v.label)}</span>${v.required ? '' : '<span class="ob-rsub-o">optional</span>'}</button>`;
@@ -2001,14 +2008,56 @@ function shotRow(v) {
 function paintStepCard() {
   const t = curStep();
   if (!t || !t.views) return;
-  const vws = stepViews(t), req = vws.filter(v => v.required), opt = vws.filter(v => !v.required);
+  const vws = listedViews(t), req = vws.filter(v => v.required), opt = vws.filter(v => !v.required);
   const n = req.filter(v => vs(v.key).status === 'approved').length;
   el('step-card-title').textContent = t.nav;
   el('step-progress').textContent = req.length ? `${n} of ${req.length} required approved` : 'all optional';
   el('body-batch-chips').innerHTML = batchChips();
-  el('step-shots').innerHTML =
+  el('step-shots').innerHTML = derivedRows(t) +
     (req.length ? `<div class="shots-h">Required${info('shots:required')}</div>` + req.map(shotRow).join('') : '')
     + (opt.length ? `<div class="shots-h">Optional extras${info('shots:optional')}</div>` + opt.map(shotRow).join('') : '');
+}
+const derivedDone = new Set(), derivedFailed = new Set();
+let derivedBusy = false;
+function derivedRows(t) {
+  return stepViews(t).filter(v => DERIVED[v.key]).map(v => {
+    const parentLabel = viewDef(DERIVED[v.key]).label.toLowerCase().split(' (')[0], st = vs(v.key);
+    const state = st.status === 'approved' && st.display !== 'outdated' ? '\u2713 Done'
+      : derivedFailed.has(v.key) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="retryDerived('${v.key}')">Retry</button>`
+      : canonOf(DERIVED[v.key]) ? 'Preparing\u2026' : `Waits for ${parentLabel}`;
+    return `<div class="shots-h">Automatic</div><div class="step-shot"><div class="sn">${esc(v.label.split(' (')[0])}${info('view:' + v.key)}<br>
+      <span class="hint">Cut from her ${esc(parentLabel)} photo. Nothing to choose.</span></div><span class="hint">${state}</span></div>`;
+  }).join('');
+}
+// Approves the crop of the parent's region as the derived photo, with no
+// generation: the parent already shows exactly what the crop should.
+async function autoDerive() {
+  if (derivedBusy || !cur || !cat) return;
+  for (const [key, parentKey] of Object.entries(DERIVED)) {
+    const v = viewDef(key), st = vs(key), parent = canonOf(parentKey);
+    if (!v || !parent || st.display === 'locked' || st.display === 'generating') continue;
+    if (st.status === 'approved' && st.display !== 'outdated') continue;
+    const stamp = key + ':' + parent.id;
+    if (derivedDone.has(stamp)) continue;
+    derivedDone.add(stamp);
+    derivedBusy = true;
+    try {
+      const image = await cropParent(key, true);
+      const added = await api(`/api/characters/${cur.id}/images`, {body: {view: key, image, crop_as: 'candidate'}});
+      await approveImage(cur.id, added.image.id, {});
+      derivedFailed.delete(key);
+    } catch (e) {
+      derivedFailed.add(key);
+    }
+    derivedBusy = false;
+    try { await reload(); } catch (e) {}
+    return;
+  }
+}
+function retryDerived(key) {
+  derivedFailed.delete(key);
+  for (const stamp of [...derivedDone]) if (stamp.startsWith(key + ':')) derivedDone.delete(stamp);
+  render();
 }
 function generateOne(key) {
   selView = key;
