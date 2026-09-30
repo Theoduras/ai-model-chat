@@ -641,6 +641,11 @@
           <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
                  oninput="genQuote()"
                  placeholder="what you want to hear">
+          <div id="gen-audio-upload" class="gen-stackform" style="display:none">
+            <div class="gen-chips" id="gen-audio-lib"></div>
+            <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Upload audio
+              <input type="file" accept="audio/*" onchange="uploadAudio(this)"></label>
+          </div>
           <span class="hint" id="gen-audio-note"></span>
         </div>
       </div>
@@ -1935,13 +1940,33 @@ function pickImageAspect(a) {
 }
 
 const AUDIO_LABELS = {
+  original: "Clip's own sound", none: 'No sound', upload: 'Upload my audio',
+  lipsync: 'New dialogue (lip-synced)', music: 'Music',
   ambience: 'Room tone', moaning: 'Breathing & moaning',
-  speech: 'She says a line', custom: 'Describe it',
+  speech: 'She says a line', custom: 'Describe the sound',
 };
 const AUDIO_PLACEHOLDERS = {
   speech: 'the line she says, in her own voice',
+  lipsync: 'the line she says — her mouth moves to it',
+  music: 'the mood, e.g. slow lo-fi, late night',
   custom: 'rain on the window, a television two rooms away',
 };
+const AUDIO_NOTES = {
+  original: 'Keeps the sound of the clip you uploaded. Free.',
+  none: 'The clip comes back silent. Free.',
+  upload: 'Your track replaces the clip’s sound, cut to its length. Free.',
+};
+let genAudioLib = [];
+
+function hasSourceClip() {
+  return genJob === 'swap' ? !!genSwap : !!genDrive;
+}
+
+function audioModes() {
+  const gen = soundOffered() ? (genPrices.audio_modes || []).filter(m => m !== 'speech'
+    && (m !== 'moaning' || genRating !== 'sfw')) : ['lipsync'];
+  return (hasSourceClip() ? ['original'] : []).concat(['none', 'upload'], gen);
+}
 
 function renderAudioModes() {
   const box = el('gen-audio-modes');
@@ -1949,39 +1974,76 @@ function renderAudioModes() {
   const field = el('gen-audio-prompt');
   if (!box || !genPrices) return;
   const rowA = el('gen-audio-row');
-  if (rowA) rowA.style.display = soundOffered() ? '' : 'none';
-  const modes = genPrices.audio_modes || [];
-  box.innerHTML = [''].concat(modes).map(m =>
-    `<button type="button" class="gen-chip" aria-pressed="${m === (genAudio.mode || '')}"
-       onclick="pickAudio('${m}')">${esc(m ? (AUDIO_LABELS[m] || m) : 'Silent')}</button>`).join('');
-  const typed = genAudio.mode === 'speech' || genAudio.mode === 'custom';
+  if (rowA) rowA.style.display = genMake === 'image' ? 'none' : '';
+  const modes = audioModes();
+  if (!modes.includes(genAudio.mode)) genAudio = { mode: modes[0] };
+  box.innerHTML = modes.map(m =>
+    `<button type="button" class="gen-chip" aria-pressed="${m === genAudio.mode}"
+       onclick="pickAudio('${m}')">${esc(AUDIO_LABELS[m] || m)}</button>`).join('');
+  const typed = ['speech', 'custom', 'lipsync', 'music'].includes(genAudio.mode);
   field.style.display = typed ? '' : 'none';
   if (typed) field.placeholder = AUDIO_PLACEHOLDERS[genAudio.mode] || '';
+  el('gen-audio-upload').style.display = genAudio.mode === 'upload' ? '' : 'none';
+  if (genAudio.mode === 'upload') {
+    el('gen-audio-lib').innerHTML = genAudioLib.map(a =>
+      `<button type="button" class="gen-chip" aria-pressed="${a.id === genAudio.audio_id}"
+         onclick="genAudio.audio_id='${a.id}'; renderGenForm()">${esc(a.name || 'Track')}</button>`).join('')
+      || '<span class="hint">No audio uploaded yet.</span>';
+  }
   if (note) {
-    const cost = (genPrices.addons || {}).audio;
-    note.textContent = !genAudio.mode
-      ? 'No sound. Nothing is added to the price.'
-      : genAudio.mode === 'speech'
-        ? `Her voice comes from her persona, not from here. ${cost || 0} tokens a clip.`
-        : `${cost || 0} tokens a clip, whatever its length. A model that cannot make sound still returns the clip.`;
+    const cost = (genPrices.addons || {})[genAudio.mode === 'lipsync' ? 'lipsync' : 'audio'];
+    note.textContent = AUDIO_NOTES[genAudio.mode]
+      || (genAudio.mode === 'lipsync'
+        ? `Her voice comes from her persona and her lips follow the line. ${cost || 0} tokens a clip.`
+        : `${cost || 0} tokens a clip, whatever its length. A model that cannot make sound still returns the clip.`);
   }
 }
 
 function pickAudio(mode) {
-  genAudio = { mode: mode };
+  genAudio = { mode: mode, audio_id: genAudio.audio_id };
+  if (mode === 'upload') loadAudioLib();
   renderGenForm();
 }
 
-// A model that replaces the person in a clip, or moves her by it, only keeps
-// or drops the clip's own sound; there is nothing to generate.
+async function loadAudioLib() {
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources?kind=audio')).json();
+    genAudioLib = (d.sources || []).map((a, i) => Object.assign(
+      { name: (genAudioLib.find(x => x.id === a.id) || {}).name || `Track ${i + 1}` }, a));
+  } catch (e) {}
+  renderAudioModes();
+}
+
+async function uploadAudio(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !slug()) return;
+  el('gen-audio-note').textContent = `Uploading ${file.name}…`;
+  try {
+    const form = new FormData();
+    form.append('file', file);
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/audio-source',
+                                 { method: 'POST', body: form })).json();
+    if (!d.ok) throw new Error(d.error || 'Upload failed');
+    genAudioLib = [{ id: d.id, name: file.name }].concat(genAudioLib);
+    genAudio.audio_id = d.id;
+    await loadAudioLib();
+    el('gen-audio-note').textContent = `✓ Uploaded: ${file.name}`;
+  } catch (e) { el('gen-audio-note').textContent = '✗ ' + e.message; }
+}
+
+// A model that replaces the person in a clip, or moves her by it, cannot make
+// sound itself; it keeps, drops or swaps the clip's track, or lip-syncs after.
 function soundOffered() {
   const m = engineModel();
   return !CLIP_MODELS.includes(m) && !(genDrive && genJob === 'reel');
 }
 
 function audioPayload() {
-  if (!genAudio.mode || !soundOffered()) return null;
-  return { mode: genAudio.mode, prompt: (el('gen-audio-prompt') || {}).value || '' };
+  const mode = genAudio.mode;
+  if (!mode || mode === 'original') return null;
+  return { mode: mode, prompt: (el('gen-audio-prompt') || {}).value || '',
+           audio_id: genAudio.audio_id || '' };
 }
 
 const EXTEND_LABELS = {
@@ -2077,7 +2139,7 @@ function providerCost() {
     ((genCosts.measured[kind] || {})[model] || []).includes(key);
   // Sound is a second call to the provider, so it is a second cost. Reading
   // only the per-second rate under-reported every clip that carries one.
-  const audioUsd = genAudio.mode ? ((genCosts.addons || {}).audio || 0) : 0;
+  const audioUsd = (genCosts.addons || {})[audioAddon()] || 0;
   if (genMake === 'swap') {
     if (!genSwap) return null;
     const per = (genCosts.video_per_second[swapModel()] || {})[swapResolution()];
@@ -2154,7 +2216,7 @@ function swapModel() {
 function syncSwapKling() {
   const kling = genJob === 'swap' && swapModel().startsWith('kling-');
   el('gen-swap-kling').style.display = kling ? 'flex' : 'none';
-  el('gen-swap-sound-row').style.display = KLING_MC.includes(swapModel()) ? 'flex' : 'none';
+  el('gen-swap-sound-row').style.display = 'none';
   el('gen-swap-motion-label').textContent = kling ? 'Scene and look (optional)' : 'Motion';
   el('gen-swap-motion').placeholder = kling
     ? 'same room, soft daylight, she smiles at the end'
@@ -2167,8 +2229,15 @@ function swapMaxSeconds() {
 
 // A swap is priced per second at its own rung, both of which the server
 // measured off the file. Nothing the panel sends can change either.
+// Keeping, dropping or swapping the clip's own track is free; only a
+// provider pass is an add-on.
+function audioAddon() {
+  const m = genAudio.mode;
+  return !m || ['original', 'none', 'upload'].includes(m) ? '' : m === 'lipsync' ? 'lipsync' : 'audio';
+}
+
 function audioTokens() {
-  return genAudio.mode ? (((genPrices && genPrices.addons) || {}).audio || 0) : 0;
+  return audioAddon() ? (((genPrices && genPrices.addons) || {})[audioAddon()] || 0) : 0;
 }
 
 function swapPrice() {
@@ -2913,7 +2982,7 @@ async function jobPayload() {
       character_views: identityOf('swap') === 'character' ? genCvPick : [],
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
-      keep_sound: el('gen-swap-sound').checked,
+      keep_sound: genAudio.mode === 'original',
     }, clipExtrasPayload());
   }
   const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;

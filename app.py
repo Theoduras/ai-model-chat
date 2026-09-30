@@ -30639,9 +30639,13 @@ def _gen_audio(body, cfg):
     mode = str(audio.get('mode') or '').strip().lower()
     if not mode or mode == 'none':
         return None
+    if mode in imagegen.TRACK_MODES:
+        return {'mode': mode, 'audio_id': str(audio.get('audio_id') or '').strip()[:40]}
     if mode not in imagegen.AUDIO_MODES:
         raise imagegen.GenerationError('Unknown audio preset.')
     text = str(audio.get('prompt') or '').strip()[:300]
+    if mode == 'lipsync' and not text:
+        raise imagegen.GenerationError('Write the line she says.')
     if mode in ('speech', 'custom') and not text:
         raise imagegen.GenerationError(
             'Write the line she says.' if mode == 'speech'
@@ -30891,10 +30895,17 @@ def _gen_spec(slug, body, user):
         raise imagegen.GenerationError('Unknown frame shape.')
     model = _gen_video_model(job, level, body.get('model'))
     audio = _gen_audio(body, cfg)
-    if audio:
+    if audio and audio['mode'] in imagegen.TRACK_MODES:
+        spec['sound'] = audio['mode']
+        if audio['mode'] == 'upload':
+            track = _video_source_row(slug, audio['audio_id'])
+            if not track or not track['mime'].startswith('audio/'):
+                raise imagegen.GenerationError('Upload the audio first.')
+            spec['audio_path'] = track['path']
+    elif audio:
         spec['audio'] = audio
         spec['voice'] = audio.get('voice') or ''
-        spec['addons'].append('audio')
+        spec['addons'].append('lipsync' if audio['mode'] == 'lipsync' else 'audio')
 
     if job == 'swap':
         _gen_identity(slug, body, spec, imagegen.ref_cap(model))
@@ -30902,7 +30913,8 @@ def _gen_spec(slug, body, user):
         if orientation not in ('video', 'image'):
             raise imagegen.GenerationError('Unknown facing option.')
         spec['orientation'] = orientation
-        spec['keep_sound'] = body.get('keep_sound') is not False
+        spec['keep_sound'] = (body.get('keep_sound') is not False
+                              and spec.get('sound') not in ('none', 'upload'))
         source_id = str(body.get('source') or body.get('source_media')
                         or body.get('id') or '').strip()
         src = _video_source_row(slug, source_id)
@@ -31353,7 +31365,10 @@ def api_persona_video_sources(slug):
         rows = (s.query(VideoSource).filter_by(slug=slug)
                 .order_by(VideoSource.created_at.desc()).limit(60).all())
         out = []
+        audio = request.args.get('kind') == 'audio'
         for r in rows:
+            if (r.mime or '').startswith('audio/') != audio:
+                continue
             try:
                 url = storage.signed_url(r.gcs_path) or ''
                 poster = (storage.signed_url(r.poster_gcs_path) or '') if r.poster_gcs_path else ''
@@ -31391,6 +31406,41 @@ def api_persona_video_source_delete(slug, source_id):
         s.delete(row)
         s.commit()
         return jsonify({'ok': True})
+    finally:
+        s.close()
+
+
+AUDIO_SOURCE_MIMES = ('audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav',
+                      'audio/mp4', 'audio/x-m4a', 'audio/aac', 'audio/ogg')
+AUDIO_SOURCE_MAX_BYTES = 25 * 1024 * 1024
+
+
+@app.route('/api/personas/<slug>/audio-source', methods=['POST'])
+def api_persona_audio_source(slug):
+    """A track to lay over a clip, kept beside her clips (a VideoSource row
+    with an audio mime) so it can be picked again."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _studio_outfit_slug(slug)
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    f = request.files.get('file')
+    mime = (f and f.mimetype or '').lower()
+    if not f or mime not in AUDIO_SOURCE_MIMES:
+        return jsonify({'ok': False, 'error': 'Use an MP3, WAV, M4A or OGG file.'}), 400
+    data = f.read(AUDIO_SOURCE_MAX_BYTES + 1)
+    if len(data) > AUDIO_SOURCE_MAX_BYTES:
+        return jsonify({'ok': False, 'error': 'That audio is over 25 MB.'}), 413
+    path = storage.put(slug, data, mime, prefix=VIDEO_SOURCE_PREFIX)
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = VideoSource(slug=slug, gcs_path=path, mime=mime, seconds=0,
+                          width=0, height=0)
+        s.add(row)
+        s.commit()
+        return jsonify({'ok': True, 'id': row.id, 'name': f.filename or 'audio'})
     finally:
         s.close()
 
@@ -33632,7 +33682,8 @@ def _gen_audio_urls(job_id, spec, urls):
     silent clip. Any failure returns the original url for the same reason --
     the clip is already paid for and already good.
     """
-    if not spec.get('audio') or imagegen.AUDIO_ROUTE != 'task':
+    if not spec.get('audio') or (imagegen.AUDIO_ROUTE != 'task'
+                                 and spec['audio']['mode'] != 'lipsync'):
         return urls
     if not GEN_HAS_WORKER:
         logger.info('generation job=%s: no worker, so the clip stays silent',
@@ -33682,6 +33733,13 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
         _gen_refund_short_clip(job_id, workspace, spec, data, mime)
+        if (mime or '').startswith('video/'):
+            if spec.get('audio_path'):
+                track = storage.get(spec['audio_path'])
+                if track:
+                    data = imagegen.mux_audio(data, track)
+            elif spec.get('sound') == 'none':
+                data = imagegen.strip_audio(data)
         raw, raw_mime = data, mime
         data, mime = imagegen.phone_look(data, mime, spec.get('phone_look'))
         try:

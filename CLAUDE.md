@@ -319,7 +319,9 @@ Stay completely in character. Never mention being an AI.
   stitching. The frame it continues from is captured **client-side** — a canvas
   seek in `studio.html` — for the same reason: there is nothing on the server
   that can decode a video.
-- **Audio is provider-side only**, for the same missing ffmpeg: either the
+- **Generated audio is provider-side.** The image now has ffmpeg, used only to keep,
+  drop or replace a finished clip's own track (`imagegen.mux_audio`/`strip_audio`,
+  free; lip-sync is a priced follow-on task, `RW_MODEL_LIPSYNC`, unverified). Either the
   generation task emits it (`RW_VIDEO_AUDIO_FLAG`/`RW_VIDEO_AUDIO_FIELD`) or a
   follow-on video-to-audio task returns a muxed clip (`RW_AUDIO_ROUTE=task`).
   A model that does not know the audio fields has them dropped by `_send`'s

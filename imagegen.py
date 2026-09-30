@@ -36,6 +36,9 @@ import base64
 import json
 import logging
 import os
+import subprocess
+import tempfile
+import shutil
 import random
 import re
 import uuid
@@ -1273,18 +1276,22 @@ def build_extend_prompt(mode='continue', motion=''):
 
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
-# Provider-side only. There is no ffmpeg in the image, so nothing here can mux
-# an uploaded track onto a clip -- sound either comes out of the generation or
-# it comes out of a second provider task that returns a clip already carrying
-# it. Both are named the way every other model id in this file is: from the
-# environment, because none of this is verified against the live catalogue.
-AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom')
+# Generated sound comes out of the generation or out of a second provider task
+# that returns a clip already carrying it, both named from the environment
+# because none of this is verified against the live catalogue. Keeping,
+# dropping or replacing a clip's own track is ffmpeg on our side (the
+# Dockerfile installs it); without ffmpeg those return the clip unchanged.
+AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom', 'music', 'lipsync')
+
+# Sound a clip gets without a provider pass, so no add-on is charged.
+TRACK_MODES = ('original', 'none', 'upload')
 
 AUDIO_PROMPTS = {
     'ambience': ('natural room tone for this scene — the quiet of the room, '
                  'fabric and movement, nothing musical and no speech'),
     'moaning': ('her breathing and soft moaning, in time with what is on '
                 'screen, no words and no music'),
+    'music': 'background music that fits the mood of the scene, no speech',
 }
 
 # Which route a clip gets its sound by. `native` asks the generation task for
@@ -1303,6 +1310,49 @@ RW_VIDEO_AUDIO_FIELD = os.getenv('RW_VIDEO_AUDIO_FIELD', 'audioPrompt')
 RW_AUDIO_TASK = os.getenv('RW_AUDIO_TASK', 'videoToAudio')
 RW_MODEL_AUDIO = os.getenv('RW_MODEL_AUDIO', 'runware:400@1')
 
+# Lip-sync: a follow-on task that makes her mouth say the line. Unverified
+# like the two above -- check with `search_models('lipsync')` on a live key.
+RW_LIPSYNC_TASK = os.getenv('RW_LIPSYNC_TASK', 'videoInference')
+RW_MODEL_LIPSYNC = os.getenv('RW_MODEL_LIPSYNC', 'sync:lipsync-2@1')
+
+HAS_FFMPEG = bool(shutil.which('ffmpeg'))
+
+
+def _ffmpeg(video, args, audio=None):
+    """Run ffmpeg over a clip held in memory; the clip unchanged on failure,
+    because it is already paid for and already good."""
+    if not HAS_FFMPEG:
+        return video
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'out.mp4')
+        with open(src, 'wb') as f:
+            f.write(video)
+        cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-i', src]
+        if audio is not None:
+            snd = os.path.join(d, 'track')
+            with open(snd, 'wb') as f:
+                f.write(audio)
+            cmd += ['-i', snd]
+        try:
+            subprocess.run(cmd + args + [out], check=True, timeout=120,
+                           capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('ffmpeg failed: %s', str(e)[:200])
+            return video
+
+
+def strip_audio(video):
+    return _ffmpeg(video, ['-an', '-c:v', 'copy', '-movflags', '+faststart'])
+
+
+def mux_audio(video, audio):
+    """Her uploaded track in place of the clip's own, cut to the clip."""
+    return _ffmpeg(video, ['-map', '0:v:0', '-map', '1:a:0', '-c:v', 'copy',
+                           '-c:a', 'aac', '-shortest', '-movflags', '+faststart'],
+                   audio=audio)
+
 
 def audio_prompt(audio, voice=''):
     """What to ask for, from the preset the creator picked.
@@ -1318,6 +1368,10 @@ def audio_prompt(audio, voice=''):
     text = (audio.get('prompt') or '').strip()
     if mode == 'custom':
         return text
+    if mode == 'music':
+        return AUDIO_PROMPTS['music'] + (f'. Mood: {text}' if text else '')
+    if mode == 'lipsync':
+        mode = 'speech'
     if mode == 'speech':
         if not text:
             return ''
@@ -1800,9 +1854,10 @@ class RunwareProvider(Provider):
         if not prompt:
             raise GenerationError('no audio was asked for', fatal=True)
         task_uuid = str(uuid.uuid4())
-        task = {'taskType': RW_AUDIO_TASK,
+        lipsync = (spec.get('audio') or {}).get('mode') == 'lipsync'
+        task = {'taskType': RW_LIPSYNC_TASK if lipsync else RW_AUDIO_TASK,
                 'taskUUID': task_uuid,
-                'model': RW_MODEL_AUDIO,
+                'model': RW_MODEL_LIPSYNC if lipsync else RW_MODEL_AUDIO,
                 _RW['prompt']: prompt[:600],
                 'inputs': {'video': video_url},
                 _RW['output']: 'URL',

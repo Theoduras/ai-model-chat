@@ -115,6 +115,8 @@ PROVIDER_COST_MEASURED = {
 # deliberately high, the same as every other guess in this file.
 ADDON_COST_USD = {
     'audio': 0.10,
+    # Unmeasured: a lip-sync pass is a second video task, so priced like one.
+    'lipsync': 0.40,
 }
 
 
@@ -191,6 +193,7 @@ GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
 # the two, because the cheaper case cannot be told apart at quote time.
 ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),
+    'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
 }
 
 
@@ -712,7 +715,7 @@ def generation_margin_report():
             for res in rungs:
                 for secs in sorted(set(VIDEO_DURATIONS +
                                        (VIDEO_SECONDS_MIN, VIDEO_MAX_SECONDS))):
-                    for addons in ((), ('audio',)):
+                    for addons in ((), ('audio',), ('lipsync',)):
                         try:
                             price = job_price(job, res, secs, addons, model)
                         except PricingError:
