@@ -920,6 +920,69 @@ def _session_secret():
 _GZIP_TYPES = ('text/', 'application/json', 'application/javascript', 'image/svg+xml')
 _GZIP_MAX = 4 * 1024 * 1024
 
+import uuid
+import os
+from werkzeug.utils import secure_filename
+
+@app.route('/api/media/upload', methods=['POST'])
+def api_media_upload():
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in required'}), 401
+
+    persona_slug = request.form.get('persona')
+    if not persona_slug:
+        return jsonify({'error': 'Persona slug required'}), 400
+
+    if not _can_edit_persona(persona_slug, user):
+        return jsonify({'error': 'Access denied'}), 403
+
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file uploaded'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No file selected'}), 400
+
+    try:
+        # 1. Prepare file and generate unique ID
+        media_id = str(uuid.uuid4())
+        ext = os.path.splitext(secure_filename(file.filename))[1] or '.jpg'
+        cloud_filename = f"uploads/{persona_slug}/{media_id}{ext}"
+        
+        # 2. Upload to Cloud Storage
+        # Adjust 'storage.upload' to match your actual storage.py method (e.g., S3 or GCS)
+        import storage
+        file_bytes = file.read()
+        file.seek(0)
+        cloud_url = storage.upload(file_bytes, cloud_filename, file.mimetype)
+
+        # 3. Save to Database
+        # Adjust 'add_persona_media' to match your db.py function
+        from db import SessionLocal, add_persona_media
+        s = SessionLocal()
+        try:
+            # Assuming your DB function accepts these parameters to create a vault item
+            add_persona_media(s, persona_slug, media_id=media_id, url=cloud_url, kind='image', source='uploaded')
+            s.commit()
+        finally:
+            s.close()
+
+        # 4. Return formatted data for the frontend grid
+        return jsonify({
+            'ok': True,
+            'media': {
+                'id': media_id,
+                'url': cloud_url,
+                'thumb': cloud_url,
+                'kind': 'image',
+                'source': 'uploaded'
+            }
+        })
+
+    except Exception as e:
+        error_logger.error('Cloud upload failed', exc_info=True)
+        return jsonify({'error': 'Upload failed on server'}), 500
 
 @app.after_request
 def _gzip_response(resp):
