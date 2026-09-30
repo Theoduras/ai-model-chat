@@ -43,7 +43,6 @@
     <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
   </div>
 </header>
-
 <div class="ud-scroll"><div class="ud-wrap">
   <div class="ud-bar">
     <label for="ud-persona">Persona</label>
@@ -53,13 +52,11 @@
       Upload Photo
       <input type="file" id="ud-upload-input" accept="image/*" style="display:none;" onchange="udUpload(this)">
     </label>
-
     <span style="color:var(--text-muted); font-size:.85rem">1 token per photo. Uploads and generated photos are listed.</span>
   </div>
   <div class="ud-note" id="ud-note" hidden></div>
   <div class="ud-grid" id="ud-grid"></div>
 </div></div>
-
 <div class="ud-lb" id="ud-lb" onclick="if(event.target===this)udClose()">
   <button class="x" onclick="udClose()" aria-label="Close">×</button>
   <button class="nav" style="left:14px" onclick="udStep(-1)" aria-label="Previous">‹</button>
@@ -67,7 +64,6 @@
   <button class="btn btn-secondary" style="padding:10px 28px" onclick="udGo(udLbId())">Undress</button>
   <button class="nav" style="right:14px" onclick="udStep(1)" aria-label="Next">›</button>
 </div>
-
 <script>
 let udSlug = '';
 function el(id) { return document.getElementById(id); }
@@ -76,7 +72,6 @@ function esc(s) {
     c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 }
 function note(msg) { const n = el('ud-note'); n.textContent = msg || ''; n.hidden = !msg; }
-
 async function udInit() {
   let list = [];
   try { list = await (await fetch('/api/personas')).json(); } catch (e) {}
@@ -85,63 +80,54 @@ async function udInit() {
   const wanted = new URLSearchParams(location.search).get('persona') || '';
   udPick(list.some(p => p.slug === wanted) ? wanted : list[0].slug);
 }
-
 async function udPick(slug) {
   udSlug = slug;
   el('ud-persona').value = slug;
   el('ud-grid').innerHTML = '';
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image' && (m.source === 'generated' || m.source === 'uploaded'));
+    // Removed source restriction so uploaded (and any other) images can be undressed
+    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image');
     el('ud-grid').innerHTML = rows.length ? rows.map(m => `
 ${udCard(m)}`).join('') : '<div class="ud-empty">No photos kept for this persona yet.</div>';
     note('');
   } catch (e) { note('Could not load the gallery.'); }
 }
-
 function udCard(m) {
   return `<div class="ud-card"><img src="${esc(m.thumb || m.url)}" loading="lazy" alt="" data-id="${esc(m.id)}" onclick="udOpen(this)" style="cursor:zoom-in">
     <button type="button" class="btn btn-secondary" onclick="udGo('${esc(m.id)}')">Undress</button></div>`;
 }
-
 async function udUpload(input) {
   const file = input.files && input.files[0];
   input.value = ''; 
   if (!file) return;
   if (!udSlug) return note('Please select a persona first.');
-
   const grid = el('ud-grid');
   const empty = grid.querySelector('.ud-empty');
   if (empty) empty.remove();
-
   const pending = document.createElement('div');
   pending.className = 'ud-card ud-pending';
   pending.innerHTML = '<span>Uploading…</span>';
   grid.prepend(pending);
-
   try {
     const fd = new FormData();
     fd.append('file', file);
     fd.append('persona', udSlug);
-
     const res = await fetch('/api/media/upload', {
       method: 'POST',
       body: fd
     });
     const d = await res.json();
-
     if (!d.ok) {
       pending.innerHTML = `<span>${esc(d.error || 'Upload failed.')}</span>`;
       return;
     }
-
     pending.outerHTML = udCard(d.media);
     note('Upload complete.');
   } catch (e) {
     pending.innerHTML = '<span>Upload error.</span>';
   }
 }
-
 async function udGo(id) {
   const slug = udSlug;
   const grid = el('ud-grid');
@@ -176,7 +162,6 @@ async function udGo(id) {
     note('Done — added to this page.');
   } catch (e) { fail('Undress failed.'); }
 }
-
 let udIdx = -1;
 function udImgs() { return [...document.querySelectorAll('#ud-grid img[data-id]')]; }
 function udLbId() { const i = udImgs()[udIdx]; return i ? i.dataset.id : ''; }
