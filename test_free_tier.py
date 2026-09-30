@@ -153,6 +153,39 @@ for key, tier in (feat.get('tiers') or feat).items():
 check('free row for AI personas is off',
       not [f for f in feat['tiers']['free']['features'] if f['label'] == 'AI personas'][0]['included'])
 
+import base64, io
+from PIL import Image
+_blobs = {}
+A.storage.put = lambda slug, data, mime, prefix='': _blobs.setdefault(f'{slug}/{prefix}/{len(_blobs)}', data) and f'{slug}/{prefix}/{len(_blobs) - 1}'
+A.storage.signed_url = lambda path: None
+A.storage.get = lambda path: _blobs.get(path)
+A.storage.delete = lambda path: _blobs.pop(path, None)
+buf = io.BytesIO(); Image.new('RGB', (40, 30), (200, 120, 60)).save(buf, 'PNG')
+png = 'data:image/png;base64,' + base64.b64encode(buf.getvalue()).decode()
+home = homes[0]['slug']
+r = cc.post('/api/generate/locations', json={'persona': home, 'image': png})
+locs = (r.get_json() or {}).get('locations') or []
+check('location photo uploads', r.status_code == 200 and len(locs) == 1, r.get_data(as_text=True)[:200])
+check('location photo is served back', cc.get(locs[0]['url']).status_code in (200, 302))
+check('outfit list is separate', cc.get(f'/api/generate/outfits?persona={home}').get_json()['outfits'] == [])
+check('big upload refused', cc.post('/api/generate/locations',
+      json={'persona': home, 'image': 'x' * 16_000_001}).status_code == 413)
+check('not-an-image refused', cc.post('/api/generate/locations',
+      json={'persona': home, 'image': 'data:image/png;base64,AAAA'}).status_code == 400)
+r = cc.post('/api/generate/prompt', json={'persona': home, 'shot': 'portrait', 'location': 'kitchen',
+      'scene': 'kitchen', 'zoom': 'wide', 'location_ref': locs[0]['id'], 'direction': 'x'})
+pr = r.get_json().get('prompt', '')
+check('prompt route uses the location photo', 'exact place shown in the last reference image' in pr, pr[:300])
+check('prompt route uses the zoom', 'framed wide' in pr)
+r = cc.post('/api/generate/prompt', json={'persona': home, 'shot': 'portrait', 'location': 'kitchen',
+      'scene': 'kitchen', 'location_ref': 'not-mine', 'direction': 'x'})
+check('a foreign location id is ignored', 'exact place shown' not in r.get_json().get('prompt', ''))
+r = cc.post('/api/generate/direction', json={'persona': home, 'mode': 'auto', 'shot': 'half',
+      'scene': 'kitchen', 'location': 'kitchen', 'style': 'pov-selfie', 'expression': 'kissy-pout'})
+check('auto direction follows the dropdowns',
+      r.get_json().get('direction') == 'taking a pov selfie in the kitchen, kissy pout', r.get_data(as_text=True))
+check('location photo deleted', cc.delete(locs[0]['url'].split('/image')[0] + f'?persona={home}').status_code == 200)
+
 chars = {c['id']: c for c in cc.get('/api/characters').get_json()['characters']}
 check('a hidden home is not shown as a linked persona', all(c['persona'] == '' for c in chars.values()))
 r = cc.post(f'/api/characters/{ids[0]}/studio', json={})

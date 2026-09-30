@@ -338,6 +338,24 @@ def test_content_prompts():
           IG.finish_prompt('x. ' + IG.QUALITY['pro-shoot'][1]).count('Real unretouched') == 0)
     check('every explicit direction has a pool', all(
         IG.pick_direction(s, '') for s in IG.SHOT_FRAMING))
+    wide = IG.build_prompt('a woman', 'half', zoom='wide')
+    check('zoom wording reaches the prompt', IG.zoom_text('wide') in wide)
+    check('a chosen zoom replaces the shot distance', 'waist-up' not in wide)
+    check('auto zoom leaves the shot alone', 'waist-up' in IG.build_prompt('a woman', 'half', zoom='auto'))
+    here = IG.build_prompt('a woman', 'portrait', has_reference=True, location='kitchen',
+                           scene='kitchen', location_ref='last')
+    check('a location photo is named by position', 'exact place shown in the last reference image' in here)
+    check('a location photo replaces the dropdown place',
+          'in the kitchen' not in here and 'not what she wears.' in here)
+    check('a location photo beside an outfit is second-to-last', 'second-to-last' in IG.build_prompt(
+        'a woman', 'portrait', location_ref='second-to-last'))
+    check('no location photo keeps the dropdown place',
+          'in the kitchen' in IG.build_prompt('a woman', 'portrait', location='kitchen'))
+    doing = IG.doing_from_choices('half', 'kitchen', 'kitchen', 'pov-selfie', 'kissy-pout')
+    check('doing follows the dropdowns', doing == 'taking a pov selfie in the kitchen, kissy pout')
+    check('doing stays short', len(doing.split()) <= 10)
+    check('spicy doing keeps the built-in pose',
+          IG.doing_from_choices('nude', '', '', '', '') in IG.DIRECTIONS_BY_SHOT['nude'])
 
 
 def test_vulva_looks():

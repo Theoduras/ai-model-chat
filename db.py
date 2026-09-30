@@ -331,6 +331,18 @@ class StudioOutfit(Base):
     created_at = Column(DateTime, default=_now)
 
 
+class StudioLocation(Base):
+    """A photo of a place a creator uploaded so the studio shoots there. Kept
+    apart from PersonaMedia for the same reason as StudioOutfit."""
+    __tablename__ = 'studio_locations'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    slug = Column(String(80), nullable=False, index=True)
+    gcs_path = Column(String(400), default='')
+    mime = Column(String(60), default='image/jpeg')
+    created_at = Column(DateTime, default=_now)
+
+
 class CharacterImage(Base):
     """A reference or the approved image for one view of a character.
 

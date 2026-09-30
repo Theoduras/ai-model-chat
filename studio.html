@@ -363,14 +363,21 @@
               <select id="gen-style"></select></label>
             <label class="gen-f"><span>Expression</span>
               <select id="gen-expression"></select></label>
+            <label class="gen-f"><span>Zoom</span>
+              <select id="gen-zoom"></select></label>
+          </div>
+          <div class="gen-f"><span>Or use a photo of the place</span>
+            <div id="gen-locations" class="gen-outfits"></div>
+            <input type="file" id="gen-location-file" accept="image/*" hidden onchange="uploadLocation(this)">
+            <span class="hint" id="gen-location-note">A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.</span>
           </div>
           <div class="gen-f"><span>What she's doing</span>
             <div class="gen-go" style="flex-wrap:nowrap;">
               <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
-                     placeholder="looking back over her shoulder, phone in one hand">
+                     placeholder="taking a pov selfie in the kitchen">
               <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
             </div>
-            <span class="hint" id="gen-direction-note">Click Suggest for a fresh idea — or type your own.</span>
+            <span class="hint" id="gen-direction-note">Follows your choices above — click Suggest for a different idea, or type your own.</span>
           </div>
         </section>
 
@@ -690,7 +697,7 @@ let genRate = null;        // what a token costs, in the creator's currency
 let genCosts = null;       // what the provider bills us — admin only, null otherwise
 let genAllowedShots = [];  // resolved server side from the persona's NSFW level
 let genScenes = [];        // scene builder vocabulary, already gated server side
-let genStyles = [], genCameras = [], genLighting = [], genQualities = [], genExpressions = [];
+let genStyles = [], genCameras = [], genLighting = [], genQualities = [], genExpressions = [], genZooms = [];
 let mediaVault = [];
 let genJobs = [];
 let genTimer = null;
@@ -826,6 +833,7 @@ function setIdentitySrc(v) {
   renderIdentitySrc();
   renderRefs();
   checkPromptStale();
+  queueAutoPrompt();
 }
 
 function renderIdentitySrc() {
@@ -889,6 +897,7 @@ function pickOutfit(id) {
   genOutfit = genOutfit === id ? '' : id;
   renderOutfits();
   checkPromptStale();
+  queueAutoPrompt();
 }
 
 function uploadOutfit(input) {
@@ -908,6 +917,7 @@ function uploadOutfit(input) {
       genOutfit = (genOutfits[0] || {}).id || '';
       renderOutfits();
       checkPromptStale();
+  queueAutoPrompt();
     } catch (e) { setGenStatus('✗ ' + e.message, false); }
   };
   reader.readAsDataURL(file);
@@ -918,9 +928,72 @@ async function deleteOutfit(id) {
   await loadOutfits();
 }
 
+// A photo of the place she is shot in. It wins over the "Where is she" pick,
+// which is greyed while a photo is chosen.
+let genLocations = [], genLocation = '';
+
+function renderLocations() {
+  el('gen-locations').innerHTML = genLocations.map(o => `
+    <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${o.id === genLocation}"
+          title="Shoot here" onclick="pickLocation('${o.id}')">
+      <img src="${esc(o.url)}" alt="Location">
+      <button type="button" class="x" aria-label="Remove location"
+        onclick="event.stopPropagation(); deleteLocation('${o.id}')">&times;</button>
+    </span>`).join('') +
+    `<button type="button" class="gen-outfit-add" onclick="el('gen-location-file').click()">+ Upload</button>`;
+  el('gen-scene').disabled = !!genLocation;
+  el('gen-location-note').textContent = genLocation
+    ? 'Using your photo of the place — “Where is she” is off while it is picked.'
+    : 'A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.';
+}
+
+async function loadLocations() {
+  try {
+    const d = await (await fetch('/api/generate/locations?persona=' + encodeURIComponent(slug()))).json();
+    genLocations = d.locations || [];
+  } catch (e) { genLocations = []; }
+  if (!genLocations.some(o => o.id === genLocation)) genLocation = '';
+  renderLocations();
+}
+
+function pickLocation(id) {
+  genLocation = genLocation === id ? '' : id;
+  renderLocations();
+  refreshShot();
+}
+
+function uploadLocation(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch('/api/generate/locations', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ persona: slug(), image: reader.result }),
+      });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || 'Upload failed');
+      genLocations = d.locations || [];
+      genLocation = (genLocations[0] || {}).id || '';
+      renderLocations();
+      refreshShot();
+    } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  };
+  reader.readAsDataURL(file);
+}
+
+async function deleteLocation(id) {
+  await fetch('/api/generate/locations/' + id + '?persona=' + encodeURIComponent(slug()), { method: 'DELETE' });
+  await loadLocations();
+  refreshShot();
+}
+
 async function loadPersona() {
   if (!slug()) return;
   loadOutfits();
+  loadLocations();
   genIdentityTouched = false;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
@@ -931,6 +1004,7 @@ async function loadPersona() {
     genCameras = d.cameras || [];
     genLighting = d.lighting || [];
     genExpressions = d.expressions || [];
+    genZooms = d.zooms || [];
     genQualities = d.qualities || [];
     el('persona-hint').textContent =
       'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
@@ -942,6 +1016,7 @@ async function loadPersona() {
   pollGenJobs();
   await Promise.all([loadCharacterBadge(), loadReferences()]);
   if (window.StudioWizard) StudioWizard.refresh();
+  refreshShot();
 }
 
 // Photos is a job like the rest of them here: the tile row is the one place a
@@ -1472,6 +1547,7 @@ function renderGenForm() {
   fillVocab('gen-camera', genCameras);
   fillVocab('gen-lighting', genLighting);
   fillVocab('gen-expression', genExpressions);
+  fillVocab('gen-zoom', genZooms);
   fillVocab('gen-quality', genQualities);
 
   renderImageRes();
@@ -2079,10 +2155,12 @@ function promptChoices() {
     style: el('gen-style').value, camera: el('gen-camera').value,
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
+    zoom: el('gen-zoom').value,
     smudges: el('gen-smudges').checked,
     quality: el('gen-quality').value,
     clothing: el('gen-clothing').value.trim(),
     outfit_ref: genOutfit,
+    location_ref: genLocation,
     direction: el('gen-direction').value.trim(),
     aspect: currentImageAspect(),
     reference_media: el('gen-ref').value || '',
@@ -2093,7 +2171,7 @@ function promptChoices() {
 async function writePrompt() {
   const note = el('gen-write-note');
   const btn = el('gen-write-btn');
-  if (!el('gen-direction').value.trim()) await suggestDirection();
+  if (!el('gen-direction').value.trim()) await autoDirection();
   const choices = promptChoices();
   btn.disabled = true;
   note.textContent = 'Writing…';
@@ -2112,6 +2190,44 @@ async function writePrompt() {
   finally { btn.disabled = false; }
 }
 
+// The prompt follows the dropdowns while it is still the one we wrote. The
+// moment she edits it, it is hers: a change then only says the choices moved
+// on, and "Write the prompt" is what rewrites it.
+let genPromptSeq = 0, genPromptTimer = null;
+
+async function autoWritePrompt() {
+  const ta = el('gen-prompt');
+  if (!ta || !slug() || genMake !== 'image') return;
+  const pristine = !ta.value.trim() || (genWritten && ta.value === genWritten.prompt);
+  if (!pristine) { checkPromptStale(); return; }
+  const seq = ++genPromptSeq;
+  const choices = promptChoices();
+  try {
+    const res = await fetch('/api/generate/prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(choices),
+    });
+    const d = await res.json();
+    if (!d.ok || seq !== genPromptSeq) return;
+    if (ta.value.trim() && !(genWritten && ta.value === genWritten.prompt)) return;
+    ta.value = d.prompt;
+    genWritten = { choices: JSON.stringify(choices), prompt: d.prompt };
+    el('gen-write-note').textContent = 'Follows your choices — edit it and it stays as you wrote it.';
+  } catch (e) {}
+}
+
+function queueAutoPrompt() {
+  clearTimeout(genPromptTimer);
+  genPromptTimer = setTimeout(autoWritePrompt, 400);
+}
+
+// A choice moved: refresh the "doing" line if it is still ours, then the prompt.
+async function refreshShot() {
+  const input = el('gen-direction');
+  if (input && (!input.value.trim() || input.dataset.auto)) await autoDirection();
+  queueAutoPrompt();
+}
+
 function checkPromptStale() {
   if (!genWritten || !el('gen-prompt').value.trim()) return;
   if (JSON.stringify(promptChoices()) !== genWritten.choices) {
@@ -2121,14 +2237,44 @@ function checkPromptStale() {
 ['change', 'input'].forEach(t => document.addEventListener(t, e => {
   const id = e.target && e.target.id;
   if (['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-camera', 'gen-lighting',
-       'gen-expression', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction', 'gen-ref',
-       'gen-model'].includes(id)) checkPromptStale();
+       'gen-expression', 'gen-zoom', 'gen-smudges', 'gen-quality', 'gen-clothing', 'gen-direction',
+       'gen-ref', 'gen-model'].includes(id)) { checkPromptStale(); queueAutoPrompt(); }
 }));
 
 // The direction fills itself in from the shot and scene, and only while it
 // still holds a suggestion: the moment she types, the words are hers and
 // nothing here writes over them.
 let genDirectionSeq = 0;
+
+function directionChoices() {
+  return {
+    persona: slug(), rating: genRating, shot: el('gen-shot').value,
+    scene: (genLocation && ((genScenes.find(x => x.key === genScene()) || {}).level === 'sfw'))
+      ? '' : genScene(),
+    location: genLocation ? '' : (el('gen-scene') || {}).value || '',
+    style: el('gen-style').value, expression: el('gen-expression').value,
+    clothing: el('gen-clothing').value.trim(),
+  };
+}
+
+// The instant version: a short line built from the dropdowns, no model call.
+async function autoDirection() {
+  const input = el('gen-direction');
+  if (!slug() || !input) return;
+  const seq = ++genDirectionSeq;
+  try {
+    const res = await fetch('/api/generate/direction', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(Object.assign(directionChoices(), { mode: 'auto' })),
+    });
+    const d = await res.json();
+    if (!d.ok || seq !== genDirectionSeq) return;
+    if (input.value.trim() && !input.dataset.auto) return;
+    input.value = d.direction;
+    input.dataset.auto = '1';
+    el('gen-direction-note').textContent = 'Follows your choices above — click Suggest for a different idea, or type your own.';
+  } catch (e) {}
+}
 
 async function suggestDirection() {
   const input = el('gen-direction');
@@ -2141,19 +2287,16 @@ async function suggestDirection() {
   try {
     const res = await fetch('/api/generate/direction', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        persona: slug(), rating: genRating, shot: el('gen-shot').value,
-        scene: genScene(), location: (el('gen-scene') || {}).value || '', style: el('gen-style').value,
-        clothing: el('gen-clothing').value.trim(),
-      }),
+      body: JSON.stringify(directionChoices()),
     });
     const d = await res.json();
     if (!d.ok) throw new Error(d.error || 'no suggestion');
     if (seq !== genDirectionSeq) return;
     input.value = d.direction;
     input.dataset.auto = '1';
-    note.textContent = 'Suggested for this shot — edit it, or Suggest again.';
+    note.textContent = 'Suggested for these choices — edit it, or Suggest again.';
     checkPromptStale();
+    queueAutoPrompt();
   } catch (e) { note.textContent = '✗ ' + e.message; }
   finally { btn.disabled = false; }
 }
@@ -2162,9 +2305,8 @@ document.addEventListener('input', e => {
   if (e.target && e.target.id === 'gen-direction') delete e.target.dataset.auto;
 });
 document.addEventListener('change', e => {
-  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw'].includes(e.target.id)) return;
-  const input = el('gen-direction');
-  if (!input.value.trim() || input.dataset.auto) suggestDirection();
+  if (!e.target || !['gen-shot', 'gen-scene', 'gen-scene-nsfw', 'gen-style', 'gen-expression'].includes(e.target.id)) return;
+  refreshShot();
 });
 
 // What this job is still missing, said plainly, or '' when it is ready. One
@@ -2293,7 +2435,10 @@ async function runGeneration() {
   if (genMake !== 'image') return runVideoJob();
   const btn = el('gen-run-btn');
   btn.disabled = true;
-  if (!el('gen-prompt').value.trim() && !el('gen-direction').value.trim()) await suggestDirection();
+  if (!el('gen-direction').value.trim()) await autoDirection();
+  // A choice changed a moment ago may not have rewritten the prompt yet.
+  clearTimeout(genPromptTimer);
+  await autoWritePrompt();
   setGenStatus('Sending…', null);
   try {
     const res = await fetch('/api/generate/job', {
@@ -2314,10 +2459,12 @@ async function runGeneration() {
         camera: el('gen-camera').value,
         lighting: el('gen-lighting').value,
         expression: el('gen-expression').value,
+        zoom: el('gen-zoom').value,
         smudges: el('gen-smudges').checked,
         quality: el('gen-quality').value,
         clothing: el('gen-clothing').value.trim(),
         outfit_ref: genOutfit,
+        location_ref: genLocation,
         direction: el('gen-direction').value.trim(),
         aspect: currentImageAspect(),
         phone_look: el('gen-phone-look').value,

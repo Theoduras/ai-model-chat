@@ -637,6 +637,25 @@ SHOT_FRAMING = {
     'explicit': 'an explicit intimate photo, candid and unposed',
 }
 
+# How far the camera is from her, picked on its own. Where a zoom is chosen the
+# shot's own distance words step aside, so the two never argue.
+ZOOM = {
+    'auto': ('Auto', ''),
+    'close': ('Close', 'framed close, her face and shoulders filling the frame'),
+    'medium': ('Medium', 'framed at a medium distance, from the waist up'),
+    'wide': ('Wide', 'framed wide, her whole body from head to toe with the room around her'),
+    'far': ('Far', 'shot from far away, she is small in the frame and the surroundings dominate'),
+}
+SHOT_FRAMING_NEUTRAL = {
+    'portrait': 'a selfie, looking into the lens',
+    'closeup': ('a photo of her face, facing the lens, her makeup crisp in every detail'),
+    'half': 'a photo',
+    'full': 'a photo',
+}
+
+def zoom_text(key):
+    return (ZOOM.get(key) or ('', ''))[1]
+
 # The one thing a close-up takes from the reference beyond who she is: the
 # face photo is what the creator uploaded to show her makeup, and a face this
 # close with different makeup reads as a different woman.
@@ -878,6 +897,25 @@ DIRECTIONS_BY_SHOT = {
 }
 
 
+_DOING_STYLE = {'pov-selfie': 'taking a pov selfie', 'mirror-selfie': 'taking a mirror selfie',
+                'candid': 'caught mid-moment', 'photoshoot': 'posing for a photoshoot'}
+_DOING_SHOT = {'portrait': 'looking into the camera', 'closeup': 'looking into the lens',
+               'half': 'posing', 'full': 'standing', 'candid': 'caught mid-moment',
+               'mirror': 'taking a mirror selfie'}
+
+
+def doing_from_choices(shot, scene='', location='', style='', expression='', rng=None):
+    """A short line for what she is doing that says only what the dropdowns
+    already say ("taking a pov selfie in the kitchen, kissy pout"). Anything
+    above safe-for-work keeps the built-in pose text, which is scene-specific."""
+    if SHOT_LEVEL.get(shot, 'sfw') != 'sfw' or SCENES.get(scene, ('sfw',))[0] != 'sfw':
+        return pick_direction(shot, scene, rng)
+    verb = _DOING_STYLE.get(style) or _DOING_SHOT.get(shot) or 'posing'
+    place = SCENES.get(location or scene, ('', ''))[1]
+    mood = (EXPRESSIONS.get(expression) or ('', ''))[0].lower() if expression != 'auto' else ''
+    return ', '.join(b for b in (' '.join(b for b in (verb, place) if b), mood) if b)
+
+
 def camera_text(key):
     return (CAMERAS.get(key) or ('', ''))[1]
 
@@ -976,7 +1014,8 @@ def _sentence(text):
 def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
                  banned=(), age=None, quality='', clothing='', features='',
-                 expression='', smudges=False, location=''):
+                 expression='', smudges=False, location='', zoom='',
+                 location_ref=''):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -992,10 +1031,17 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     scene_row = SCENES.get(scene, ('sfw', ''))
     intimate = level != 'sfw' or scene_row[0] != 'sfw'
 
+    zoomed = zoom_text(zoom)
     framing = ((clothing and SHOT_FRAMING_BARE.get(shot))
+               or (zoomed and SHOT_FRAMING_NEUTRAL.get(shot))
                or SHOT_FRAMING.get(shot, SHOT_FRAMING['portrait']))
     where = (clothing and SCENES_BARE.get(scene)) or scene_row[1]
     place = SCENES.get(location, ('', ''))[1] if SCENES.get(location, ('',))[0] == 'sfw' else ''
+    if location_ref:
+        # The creator's own photo of the place wins over every dropdown.
+        place = ''
+        where = ('' if scene_row[0] == 'sfw'
+                 else SCENES_ACTION.get(scene) or SCENES_BARE.get(scene) or where)
     if place:
         act = '' if scene in ('', location) else (SCENES_ACTION.get(scene) or where)
         where = ', '.join(b for b in (place, act) if b)
@@ -1012,10 +1058,14 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
 
     body = ' '.join(filter(None, [
         _sentence(((purpose + ': ') if purpose else '')
-                  + ', '.join(b for b in (who, framing, where, styled) if b)),
-        ('The reference images set who she is — not what she wears or where she is.'
-         if has_reference else ''),
+                  + ', '.join(b for b in (who, framing, zoomed, where, styled) if b)),
+        (('The reference images set who she is — not what she wears'
+          + ('.' if location_ref else ' or where she is.')) if has_reference else ''),
         _sentence(f'The photo is taken {place}; the setting must clearly be that place' if place else ''),
+        _sentence(f'The photo is taken in the exact place shown in the {location_ref} '
+                  'reference image — the same room, layout, furniture and light; the '
+                  'setting must clearly match it, with nobody else in it'
+                  if location_ref else ''),
         (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),

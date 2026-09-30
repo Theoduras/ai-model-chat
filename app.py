@@ -12910,7 +12910,9 @@ def api_persona_media_list(slug):
                                       for k, v in imagegen.QUALITY.items()],
                         'lighting': sorted(imagegen.LIGHTING),
                         'expressions': [{'key': k, 'label': v[0]}
-                                        for k, v in imagegen.EXPRESSIONS.items()]})
+                                        for k, v in imagegen.EXPRESSIONS.items()],
+                        'zooms': [{'key': k, 'label': v[0]}
+                                  for k, v in imagegen.ZOOM.items()]})
     finally:
         s.close()
 
@@ -30741,6 +30743,9 @@ def _gen_spec(slug, body, user):
         'expression': (body.get('expression') or '').strip().lower(),
         'smudges': bool(body.get('smudges')),
         'outfit_ref': _studio_outfit(slug, body.get('outfit_ref')) and str(body['outfit_ref']),
+        'location_ref': (_studio_location(slug, body.get('location_ref'))
+                         and str(body['location_ref'])),
+        'zoom': (body.get('zoom') or '').strip().lower(),
     })
 
     if kind == 'image':
@@ -31661,7 +31666,7 @@ def _persona_char_fields(config):
 
 _CHAR_CONTENT_TABLES = ('PersonaMedia', 'GenerationJob', 'MediaOutfitLink',
                         'ModelReferenceSet', 'VideoSource', 'AudioReference',
-                        'StudioOutfit')
+                        'StudioOutfit', 'StudioLocation')
 
 
 def _char_move_content(s, old, new):
@@ -31882,6 +31887,9 @@ def _gen_image_prompt(slug, spec, has_reference):
             _prop_from_config(cfg, spec.get('style', ''), spec.get('camera', ''))))),
         features=clause, quality=spec.get('quality', ''), clothing=clothing,
         expression=spec.get('expression', ''), smudges=spec.get('smudges', False),
+        zoom=spec.get('zoom', ''),
+        location_ref=(('second-to-last' if spec.get('outfit_ref') else 'last')
+                      if spec.get('location_ref') else ''),
         banned=banned, age=age)
 
 
@@ -33007,6 +33015,11 @@ def api_generate_direction():
     if scene not in imagegen.SCENES:
         scene = ''
     spicy = CH.job_level(shot, scene) != 'sfw'
+    expression = str(body.get('expression') or '').strip().lower()
+    if body.get('mode') == 'auto':
+        return jsonify({'ok': True, 'source': 'auto', 'direction': imagegen.doing_from_choices(
+            shot, scene, str(body.get('location') or '').strip().lower(),
+            str(body.get('style') or '').strip().lower(), expression)})
     cfg = _persona_config(slug) or {}
     clothing = str(body.get('clothing') or '').strip()[:200]
     place = imagegen.SCENES.get(str(body.get('location') or '').strip().lower(), ('', ''))
@@ -33015,20 +33028,19 @@ def api_generate_direction():
         '' if spicy else imagegen.SHOT_FRAMING.get(shot, ''),
         '' if spicy else imagegen.SCENES.get(scene, ('', ''))[1],
         imagegen.STYLES.get(str(body.get('style') or ''), ''),
+        imagegen.expression_text(expression),
         f'wearing {clothing}' if clothing else '')))
     system = (
         "You are a content creator planning your next social media photo. "
-        "Write ONE direction for it: your pose, expression, what you are doing "
-        "and any prop, in 25 words or fewer, as a plain comma-separated phrase. "
-        "Make it feel natural and personal, like something you would actually post. "
+        "Write ONE short line for what you are doing in it, in 10 words or fewer, "
+        "as a plain phrase. It must fit the photo described and add nothing new: "
+        "no new place, outfit, camera or expression. Keep it simple and natural, "
+        "like something you would actually post. "
         + ("It is for your paid page, so make it flirty and sensual — a teasing, "
            "intimate pose — but never graphic or explicit. " if spicy else "") +
-        "Be surprising: never the obvious pose for this kind of photo. "
         "Do not mention clothing" + (" beyond what is given" if clothing else "") + ", "
         "camera, lighting, photo quality, age or body. No quotes, no hashtags, no emoji.")
-    mood = random.choice(('playful', 'lazy', 'confident', 'shy', 'mischievous', 'dreamy',
-                          'bold', 'cosy', 'candid', 'sultry', 'goofy', 'focused'))
-    ask = f"The photo: {what or ('a private, intimate photo' if spicy else 'a casual photo')}. Mood: {mood}."
+    ask = f"The photo: {what or ('a private, intimate photo' if spicy else 'a casual photo')}."
     interests = str(cfg.get('interests') or '').strip()
     if interests:
         ask += f" Things you are into: {interests[:200]}."
@@ -33037,15 +33049,16 @@ def api_generate_direction():
             model=MODEL_NAME,
             contents=[{'role': 'user', 'parts': [{'text': ask}]}],
             config=types.GenerateContentConfig(system_instruction=system,
-                                               temperature=1.3),
+                                               temperature=0.9),
         )
         line = re.sub(r'\s+', ' ', _gemini_text(resp)).strip().strip('"\'').rstrip('.')
         if line:
             return jsonify({'ok': True, 'direction': line[:300], 'source': 'gemini'})
     except Exception as e:
         logger.warning('direction suggestion failed: %s', str(e)[:200])
-    return jsonify({'ok': True, 'direction': imagegen.pick_direction(shot, scene),
-                    'source': 'built-in'})
+    return jsonify({'ok': True, 'source': 'built-in', 'direction': imagegen.doing_from_choices(
+        shot, scene, str(body.get('location') or '').strip().lower(),
+        str(body.get('style') or '').strip().lower(), expression)})
 
 
 @app.route('/api/generate/job', methods=['POST'])
@@ -33166,13 +33179,18 @@ def _gen_start(job_id, slug, spec, workspace):
                 refs = refs[:imagegen.MAX_REFERENCES]
                 outfit = _studio_outfit(slug, spec.get('outfit_ref'))
                 outfit_url = outfit and _char_path_url(outfit.gcs_path, outfit.mime)
-                if outfit_url:
-                    # The prompt names "the last reference image", so it goes
-                    # last and is never the one trimmed.
-                    refs = refs[:imagegen.MAX_REFERENCES - 1] + [outfit_url]
+                place = _studio_location(slug, spec.get('location_ref'))
+                place_url = place and _char_path_url(place.gcs_path, place.mime)
+                # The prompt names them by position: the place is the last
+                # reference (second-to-last beside an outfit) and the outfit is
+                # always last, so neither is ever the one trimmed.
+                tail = [u for u in (place_url, outfit_url) if u]
+                has_identity = bool(ref_b64 or refs)
+                if tail:
+                    refs = refs[:imagegen.MAX_REFERENCES - len(tail)] + tail
                 if refs:
                     call['reference_urls'] = refs
-                call['prompt'] = _gen_image_prompt(slug, spec, bool(ref_b64 or refs))
+                call['prompt'] = _gen_image_prompt(slug, spec, has_identity)
                 call['async_delivery'] = True
                 provider_job, result = provider.submit_image(call)
             else:
@@ -33849,18 +33867,31 @@ def api_generate_keep():
     return jsonify({'ok': True, 'kept' if keep else 'dropped': done})
 
 
-def _studio_outfit(slug, outfit_id):
-    from db import StudioOutfit
-    if not outfit_id:
+def _studio_photo_model(kind):
+    import db as D
+    return D.StudioLocation if kind == 'locations' else D.StudioOutfit
+
+
+def _studio_photo(kind, slug, photo_id):
+    if not photo_id:
         return None
     s = _db_session()
     try:
-        row = s.query(StudioOutfit).filter_by(id=str(outfit_id), slug=slug).first()
+        row = (s.query(_studio_photo_model(kind))
+               .filter_by(id=str(photo_id), slug=slug).first())
         if row:
             s.expunge(row)
         return row
     finally:
         s.close()
+
+
+def _studio_outfit(slug, outfit_id):
+    return _studio_photo('outfits', slug, outfit_id)
+
+
+def _studio_location(slug, location_id):
+    return _studio_photo('locations', slug, location_id)
 
 
 def _studio_outfit_slug(slug):
@@ -33871,13 +33902,15 @@ def _studio_outfit_slug(slug):
     return slug
 
 
-@app.route('/api/generate/outfits', methods=['GET', 'POST'])
-def api_generate_outfits():
-    """The persona's saved outfit photos, and uploading a new one."""
+_STUDIO_PHOTO_MAX_CHARS = 16_000_000
+
+
+def _studio_photos(kind):
+    """A persona's saved outfit or location photos, and uploading a new one."""
     blocked = _require_active()
     if blocked:
         return blocked
-    from db import StudioOutfit
+    model = _studio_photo_model(kind)
     body = request.get_json(silent=True) or {}
     slug = _studio_outfit_slug(request.args.get('persona') or body.get('persona'))
     if not slug:
@@ -33887,6 +33920,8 @@ def api_generate_outfits():
         import io
         from PIL import Image
         raw = str(body.get('image') or '')
+        if len(raw) > _STUDIO_PHOTO_MAX_CHARS:
+            return jsonify({'ok': False, 'error': 'That photo is too large (12 MB at most)'}), 413
         try:
             img = Image.open(io.BytesIO(base64.b64decode(raw.split(',', 1)[-1])))
             img = img.convert('RGB')
@@ -33895,31 +33930,30 @@ def api_generate_outfits():
             img.save(out, 'JPEG', quality=88)
         except Exception:
             return jsonify({'ok': False, 'error': 'That is not an image'}), 400
-        path = storage.put(slug, out.getvalue(), 'image/jpeg', prefix='outfits')
+        path = storage.put(slug, out.getvalue(), 'image/jpeg', prefix=kind)
         s = _db_session()
         try:
-            s.add(StudioOutfit(slug=slug, gcs_path=path))
+            s.add(model(slug=slug, gcs_path=path))
             s.commit()
         finally:
             s.close()
     s = _db_session()
     try:
-        rows = (s.query(StudioOutfit).filter_by(slug=slug)
-                .order_by(StudioOutfit.created_at.desc()).all())
-        return jsonify({'ok': True, 'outfits': [
-            {'id': r.id, 'url': f'/api/generate/outfits/{r.id}/image?persona={slug}'}
+        rows = (s.query(model).filter_by(slug=slug)
+                .order_by(model.created_at.desc()).all())
+        return jsonify({'ok': True, kind: [
+            {'id': r.id, 'url': f'/api/generate/{kind}/{r.id}/image?persona={slug}'}
             for r in rows]})
     finally:
         s.close()
 
 
-@app.route('/api/generate/outfits/<outfit_id>/image')
-def api_generate_outfit_image(outfit_id):
+def _studio_photo_image(kind, photo_id):
     blocked = _require_active()
     if blocked:
         return blocked
     slug = _studio_outfit_slug(request.args.get('persona'))
-    row = slug and _studio_outfit(slug, outfit_id)
+    row = slug and _studio_photo(kind, slug, photo_id)
     if not row:
         return ('', 404)
     try:
@@ -33932,24 +33966,53 @@ def api_generate_outfit_image(outfit_id):
     return Response(data, mimetype=row.mime) if data else ('', 404)
 
 
-@app.route('/api/generate/outfits/<outfit_id>', methods=['DELETE'])
-def api_generate_outfit_delete(outfit_id):
+def _studio_photo_delete(kind, photo_id):
     blocked = _require_active()
     if blocked:
         return blocked
-    from db import StudioOutfit
+    model = _studio_photo_model(kind)
     slug = _studio_outfit_slug(request.args.get('persona'))
-    row = slug and _studio_outfit(slug, outfit_id)
+    row = slug and _studio_photo(kind, slug, photo_id)
     if not row:
-        return jsonify({'ok': False, 'error': 'Unknown outfit'}), 404
+        return jsonify({'ok': False, 'error': 'Unknown photo'}), 404
     s = _db_session()
     try:
-        s.query(StudioOutfit).filter_by(id=row.id).delete()
+        s.query(model).filter_by(id=row.id).delete()
         s.commit()
     finally:
         s.close()
     storage.delete(row.gcs_path)
     return jsonify({'ok': True})
+
+
+@app.route('/api/generate/outfits', methods=['GET', 'POST'])
+def api_generate_outfits():
+    return _studio_photos('outfits')
+
+
+@app.route('/api/generate/locations', methods=['GET', 'POST'])
+def api_generate_locations():
+    return _studio_photos('locations')
+
+
+@app.route('/api/generate/outfits/<outfit_id>/image')
+def api_generate_outfit_image(outfit_id):
+    return _studio_photo_image('outfits', outfit_id)
+
+
+@app.route('/api/generate/locations/<location_id>/image')
+def api_generate_location_image(location_id):
+    return _studio_photo_image('locations', location_id)
+
+
+@app.route('/api/generate/outfits/<outfit_id>', methods=['DELETE'])
+def api_generate_outfit_delete(outfit_id):
+    return _studio_photo_delete('outfits', outfit_id)
+
+
+@app.route('/api/generate/locations/<location_id>', methods=['DELETE'])
+def api_generate_location_delete(location_id):
+    return _studio_photo_delete('locations', location_id)
 
 
 @app.route('/api/generate/look', methods=['POST'])
