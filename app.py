@@ -31574,7 +31574,7 @@ def _gen_spec(slug, body, user):
             # background and only the person changes.
             if model not in (imagegen.CLIP_ONLY_MODELS
                              + imagegen.KLING_MOTION_MODELS
-                             + (CR.VIDEO_EDIT_MODEL,)):
+                             + (CR.VIDEO_EDIT_MODEL, imagegen.EXPLICIT_MOTION_MODEL)):
                 model = imagegen.DEFAULT_REPLACE_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
@@ -31641,14 +31641,16 @@ def _gen_spec(slug, body, user):
                     'That motion clip is no longer there. Upload it again.')
             # Wan 2.7 takes a reference video as motion guidance while still
             # conditioning on her photo, which is what this job needs -- a
-            # true replace takes no motion guidance.
-            model = CR.VIDEO_EDIT_MODEL
+            # true replace takes no motion guidance. Alibaba's filter refuses
+            # an explicit clip, so explicit work goes to Runware's own Wan.
+            model = (CR.VIDEO_EDIT_MODEL if level == 'sfw'
+                     else imagegen.EXPLICIT_MOTION_MODEL)
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
             spec['source_height'] = src['height']
             seconds = imagegen.video_seconds(model, src['seconds'])
-        elif model in imagegen.CLIP_ONLY_MODELS:
+        elif model in imagegen.CLIP_ONLY_MODELS + (imagegen.EXPLICIT_MOTION_MODEL,):
             raise imagegen.GenerationError(
                 'That model animates her from a motion clip — upload one first.')
         else:

@@ -106,12 +106,16 @@ RUNWARE_VIDEO_MODELS = {
     'wan-3-0': os.getenv('RW_MODEL_WAN_30', 'alibaba:wan@3.0'),
     # Kling motion control: her one photo performs the uploaded clip.
     'kling-2-6-mc': os.getenv('RW_MODEL_KLING_26_MC', 'klingai:kling-video@2.6-pro'),
+    # Open weights on Runware's own GPUs: Alibaba's hosted Wan 2.7 runs a
+    # content filter over the input clip (DataInspectionFailed), this does not.
+    'wan-2-2-animate': os.getenv('RW_MODEL_WAN22_ANIMATE', 'runware:200@8'),
     'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
     # Video edit: the clip and up to four photos, addressed in the prompt as
     # @Image1.. Id and fields are from public docs, not the live catalogue.
     'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@o3-pro'),
 }
 KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
+EXPLICIT_MOTION_MODEL = 'wan-2-2-animate'
 # The safe-work models that take her photos as `inputs.referenceImages` beside
 # a prompt, so a reel or an animate can carry her character on them.
 REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
@@ -159,12 +163,14 @@ VIDEO_JOBS = {
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
     'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc',
-                        'ml-face-swap', 'wan-2-7', 'kling-3-0-omni'),
+                        'ml-face-swap', 'wan-2-2-animate', 'wan-2-7',
+                        'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
-    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0'),
+    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
+                           'wan-2-2-animate'),
                 'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
@@ -274,7 +280,8 @@ MODEL_VIDEO_FIELDS = {
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
     **{m: {'shape': 'motion', 'in_source': 'referenceVideos',
-           'in_refs': 'referenceImages'} for m in ('kling-2-6-mc', 'kling-3-0-mc')},
+           'in_refs': 'referenceImages'}
+       for m in ('kling-2-6-mc', 'kling-3-0-mc', 'wan-2-2-animate')},
     **{m: {'shape': 'inputs', 'source': 'inputVideo', 'refs': 'referenceImages'}
        for m in ('seedance-2-0', 'seedance-2-0-fast', 'minimax-h3',
                  'minimax-h3-fast', 'wan-3-0', 'kling-3-0-omni')},
@@ -520,7 +527,7 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+MODEL_REF_CAP = {'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
                  'kling-3-0-omni': 4}
 
 # The studio offers a handful of her views, not thirty, so a model that takes
@@ -1810,6 +1817,9 @@ class RunwareProvider(Provider):
                     src_key: source if src_key == 'video' else [source],
                     (fields.get('in_refs') or 'referenceImages'):
                         list(refs)[:cap]}
+                if model_key == 'wan-2-2-animate':
+                    task['settings'] = {'wanAnimate': {
+                        'mode': 'replace' if job == 'swap' else 'animate'}}
             else:
                 task[fields['source']] = source
                 task[fields['refs']] = list(refs)[:MAX_REFERENCES]
