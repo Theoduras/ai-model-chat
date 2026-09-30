@@ -682,6 +682,9 @@ def price_table():
         # already read; it now covers every model a job can reach.
         'swap_model_caps': {m: model_caps(m) for m in all_video_models()},
         'explicit_swap_model': EXPLICIT_SWAP_MODEL,
+        # An Animate with a motion clip runs on one of these whatever the
+        # picker says, so the studio quotes and draws the form for that one.
+        'explicit_motion_model': _IG.EXPLICIT_MOTION_MODEL,
         # The lengths each video model actually serves, so the picker cannot
         # offer one the provider will refuse.
         'video_model_durations': {m: _imagegen_durations(m)

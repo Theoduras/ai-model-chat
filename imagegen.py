@@ -440,9 +440,14 @@ def takes_aspect(model_key):
     frame, so an aspect picker in front of it is a control that changes
     nothing -- which is worse than no control, because it reads as a promise.
     """
-    if model_key in _NO_DURATION_MODELS:
+    if model_key in _NO_DURATION_MODELS or model_key in RUNG_SCALED_MODELS:
         return False
     return _video_fields(model_key).get('shape') != 'replace'
+
+# Takes any size, so the clip's own shape is kept and scaled to the rung the
+# creator picked and paid for, rather than run at whatever the phone filmed.
+RUNG_SCALED_MODELS = ('wan-2-2-animate',)
+_RUNG_SHORT_SIDE = {'480p': 480, '720p': 720, '1080p': 1080}
 
 # Wan 2.7 takes a fixed set of sizes and refuses anything else outright, so a
 # phone clip's own 480p dimensions are not a size it can be asked for. Snapping
@@ -604,6 +609,9 @@ def video_size(model_key, width=0, height=0, resolution=None, aspect=None):
         # to a multiple of 16, because a phone crop is any width it likes --
         # 406 is a real one -- and an encoder takes macroblocks or nothing.
         if w > 0 and h > 0:
+            if model_key in RUNG_SCALED_MODELS and resolution in _RUNG_SHORT_SIDE:
+                k = _RUNG_SHORT_SIDE[resolution] / float(min(w, h))
+                w, h = w * k, h * k
             return _macroblock(w), _macroblock(h)
         return fallback
     if w <= 0 or h <= 0:
@@ -1291,6 +1299,20 @@ def build_swap_prompt(motion='', preserve=False, roles=None, place='',
     return (base + ' ' + motion.strip()) if motion.strip() else base
 
 
+def build_animate_prompt(motion=''):
+    """Wan 2.2 Animate in animate mode: the photo is her, her outfit and the
+    place, and the clip lends only its movement. The swap wording said the
+    opposite -- keep the clip's clothes and background -- which this mode
+    does not do."""
+    base = ('The woman in the reference image performs the movement of the '
+            'reference video: follow its motion, timing, pose and expressions '
+            'exactly. Keep her face, hair, body, outfit and the setting exactly '
+            'as they are in the reference image; take nothing from the video '
+            'but the movement.')
+    motion = motion.strip()
+    return f'{base} {motion[0].upper()}{motion[1:]}' if motion else base
+
+
 def build_video_prompt(motion=''):
     base = ('She moves naturally and subtly — a slow breath, a small shift of '
             'weight, hair settling. The camera holds nearly still.')
@@ -1598,18 +1620,35 @@ _UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter
 _BAD_MODEL = "Invalid value for 'model'"
 
 
+# What to search the provider's catalogue for when it refuses one of our ids.
+MODEL_SEARCH_NAMES = {'wan-2-2-animate': 'wan animate'}
+
+
 def _bad_model_error(tasks, err):
     """Runware's refusal of a model id names neither the id nor the model, and
-    most ids here were read off documentation, so without this the creator is
-    left guessing which one is wrong."""
+    most ids here were read off documentation, so the refusal also asks the
+    catalogue what the model is really called: the failed card then carries
+    the id to set, instead of a second guess."""
     names = {**{v: k for k, v in RUNWARE_MODELS.items()},
              **{v: k for k, v in RUNWARE_VIDEO_MODELS.items()}}
     sent = [t['model'] for t in tasks if isinstance(t.get('model'), str)]
     said = ', '.join(f"{a!r} ({names[a]})" if a in names else repr(a) for a in sent) or 'none'
+    found = ''
+    keys = [names[a] for a in sent if a in names]
+    if keys:
+        query = MODEL_SEARCH_NAMES.get(keys[0]) or keys[0].replace('-', ' ')
+        category = 'video' if keys[0] in RUNWARE_VIDEO_MODELS else 'image'
+        try:
+            hits = search_models(query, category, limit=5)
+        except Exception:
+            hits = []
+        if hits:
+            found = (' Runware lists: ' + '; '.join(
+                f"{h['air']} ({h['name']})" if h['name'] else h['air'] for h in hits) + '.')
     return GenerationError(
-        f'Runware does not know the model id {said}. Look up the right id at '
-        f'/api/generate/models?q=<model name> and set it in that model\'s '
-        f'RW_MODEL_* variable. The provider said: {err}', fatal=True)
+        f'Runware does not know the model id {said}.{found} Set the right one in '
+        f'that model\'s RW_MODEL_* variable (or look it up at '
+        f'/api/generate/models?q=<model name>). The provider said: {err}', fatal=True)
 
 # Dropping one of these and resending does not degrade the generation, it
 # replaces it: a swap with no input clip and no reference is a stranger's video
@@ -1802,6 +1841,8 @@ class RunwareProvider(Provider):
             # the scene. A duration, a size or a negative prompt is refused.
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
+            if model_key in RUNG_SCALED_MODELS:
+                task['width'], task['height'] = width, height
             # Wan 2.2 Animate shares this shape but runs on Runware's own GPUs,
             # and a Kling provider block on it is refused as an invalid model.
             if model_key in KLING_MOTION_MODELS:
