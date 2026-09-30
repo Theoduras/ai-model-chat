@@ -22017,6 +22017,7 @@ def _plat_round_body(plat, persona):
             log.append(f'Replied → {handle or fan_uuid}: {reply[:50]}')
 
     _set_setting(cursor_key, json.dumps(cursor))
+    _skip_flush(plat, persona, dropped)
 
     # A round that replies to nobody leaves no trace at all, which reads as "the
     # bot is dead" when it is really just skipping every chat. Record why —
@@ -22463,19 +22464,27 @@ def _claim_msg(plat, persona, fan_uuid, msg_id, ttl=600):
         s.close()
 
 
-_skip_noted = {}
+_skip_round = {}
+_skip_said = {}
 
 
 def _skip_note(plat, persona, fan_uuid, who, reason):
-    """Put a skipped chat in the activity log, once an hour per fan and reason:
-    the round's own log is never shown, so a fan the bot ignored looked like a
-    fan it never saw."""
-    key = (plat.slug, persona, fan_uuid, reason)
-    if time.time() - _skip_noted.get(key, 0) < 3600:
+    _skip_round.setdefault((plat.slug, persona), {}).setdefault(reason, []).append(who)
+
+
+def _skip_flush(plat, persona, dropped):
+    """One activity-log line per round saying who was skipped and why, at most
+    every 10 minutes: the round's own log is never shown, so an ignored fan
+    looked like one the bot never saw. Small groups are named, big ones counted."""
+    got = _skip_round.pop((plat.slug, persona), {})
+    if dropped:
+        got['cannot be messaged'] = list(dropped)
+    if not got or time.time() - _skip_said.get((plat.slug, persona), 0) < 600:
         return
-    _skip_noted[key] = time.time()
-    _plat_trace(plat, persona, 'skipped', f'{who}: skipped ({reason})',
-                plat.fan_key(fan_uuid))
+    _skip_said[(plat.slug, persona)] = time.time()
+    parts = [f'{len(v)} {k}' + (f' ({", ".join(v)})' if len(v) <= 8 else '')
+             for k, v in sorted(got.items(), key=lambda kv: len(kv[1]))]
+    _plat_trace(plat, persona, 'skipped', 'skipped this round: ' + '; '.join(parts))
 
 
 def _plat_round_now(plat, persona, block=False):
