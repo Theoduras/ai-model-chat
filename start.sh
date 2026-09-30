@@ -35,5 +35,6 @@ fi
 # hop away. Eight of them is eight frame polls before the ninth request queues,
 # and a sign-in window on its own asks several times a second, so the window
 # and the site it is hosting were competing for the same handful.
+# wsgi:app applies the uploaded-photo undress allowance before serving.
 exec gunicorn --bind ":${PORT:-8080}" --workers 1 --threads "${GUNICORN_THREADS:-32}" \
-     --timeout "${GUNICORN_TIMEOUT:-0}" "${GUNICORN_TARGET:-app:app}"
+     --timeout "${GUNICORN_TIMEOUT:-0}" "${GUNICORN_TARGET:-wsgi:app}"
