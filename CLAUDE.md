@@ -59,6 +59,7 @@ tiktok_stub.py                   — Offline TikTok transport (tests only)
 tiktok.html                      — TikTok console (connect, post a video)
 admin.html                      — Visual persona builder UI (creator-facing)
 index.html                      — Homepage (character builder pitch, plans, generation prices)
+wishes.py                       — Fan wishes: spot a picture request, refuse terms, price it (test_wishes.py)
 free_tools.py                   — Free public tools (lead magnets): the list, generator prompts, limiter
 templates/tool.html             — Shared page for the free tools; one child per tool in templates/tools/
 test_free_tools.py              — Free-tool input, parsing and rate-limit tests
@@ -361,6 +362,12 @@ Stay completely in character. Never mention being an AI.
   to `kept/` and sets `approved`. The three-day purge is a **bucket lifecycle
   rule**, installed at boot by `_gen_worker`, never a loop: a worker that is
   not running must not be why a generation outlives its window.
+- **Fan wishes are the one exception to review** (`/api/fanvue/wish`, Fanvue only,
+  super admin only while testing, off per persona by default). A Fanvue message that
+  passes `wishes.looks_like_wish` gets one classifier call; a wish is generated from
+  her character and sent as a locked PPV (`set_id='wish'`) without review. The media
+  stays unapproved, so no other fan's send path can reach it, and a fan's next wish
+  waits until the last one is bought, because each one spends the creator's tokens.
 - **Tokens are pegged to provider cost** — `credits.TOKEN_COST_USD`, one
   number — so margin is identical whatever is generated and a new model is a
   table entry, not a pricing decision. `credits.py` asserts at import that every

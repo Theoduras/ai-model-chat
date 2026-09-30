@@ -184,6 +184,16 @@
         <div id="ppv-sim-out" style="font-size:.78rem;"></div>
       </div>
     </div>
+    <div id="wish-row" style="display:none; margin-top:12px; border-top:1px solid var(--border-soft); padding-top:16px;">
+      <label style="display:block;margin-bottom:6px;">✨ Fan wishes <span style="font-weight:400;color:var(--text-muted);">(super admin test — a fan describes a picture, she makes it and sends it locked, no review)</span></label>
+      <div class="row-inline" style="gap:14px;align-items:center;flex-wrap:wrap;">
+        <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="checkbox" id="wish-on"> On</label>
+        <label style="margin:0;">Safe price ($) <input type="number" id="wish-sfw" min="3" step="1" style="max-width:90px;"></label>
+        <label style="margin:0;">Explicit price ($) <input type="number" id="wish-nsfw" min="3" step="1" style="max-width:90px;"></label>
+        <button class="btn-ai" onclick="saveWish()">Save</button>
+        <span class="hint" id="wish-hint"></span>
+      </div>
+    </div>
     <div id="connect-panel" style="display:none; margin-top:4px; border-top:1px solid var(--border-soft); padding-top:16px;">
       <div class="result-box" id="config-status"></div>
       <div id="connect-step2" style="display:none; margin-top:14px;">
@@ -400,6 +410,7 @@ async function loadConfig(){
   loadCreators();
   window._ppvTiersLoaded=false;
   loadPpv();
+  loadWish();
   loadPpvStats();
   loadFunnels();
   loadAuto();
@@ -735,6 +746,23 @@ async function loadMoreMedia(){
 function onGridScroll(){
   const g=document.getElementById('ppv-media-grid');
   if(mediaHasMore&&!mediaLoading&&g.scrollTop+g.clientHeight>=g.scrollHeight-120) loadMoreMedia();
+}
+async function loadWish(){
+  const row=document.getElementById('wish-row');
+  const r=await fetch('/api/fanvue/wish?persona='+encodeURIComponent(persona()));
+  if(!r.ok){row.style.display='none';return;}
+  const d=await r.json();
+  document.getElementById('wish-on').checked=!!d.enabled;
+  document.getElementById('wish-sfw').value=d.price_sfw?d.price_sfw/100:'';
+  document.getElementById('wish-nsfw').value=d.price_nsfw?d.price_nsfw/100:'';
+  row.style.display='';
+}
+async function saveWish(){
+  const cents=id=>Math.round((parseFloat(document.getElementById(id).value)||0)*100);
+  const d=await post('/api/fanvue/wish',{persona:persona(),enabled:document.getElementById('wish-on').checked,
+    price_sfw:cents('wish-sfw'),price_nsfw:cents('wish-nsfw')});
+  document.getElementById('wish-hint').textContent=d.ok?'Saved':(d.error||'Save failed');
+  if(d.ok)loadWish();
 }
 async function loadPpv(){
   const row=document.getElementById('ppv-row');

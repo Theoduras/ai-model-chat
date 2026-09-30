@@ -28,6 +28,7 @@ import growth
 import credits as CR
 import imagegen
 import storage
+import wishes
 from google import genai
 from google.genai import types
 
@@ -18173,6 +18174,26 @@ def api_fanvue_media_lookup():
     return jsonify({'media': out})
 
 
+@app.route('/api/fanvue/wish', methods=['GET', 'POST'])
+def api_fanvue_wish():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    d = request.args if request.method == 'GET' else (request.get_json(silent=True) or {})
+    persona = (d.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    if request.method == 'POST':
+        try:
+            cfg = {'enabled': bool(d.get('enabled')),
+                   'price_sfw': max(FV_PRICE_FLOOR, int(d.get('price_sfw') or 0)),
+                   'price_nsfw': max(FV_PRICE_FLOOR, int(d.get('price_nsfw') or 0))}
+        except (TypeError, ValueError):
+            return jsonify({'ok': False, 'error': 'Prices must be numbers'}), 400
+        _set_setting(f'fanvue_wish_{persona}', json.dumps(cfg))
+    return jsonify({'ok': True, **_fv_wish_cfg(persona)})
+
+
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])
 @platform_scoped
 def api_fanvue_ppv():
@@ -20976,6 +20997,151 @@ def _fv_clear_unsendable(persona, fan_uuid, plat=None):
     if rows.pop(fan_uuid, None) is not None:
         _set_setting(_fv_unsendable_key(persona, plat), json.dumps(rows))
 
+# persona:fan -> start time. Expires on its own so a wish lost between the
+# check and the send never blocks that fan for good.
+_fv_wish_busy = {}
+
+
+def _fv_wish_cfg(persona):
+    try:
+        return json.loads(_get_setting(f'fanvue_wish_{persona}') or '{}')
+    except ValueError:
+        return {}
+
+
+def _wish_owner(persona):
+    """The persona's owner as a user dict, only while that is the super admin:
+    wishes auto-send unreviewed media, so they stay a super-admin test."""
+    uid = _persona_owner(persona)
+    if not uid:
+        return None
+    from db import User
+    s = _db_session()
+    try:
+        u = s.get(User, uid)
+        if u is None or u.role != 'super_admin':
+            return None
+        return {'id': u.id, 'email': u.email, 'role': u.role, 'tier': u.tier,
+                'status': u.status, 'workspace_id': u.id,
+                'is_admin': True, 'is_super_admin': True}
+    finally:
+        s.close()
+
+
+def _fv_wish_unpaid(persona, fan_uuid):
+    """True while this fan's last wish is unbought, or when that cannot be read:
+    each wish spends the creator's tokens, so an unpaid one blocks the next."""
+    try:
+        from db import PpvDrop
+        s = _db_session()
+        try:
+            d = (s.query(PpvDrop)
+                 .filter(PpvDrop.persona == persona, PpvDrop.fan_uuid == str(fan_uuid),
+                         PpvDrop.set_id == 'wish')
+                 .order_by(PpvDrop.created_at.desc()).first())
+            return bool(d and not d.paid_at)
+        finally:
+            s.close()
+    except Exception:
+        return True
+
+
+def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
+    """A wish to make from this message, or None. The free gates run before
+    the one classifier call, so an ordinary message costs nothing."""
+    cfg = _fv_wish_cfg(persona)
+    if not cfg.get('enabled') or not wishes.looks_like_wish(text):
+        return None
+    owner = _wish_owner(persona)
+    if not owner or time.time() - _fv_wish_busy.get(f'{persona}:{fan_uuid}', 0) < 300:
+        return None
+    if _fv_wish_unpaid(persona, fan_uuid):
+        _fv_trace(persona, 'guardrail', f'{who}: last wish not bought — no new one',
+                  fan=fan_key)
+        return None
+    wish = wishes.parse(_persona_text(
+        persona, wishes.CLASSIFY_INSTRUCTION.format(text=text[:500]),
+        max_tokens=250, temperature=0.2))
+    if not wish:
+        return None
+    term = wishes.blocked(text, wish['scene'], wish['outfit'])
+    if term:
+        _fv_trace(persona, 'guardrail', f'{who}: wish refused ("{term}")', fan=fan_key)
+        return None
+    if wish['explicit'] and not (_persona_config(persona) or {}).get('nsfw_enabled'):
+        _fv_trace(persona, 'guardrail', f'{who}: explicit wish, persona is SFW', fan=fan_key)
+        return None
+    wish['owner'] = owner
+    wish['price'] = wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)
+    _fv_wish_busy[f'{persona}:{fan_uuid}'] = time.time()
+    return wish
+
+
+def _gen_wait(job_id, timeout=150):
+    """The first media row a job made, or None if it failed or ran out of time."""
+    from db import get_generation, get_persona_media
+    end = time.time() + timeout
+    while time.time() < end:
+        s = _db_session()
+        try:
+            job = get_generation(s, job_id)
+            status, ids = job.status, (job.result_media_ids or '').split(',')
+            if status == 'done':
+                return get_persona_media(s, ids[0])
+        finally:
+            s.close()
+        if status == 'failed':
+            return None
+        if not GEN_HAS_WORKER:
+            _gen_advance_open(job_id=job_id)
+        time.sleep(3)
+    return None
+
+
+def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
+    """Generate the wish and send it as a locked message. Off the reply path:
+    a generation takes tens of seconds and the chat must not wait on it."""
+    try:
+        with app.app_context():
+            owner = wish['owner']
+            body = {'kind': 'image', 'batch': 1,
+                    'rating': 'explicit' if wish['explicit'] else 'sfw',
+                    'shot': 'nude' if wish['explicit'] else 'full',
+                    'prompt': wish['scene'], 'clothing': wish['outfit']}
+            spec = _gen_spec(persona, body, owner)
+            char = _character_snapshot(persona)
+            if char:
+                spec.update(character=char, character_id=char['id'],
+                            character_version=char['version'])
+            job_id, _short = _gen_queue(owner, persona, spec, CR.quote(spec),
+                                        _token_balance(owner))
+            if not job_id:
+                _fv_trace(persona, 'error', f'{who}: wish skipped — not enough tokens',
+                          fan=fan_key)
+                return
+            _gen_start(job_id, persona, spec, _workspace_id(owner))
+            media = _gen_wait(job_id)
+            data = media and storage.get(media.gcs_path)
+            if not data:
+                _fv_trace(persona, 'error', f'{who}: wish generation failed', fan=fan_key)
+                return
+            ext = (media.mime or 'image/jpeg').split('/')[-1]
+            uuid = _fv_upload_media(persona, data, 'image', f'wish-{media.id}.{ext}',
+                                    content_type=media.mime or 'image/jpeg', scope=scope)
+            caption = wish['caption'] or 'made this one just for you'
+            msg_uuid = plat.send_ppv(persona, scope, fan_uuid, caption, [uuid],
+                                     wish['price'])
+            _fv_record_drop(persona, fan_uuid, {'id': 'wish', 'name': 'Wish'}, 0,
+                            wish['price'], [uuid], msg_uuid, plat=plat)
+            _fv_trace(persona, 'ppv', f'✨ wish → {who} at ${wish["price"] / 100:g}: '
+                                      f'{wish["scene"]}', fan=fan_key)
+    except Exception as e:
+        logger.exception('wish for %s/%s failed', persona, fan_uuid)
+        _fv_trace(persona, 'error', f'{who}: wish failed: {str(e)[:160]}', fan=fan_key)
+    finally:
+        _fv_wish_busy.pop(f'{persona}:{fan_uuid}', None)
+
+
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
                 ppv_ctx, active=True, plat=None):
     """Pace out one reply, then consider the next PPV tier so the paid drop
@@ -21002,7 +21168,11 @@ def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
         _fv_clear_unsendable(persona, fan_uuid, plat=plat)
         _log_x_message(persona, fan_key, handle, 'out', reply)
         _fv_trace(persona, 'sent', f'→ {handle or fan_uuid}: {reply}')
-        if ppv_ctx:
+        if ppv_ctx and ppv_ctx.get('wish'):
+            threading.Thread(target=_fv_run_wish, daemon=True,
+                             args=(persona, scope, fan_uuid, fan_key, handle or fan_uuid,
+                                   ppv_ctx['wish'], plat)).start()
+        elif ppv_ctx:
             _fv_maybe_ppv(persona, scope, fan_uuid, fan_key, handle, reply,
                           ppv_ctx, context=incoming, plat=plat)
 
@@ -21714,6 +21884,8 @@ def _plat_round_body(plat, persona):
                 elif not fan_cta.get('sent'):
                     logger.warning('%s [%s] CTA due for %s but no link is configured',
                                    plat.label, persona, who)
+        wish = (_fv_wish_check(persona, fan_uuid, fan_key, who, text)
+                if plat is PLAT_FANVUE else None)
         instruction = (
             f"Reply to this {plat.label} fan in-character. You have the full earlier "
             "conversation above — USE it: do not re-ask anything they already told "
@@ -21726,12 +21898,16 @@ def _plat_round_body(plat, persona):
             # Say what is about to go out, so the reply lands on it. Without
             # this the model writes blind and a caption-less tier ships the
             # conversational reply as the sales line on a paid unlock.
-            + _fv_queued_hint(persona, fan_uuid, fan_key, ppv_sets if ppv_on else [],
+            + _fv_queued_hint(persona, fan_uuid, fan_key,
+                              ppv_sets if ppv_on and not wish else [],
                               ppv_state_key, text, ppv_tz)
             + "Their latest message: "
             f"\"{text}\""
             + (' Do NOT paste a link or URL yourself, and don\'t name the site '
-               'by name — a link is appended after your message.' if cta_choice else ''))
+               'by name — a link is appended after your message.' if cta_choice else '')
+            + (' You are making the exact picture they asked for right now: say it '
+               'is coming in a moment, playfully, without describing it or naming '
+               'a price.' if wish else ''))
         if fcfg and assignment:
             try:
                 instruction += _fv_funnel_steer(persona, fan_uuid, handle, fan_type,
@@ -21771,6 +21947,8 @@ def _plat_round_body(plat, persona):
                    'state_key': ppv_state_key, 'paid_key': ppv_paid_key,
                    'tz_offset': ppv_tz, 'funnels': fcfg, 'assignment': assignment,
                    'require_payment': ppv_require_payment} if ppv_on else None
+        if wish:
+            ppv_ctx = {'wish': wish}
         age = plat.msg_age(newest)
         active = age is None or age < FV_ACTIVE_MIN
         args = (persona, scope, fan_uuid, fan_key, handle, reply.strip(), text, hcfg,
@@ -34128,22 +34306,9 @@ def _gen_submit(user, slug, spec, price):
     unaffordable job never costs an API call. Shared by the studio and the
     character builder so both get the same refunds and sweeping."""
     balance = _token_balance(user)
-    if balance is not None and balance < price:
-        return _tokens_denied(price, balance)
-
-    from db import queue_generation, update_generation
-    s = _db_session()
-    try:
-        job = queue_generation(s, _workspace_id(user), slug, spec['kind'],
-                               json.dumps(spec), price,
-                               imagegen.provider_name_for(spec))
-        job_id = job.id
-    finally:
-        s.close()
-
-    if not _spend_tokens(user, price, job_id, note=f"{spec['kind']} generation"):
-        _set_job_failed(job_id, 'Not enough credits.')
-        return _tokens_denied(price, _token_balance(user) or 0)
+    job_id, short = _gen_queue(user, slug, spec, price, balance)
+    if not job_id:
+        return _tokens_denied(price, short)
 
     workspace = _workspace_id(user)
     if GEN_HAS_WORKER:
@@ -34165,6 +34330,26 @@ def _gen_submit(user, slug, spec, price):
     return jsonify({'ok': True, 'job': job_id, 'tokens': price,
                     'status': payload.get('status'), 'result': payload,
                     'balance': (balance - price) if balance is not None else None})
+
+
+def _gen_queue(user, slug, spec, price, balance):
+    """Queue the job and reserve its tokens. (job_id, None), or (None, balance)
+    when the tokens are not there -- nothing reaches a provider in that case."""
+    if balance is not None and balance < price:
+        return None, balance
+    from db import queue_generation
+    s = _db_session()
+    try:
+        job = queue_generation(s, _workspace_id(user), slug, spec['kind'],
+                               json.dumps(spec), price,
+                               imagegen.provider_name_for(spec))
+        job_id = job.id
+    finally:
+        s.close()
+    if not _spend_tokens(user, price, job_id, note=f"{spec['kind']} generation"):
+        _set_job_failed(job_id, 'Not enough credits.')
+        return None, _token_balance(user) or 0
+    return job_id, None
 
 
 def _set_job_failed(job_id, message):
