@@ -18389,7 +18389,9 @@ def _fv_webhook_url():
 
 def _fv_wanted_events(persona):
     granted = set((_fanvue_tokens(persona).get('scope') or '').split())
-    return sorted(e for e, need in FV_WEBHOOK_EVENTS.items() if need in granted)
+    refused = set(_fv_stored_hook(persona).get('refused') or [])
+    return sorted(e for e, need in FV_WEBHOOK_EVENTS.items()
+                  if need in granted and e not in refused)
 
 
 def _fv_hook_key(persona):
@@ -18453,7 +18455,8 @@ def _fv_ensure_webhook(persona, force=False):
             # returns one again after creation.
             _set_setting(_fv_hook_key(persona), json.dumps(
                 {'id': mine.get('id') or '', 'url': url, 'events': sorted(have),
-                 'secret': stored.get('secret') or ''}))
+                 'secret': stored.get('secret') or '',
+                 'refused': stored.get('refused') or []}))
             return {'ok': True, 'reason': 'already subscribed', 'url': url,
                     'events': sorted(have), 'created': False}
 
@@ -18464,25 +18467,42 @@ def _fv_ensure_webhook(persona, force=False):
             logger.warning('Fanvue [%s] could not replace the webhook subscription: %s',
                            persona, str(e)[:120])
 
+    refused, why = [], ''
     try:
         made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
                             body={'url': url, 'events': wanted})
     except Exception as e:
-        _fv_trace(persona, 'error',
-                  f'webhook subscription refused for {url} '
-                  f'({len(wanted)} events: {", ".join(wanted)}) — {str(e)[:200]}')
-        _set_setting(_fv_hook_key(persona), json.dumps(
-            dict(stored, url=url, last_error=str(e)[:300], tried=wanted)))
-        return {'ok': False, 'reason': str(e)[:160], 'url': url, 'tried': wanted}
+        made, why = None, _fv_error_text(e)
+        # One unknown event fails the whole call, taking the rest with it, so
+        # find the one Fanvue will not take by leaving each out in turn.
+        if getattr(e, 'code', None) == 400 and len(wanted) > 1:
+            for drop in wanted:
+                rest = [x for x in wanted if x != drop]
+                try:
+                    made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
+                                        body={'url': url, 'events': rest})
+                except Exception:
+                    continue
+                refused, wanted = [drop], rest
+                break
+        if made is None:
+            _fv_trace(persona, 'error',
+                      f'webhook subscription refused for {url} '
+                      f'({len(wanted)} events: {", ".join(wanted)}) — {why}')
+            _set_setting(_fv_hook_key(persona), json.dumps(
+                dict(stored, url=url, last_error=why[:300], tried=wanted)))
+            return {'ok': False, 'reason': why, 'url': url, 'tried': wanted}
     body = made.get('data') if isinstance(made.get('data'), dict) else made
     secret = str((body or {}).get('signingSecret') or '')
     _set_setting(_fv_hook_key(persona), json.dumps(
         {'id': str((body or {}).get('id') or ''), 'url': url, 'events': wanted,
-         'secret': secret or stored.get('secret') or ''}))
-    missing = sorted(set(FV_WEBHOOK_EVENTS) - set(wanted))
+         'secret': secret or stored.get('secret') or '',
+         'refused': sorted(set(stored.get('refused') or []) | set(refused))}))
+    missing = sorted(set(FV_WEBHOOK_EVENTS) - set(wanted) - set(refused))
     _fv_trace(persona, 'connected',
               'subscribed to ' + ', '.join(e.split('.', 1)[1] for e in wanted)
-              + (f" — {len(missing)} more need read:creator" if missing else ''))
+              + (f" — {len(missing)} more need read:creator" if missing else '')
+              + (f" — Fanvue refused {refused[0]} ({why})" if refused else ''))
     logger.info('Fanvue [%s] webhook subscribed: %s → %s', persona, url, wanted)
     return {'ok': True, 'reason': 'subscribed', 'url': url, 'events': wanted,
             'missing': missing, 'created': True}
