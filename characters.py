@@ -330,7 +330,7 @@ VIEWS = {
         dict(key='rear_nude', label='Nude from behind (standing)', group='nsfw', rating='moderate', required_from='explicit',
              parents=('nude_front', 'body_back'), tier=2, mode='reference', framing='a full-body nude photo from behind, standing straight', uses=('body',),
              topless=('Topless from behind (standing)', 'a full-body topless photo from behind wearing only plain panties, standing straight')),
-        dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from='explicit',
+        dict(key='pubic', label='Pubic area (front, standing)', group='nsfw', rating='explicit', required_from=None,
              parents=('nude_front',), tier=2, mode='crop', region='pelvis', zoom=True,
              body=('hips', 'thighs', 'birthmarks'),
              framing=('a close-up of her nude pubic area from the front while standing, framed from just below the '
@@ -346,7 +346,7 @@ VIEWS = {
              framing=('an explicit macro close-up of her vulva with labia spread open by her fingers, the vulva centred '
                       'and filling the frame, only fingertips and inner thighs at the edges'),
              uses=('pubic', 'vulva')),
-        dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from='explicit',
+        dict(key='anus_closed', label='Anus, closed (bending forward)', group='nsfw', rating='explicit', required_from=None,
              parents=('rear_nude',), tier=2, mode='reference', zoom=True, body=('glute_shape',),
              framing=('an explicit macro close-up from behind while she bends forward, buttocks parted, her closed '
                       'anus and her vulva just below it both in frame and in sharp focus, filling the frame, '

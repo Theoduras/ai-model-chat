@@ -50,9 +50,9 @@ def test_required_views():
     check('breasts come from the dressed body, never cropped',
           CH.view('breasts')['parents'] == ('body_front',) and CH.view('breasts')['mode'] == 'reference')
     exp = set(CH.required_views('explicit'))
-    check('explicit requires pubic, vulva, anus closed',
-          {'pubic', 'vulva_closed', 'anus_closed'} <= exp)
-    check('open views optional', not {'vulva_open', 'anus_open'} & exp)
+    check('explicit requires the closed vulva', 'vulva_closed' in exp)
+    check('close-ups beyond the nude are optional extras',
+          not {'pubic', 'anus_closed', 'vulva_open', 'anus_open'} & exp)
     check('missing views', CH.missing_views('sfw', ['face_front']) == ['body_front'])
     check('catalogue cut to level', all(
         CH._rank(v['rating']) <= CH._rank('moderate') for v in CH.catalogue('moderate')['views']))

@@ -24,6 +24,8 @@
     .ob-rsub:hover { background: var(--surface); }
     .ob-rsub.on { background: var(--accent-soft); color: var(--text); font-weight: 600; }
     .ob-rsub.locked { opacity: .55; }
+    .ob-rsub-o { margin-left: auto; font-size: 0.62rem; letter-spacing: .04em; text-transform: uppercase; color: var(--text-muted); }
+    .shots-h { margin: 6px 0 0; font-size: 0.66rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
     .ob-rsub-i { width: 14px; text-align: center; font-size: 0.7rem; flex-shrink: 0; color: var(--text-muted); }
     .ob-rsub.approved .ob-rsub-i { color: var(--ok); }
     .ob-rsub.review .ob-rsub-i, .ob-rsub.generating .ob-rsub-i, .ob-rsub.outdated .ob-rsub-i { color: var(--warn); }
@@ -1085,7 +1087,7 @@ function go(s) {
   if (!stepOpen(idx)) {
     refused = openWhy(idx);
     const open = STEPS.map((x, j) => j).filter(j => stepOpen(j));
-    idx = open.find(j => !stepDone(j) && !STEPS[j].optional) ?? open[open.length - 1] ?? 0;
+    idx = open.find(j => !stepDone(j) && !stepOptional(STEPS[j])) ?? open[open.length - 1] ?? 0;
   }
   s = STEPS[idx].key;
   if (s !== step) { lastMsg = ['', '']; if (TOUR && TOUR.on()) TOUR.end(true); }
@@ -1127,15 +1129,17 @@ const HELP = {
   'step:pick': ['Pick her face', 'Choose the option that looks most like her. Options you do not pick delete themselves after 3 days, and you can regenerate if none is right.'],
   'step:check': ['Check & approve', 'Tick every feature that matches what you chose. Approving runs an adult-appearance check and locks her face; every later photo copies it.'],
   'step:body': ['Body profile', 'Her overall shape: a preset, her breast size, and the individual features. You can set this before her face is done. Every body photo is made from it, so finish it before generating any.'],
-  'step:photos_body': ['Body photos', 'Her clothed full-body photos, starting with the front. The back, side, hands and feet are built from the front, so they unlock once it is approved. All of them must be approved to move on.'],
+  'step:photos_body': ['Body photos', 'Her clothed full-body photos, starting with the front. The others are built from the front, so they unlock once it is approved. The front (and back at Topless and Explicit) are required. Side, hands, palms, feet and soles are optional extras for more control.'],
   'step:photos_face': ['Face angles (optional)', 'Not required. Three-quarter, profile and smiling, each built from her approved face. They give the generator more of her face to copy, for extra control over how she looks turned or smiling. Skip them if her front face is enough.'],
   'step:intimate': ['Intimate details', 'What your level allows: breasts and nipples at Topless, plus pubic hair, vulva and anus at Explicit. You can choose these before her face is done. Choose all of it before generating: the intimate photos are generated from these choices, so nothing is generated first and then corrected. Breast size is set in Body profile.'],
-  'step:photos_intimate': ['Intimate photos', 'Each photo is built from the ones it depends on (the lock message says which) and from your intimate details. Approve them top to bottom.'],
+  'step:photos_intimate': ['Intimate photos', 'Each photo is built from the ones it depends on (the lock message says which) and from your intimate details. Required ones must be approved to finish; close-ups marked optional (the open views, and pubic and anus at Explicit) are extras.'],
   'step:finish': ['Accept & link', 'Review her full set, accept this version, then link her to a persona so every photo that persona sends looks like her.'],
   'body:mode': ['Body source', 'Create with the builder: pick her shape from drawings. Match reference bodies: upload photos and hers is made similar to them, never a copy. Her face is always her own.'],
   'body:preset': ['Presets', 'A preset sets her whole body, breast size and intimate shapes at once, replacing earlier picks. Face features are never touched. Changing the breast size afterwards keeps the preset otherwise.'],
   'body:size': ['Breast size', 'Her cup size. It is used in her first full-body photo already, so every later photo starts from the right bust. Picking a preset resets it to that preset\u2019s size.'],
   'body:advanced': ['Advanced features', 'Individual body features. Each pick overrides the preset, so she may no longer look like it.'],
+  'shots:required': ['Required photos', 'These must be approved to open the next step. Her level decides which photos are required.'],
+  'shots:optional': ['Optional extras', 'Not needed to continue. Add them when you want more control over how she looks from those angles or details; you can come back any time.'],
   'gen:batch': ['Options per photo', 'How many options each Generate makes. You pick and approve one; more options cost more tokens. Options you do not approve delete themselves after 3 days.'],
   'drawer:refs': ['References', 'Approved photos sent along with the prompt so the model copies her face, skin and body from them.'],
   'drawer:upload': ['Your own reference', 'Add a photo to steer pose, angle or framing for this one photo. Her look still comes from her approved photos. You must confirm you have the rights.'],
@@ -1258,19 +1262,19 @@ const ALL_STEPS = [
    sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
    sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
-  {key: 'photos_face', stage: 'face', optional: true, nav: 'Face angles (optional)', title: 'Extra face angles (optional)',
+  {key: 'photos_face', stage: 'face', nav: 'Face angles (optional)', title: 'Extra face angles (optional)',
    views: ['face_three_quarter', 'face_profile', 'face_smile'],
    sub: 'Not required. Her front face is enough to continue. Extra angles give the generator more of her face to copy, so it has more to work from when she is turned or smiling in later photos. Add them if you want that extra control, or skip.'},
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
    sub: 'Start from a preset, set her breast size right under it, then fine-tune. Every body photo is made from this, so finish it before generating.'},
   {key: 'photos_body', stage: 'body', nav: 'Body photos', title: 'Approve her body photos',
    views: ['body_front', 'body_back', 'body_side', 'hands', 'hands_palms', 'feet', 'feet_soles'],
-   sub: 'Her clothed full-body photos, front first. Generate each photo, approve the best option, and every photo in this step must be approved before the next step opens.'},
+   sub: 'Her clothed full-body photos, front first. Generate each photo and approve the best option. Photos marked optional (side, hands, feet, and back at SFW) are extras for more control; the required ones must be approved before the next step opens.'},
   {key: 'intimate', stage: 'intimate', nsfw: true, nav: 'Intimate details', title: 'How is she intimately?',
    sub: 'Breasts, nipples, pubic hair, vulva and anus. Choose everything here first: her intimate photos are generated from these choices, so nothing has to be redrawn later.'},
   {key: 'photos_intimate', stage: 'intimate', nsfw: true, nav: 'Intimate photos', title: 'Approve her intimate photos',
    views: ['breasts', 'nipples', 'nude_front', 'rear_nude', 'pubic', 'vulva_closed', 'vulva_open', 'anus_closed', 'anus_open'],
-   sub: 'Each photo is built from the ones before it and from your intimate details. Generate and approve them top to bottom; a photo unlocks when the ones it depends on are approved.'},
+   sub: 'Each photo is built from the ones before it and from your intimate details. Approve the required ones top to bottom; a photo unlocks when the ones it depends on are approved. Close-ups marked optional (like the open views, and pubic and anus at Explicit) are extras you can skip.'},
   {key: 'finish', stage: 'ready', nav: 'Accept & link', title: 'Accept and link her',
    sub: 'Check the set, accept this version, then link her to a persona so every photo it sends looks like her.'},
 ];
@@ -1288,6 +1292,9 @@ const curStep = () => STEPS.find(x => x.key === step);
 const isPhotos = () => !!(curStep() && curStep().views);
 const stepViews = t => t.views.map(viewDef).filter(Boolean);
 const stepOfView = key => STEPS.find(x => x.views && x.views.includes(key));
+// A photo step is optional when none of its photos is required at her level.
+const reqViews = t => stepViews(t).filter(v => v.required);
+const stepOptional = t => !!t.views && !reqViews(t).length;
 const seenChoice = k => PageWizard.seen(setupKey()).includes(k);
 let guided = false, showDone = false;
 const setupKey = () => 'character:' + cur.id;
@@ -1301,12 +1308,12 @@ function approvedCount() {
 function nextPhoto() {
   const t = curStep();
   if (!t || !t.views) return undefined;
-  const left = stepViews(t).filter(v => vs(v.key).status !== 'approved');
+  const left = reqViews(t).filter(v => vs(v.key).status !== 'approved');
   return left.find(v => vs(v.key).display !== 'locked') || left[0];
 }
 // The first step a returning creator still has work in.
 function resumeStep() {
-  const j = STEPS.findIndex((x, i) => i > 3 && x.key !== 'finish' && !x.optional && stepOpen(i) && !stepDone(i));
+  const j = STEPS.findIndex((x, i) => i > 3 && x.key !== 'finish' && !stepOptional(x) && stepOpen(i) && !stepDone(i));
   return STEPS[j < 0 ? STEPS.length - 1 : j].key;
 }
 function basicsWhy() {
@@ -1324,7 +1331,7 @@ function stepDone(i) {
   if (k === 'check') return face;
   if (k === 'body') return seenChoice('body') || !!canonOf('body_front');
   if (k === 'intimate') return seenChoice('intimate') || cat.views.some(v => v.group === 'nsfw' && canonOf(v.key));
-  if (t.views) return stepViews(t).every(v => vs(v.key).status === 'approved');
+  if (t.views) return stepViews(t).every(v => !v.required || vs(v.key).status === 'approved');
   return accepted();
 }
 // The same gates go() applies, so the rail never offers a step it would refuse.
@@ -1341,7 +1348,7 @@ function stepOpen(i) {
   if (k === 'photos_face') return face;
   if (k === 'photos_body') return face && stepDoneKey('body');
   if (k === 'photos_intimate') return face && stepDoneKey('photos_body') && stepDoneKey('intimate');
-  if (k === 'finish') return cur.status === 'complete' && STEPS.every((x, j) => j >= i || x.optional || stepDone(j));
+  if (k === 'finish') return cur.status === 'complete' && STEPS.every((x, j) => j >= i || stepOptional(x) || stepDone(j));
   return false;
 }
 function openWhy(i) {
@@ -1362,15 +1369,14 @@ function stepWhy(i) {
   if (k === 'pick' && !pickedFace) return 'Select one option to continue.';
   if (k === 'check' && !canonOf('face_front')) return 'Approve her face to continue.';
   if (k === 'intimate') {
-    const sheet = cur.sheet || {}, miss = (cat.looks || []).filter(l => !sheet[l.key]);
+    const sheet = cur.sheet || {}, miss = (cat.looks || []).filter(l => !sheet[l.key] && l.views.some(x => (viewDef(x) || {}).required));
     if (miss.length) return `Pick an example for ${miss.map(l => l.label.toLowerCase()).join(', ')} to continue.`;
     if (cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style) return 'Choose her pubic hair style to continue.';
   }
-  if (t.views && !t.optional) {
-    const vws = stepViews(t), left = vws.filter(v => vs(v.key).status !== 'approved');
-    const sel = selView && t.views.includes(selView) && viewDef(selView);
-    const pick = sel && vs(sel.key).status !== 'approved' ? sel : !sel && left.length ? left[0] : null;
-    if (pick) return `Approve ${pick.label} to continue (${vws.length - left.length} of ${vws.length}).`;
+  if (t.views && !stepOptional(t)) {
+    const vws = reqViews(t), left = vws.filter(v => vs(v.key).status !== 'approved');
+    // An optional photo being open never holds Continue; the next required one does.
+    if (left.length) return `Approve ${left[0].label} to continue (${vws.length - left.length} of ${vws.length} required).`;
   }
   if (k === 'finish' && basicsWhy()) return basicsWhy().replace('continue', 'finish');
   if (k === 'finish' && !accepted()) return 'Accept her to finish.';
@@ -1421,7 +1427,7 @@ async function stepNext() {
   if (stepWhy(i)) return;
   if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
   if (STEPS[i].key === 'body' || STEPS[i].key === 'intimate') PageWizard.markSeen(setupKey(), STEPS[i].key);
-  if (STEPS[i].views && !STEPS[i].optional && nextPhoto()) {
+  if (STEPS[i].views && !stepOptional(STEPS[i]) && nextPhoto()) {
     selView = nextPhoto().key;
     lastMsg = ['', ''];
     return render();
@@ -1431,7 +1437,7 @@ async function stepNext() {
   while (j < STEPS.length && !stepOpen(j)) j++;
   if (j < STEPS.length) return go(STEPS[j].key);
   // Nothing further is open yet: carry on with what the next steps are waiting for.
-  const back = STEPS.findIndex((x, k) => k !== i && stepOpen(k) && !stepDone(k) && !x.optional);
+  const back = STEPS.findIndex((x, k) => k !== i && stepOpen(k) && !stepDone(k) && !stepOptional(x));
   if (back >= 0) {
     go(STEPS[back].key);
     lastMsg = [`Saved. Next up: ${STEPS[back].nav}.`, 'ok'];
@@ -1440,7 +1446,7 @@ async function stepNext() {
   go(STEPS[i].key);
 }
 function continueLabel() {
-  if (isPhotos() && curStep().optional && nextPhoto()) return 'Skip for now \u2192';
+  if (isPhotos() && stepOptional(curStep()) && stepViews(curStep()).some(v => vs(v.key).status !== 'approved')) return 'Skip for now \u2192';
   const v = isPhotos() && nextPhoto();
   return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
 }
@@ -1453,7 +1459,7 @@ function railPhotos(i) {
   const rows = stepViews(t).map(v => {
     const d = vs(v.key).display;
     return `<button type="button" class="ob-rsub ${d}${selView === v.key && step === t.key ? ' on' : ''}" onclick="openView('${v.key}')">
-      <span class="ob-rsub-i">${RAIL_ICON[d] || '\u25cb'}</span><span class="ob-rsub-t">${esc(v.label)}</span></button>`;
+      <span class="ob-rsub-i">${RAIL_ICON[d] || '\u25cb'}</span><span class="ob-rsub-t">${esc(v.label)}</span>${v.required ? '' : '<span class="ob-rsub-o">optional</span>'}</button>`;
   }).join('');
   return `<div class="rail-sub" role="group" aria-label="${esc(t.nav)} photos">${rows}</div>`;
 }
@@ -1550,7 +1556,7 @@ const PHOTO_TIPS = () => [
    body: 'This list shows only the photos of this step. Each button generates that one photo and shows its price. Generate, then open it and approve the best option.'},
   {anchor: '#ch-rail .rail-sub', placement: 'right', title: 'Her photos are in the menu',
    body: 'Every photo of this step is listed under it in the menu, with its status. Tap one to open it. A photo unlocks once the ones it is built from are approved.'},
-  foot(['Approve all to move on', 'Continue opens the next step once every photo in this one is approved. The line above says which one is missing.'])];
+  foot(['Approve the required ones', 'Continue opens the next step once every required photo is approved. Photos marked optional in the menu are extras you can add for more control, or skip.'])];
 ['photos_body', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
 STEP_TIPS.photos_face = () => [
   {anchor: '#step-card', placement: 'left', title: 'Optional: extra control over her face',
@@ -1995,11 +2001,14 @@ function shotRow(v) {
 function paintStepCard() {
   const t = curStep();
   if (!t || !t.views) return;
-  const vws = stepViews(t), n = vws.filter(v => vs(v.key).status === 'approved').length;
+  const vws = stepViews(t), req = vws.filter(v => v.required), opt = vws.filter(v => !v.required);
+  const n = req.filter(v => vs(v.key).status === 'approved').length;
   el('step-card-title').textContent = t.nav;
-  el('step-progress').textContent = `${n} of ${vws.length} approved`;
+  el('step-progress').textContent = req.length ? `${n} of ${req.length} required approved` : 'all optional';
   el('body-batch-chips').innerHTML = batchChips();
-  el('step-shots').innerHTML = vws.map(shotRow).join('');
+  el('step-shots').innerHTML =
+    (req.length ? `<div class="shots-h">Required${info('shots:required')}</div>` + req.map(shotRow).join('') : '')
+    + (opt.length ? `<div class="shots-h">Optional extras${info('shots:optional')}</div>` + opt.map(shotRow).join('') : '');
 }
 function generateOne(key) {
   selView = key;
