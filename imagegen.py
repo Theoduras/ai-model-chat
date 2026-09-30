@@ -1595,6 +1595,21 @@ _RW = {
 
 
 _UNSUPPORTED_PARAM = re.compile(r"Unsupported use of '([A-Za-z0-9_]+)' parameter")
+_BAD_MODEL = "Invalid value for 'model'"
+
+
+def _bad_model_error(tasks, err):
+    """Runware's refusal of a model id names neither the id nor the model, and
+    most ids here were read off documentation, so without this the creator is
+    left guessing which one is wrong."""
+    names = {**{v: k for k, v in RUNWARE_MODELS.items()},
+             **{v: k for k, v in RUNWARE_VIDEO_MODELS.items()}}
+    sent = [t['model'] for t in tasks if isinstance(t.get('model'), str)]
+    said = ', '.join(f"{a!r} ({names[a]})" if a in names else repr(a) for a in sent) or 'none'
+    return GenerationError(
+        f'Runware does not know the model id {said}. Look up the right id at '
+        f'/api/generate/models?q=<model name> and set it in that model\'s '
+        f'RW_MODEL_* variable. The provider said: {err}', fatal=True)
 
 # Dropping one of these and resending does not degrade the generation, it
 # replaces it: a swap with no input clip and no reference is a stranger's video
@@ -1675,6 +1690,8 @@ class RunwareProvider(Provider):
                 if not err:
                     return body.get('data') or (body.get('response') or {}).get('data') or []
                 failure = GenerationError(err)
+            if _BAD_MODEL in err:
+                raise _bad_model_error(tasks, err)
             hit = _UNSUPPORTED_PARAM.search(err)
             key = hit.group(1) if hit else None
             if key in _NEVER_STRIP:
