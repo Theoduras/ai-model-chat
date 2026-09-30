@@ -29,7 +29,7 @@ app.py                          — Flask server, Gemini API, multi-persona, bui
 studio.html                     — Generation studio (admin-only while in testing)
 characters.py                   — Character catalogue: views, features, level rules, prompts
 characters.html                 — Character builder (face, checks, body views; admin-only)
-characters-v2.html              — Preview of the reworked builder flow (admin-only, /characters-v2, same data and APIs as characters.html; replaces it once approved)
+characters-v2.html              — Reworked stepwise builder (admin-only preview at /characters-v2, same data and APIs; layout A chosen; replaces characters.html once approved)
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
 js/support-widget.js            — Support bubble (AI assistant, team takeover), loaded by site-nav.js
 js/support-sw.js                — Service worker for admin push alerts (empty push; fetches what to show)

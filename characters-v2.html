@@ -37,10 +37,7 @@
     .view.off-step { opacity: .72; }
     details.parts { margin-bottom: 12px; }
     details.parts > summary { cursor: pointer; font-weight: 700; font-size: .85rem; padding: 6px 0; }
-    .st.tag { background: var(--surface-2); }
-    .st.tag.nsfw { color: var(--warn); }
-    .parts-tabs { display: flex; gap: 6px; margin-bottom: 10px; }
-    /* Colours, type, buttons and fields come from style.css; the editor runs in
+        /* Colours, type, buttons and fields come from style.css; the editor runs in
        the persona wizard's frame (.ob-*). Only this page's own parts live here. */
     [hidden] { display: none !important; }
     .in-workspace body > header { display: none; }
@@ -682,7 +679,6 @@
           </div>
         </section>
         <div class="views-toolbar" id="views-head">
-          <div class="chips" id="layout-switch"></div>
           <span class="hint" id="body-summary"></span>
         </div>
         <div id="tiers"></div>
@@ -1085,7 +1081,7 @@ function go(s) {
     idx = open.find(j => !stepDone(j)) ?? open[open.length - 1] ?? 3;
   }
   s = STEPS[idx].key;
-  if (s !== step) { lastMsg = ['', '']; partsTab = null; }
+  if (s !== step) lastMsg = ['', ''];
   const t = STEPS[idx];
   step = s;
   if (!t.views) selView = '';
@@ -1132,7 +1128,6 @@ const HELP = {
   'body:size': ['Breast size', 'Her cup size. It is used in her first full-body photo already, so every later photo starts from the right bust. Picking a preset resets it to that preset\u2019s size.'],
   'body:advanced': ['Advanced features', 'Individual body features. Each pick overrides the preset, so she may no longer look like it.'],
   'gen:batch': ['Options per photo', 'How many options each Generate makes. You pick and approve one; more options cost more tokens. Options you do not approve delete themselves after 3 days.'],
-  'layout': ['List layout (preview only)', 'Three ways to lay out the list of all photos: A collapsible Safe-for-work and NSFW sections, B two tabs, C one list with badges. Pick your favourite and the others go away.'],
   'drawer:refs': ['References', 'Approved photos sent along with the prompt so the model copies her face, skin and body from them.'],
   'drawer:upload': ['Your own reference', 'Add a photo to steer pose, angle or framing for this one photo. Her look still comes from her approved photos. You must confirm you have the rights.'],
   'drawer:crop': ['Adjust the crop', 'For close-ups: choose which part of the parent photo this shot is cut from. Drag the box to move it, a corner to resize.'],
@@ -1470,8 +1465,8 @@ const TOUR = PageWizard.tour([
    body: 'A preset fills her whole body in one click. The breast size row under it changes only her bust, and her full-body photos are drawn with it from the very first one.'},
   {anchor: () => vis('#step-card'), placement: 'left', title: 'Generate one photo at a time',
    body: 'This list shows only the photos of the current step. Each button generates that one photo and shows its price; there is no bulk button, so every photo is made from choices you have already locked in.'},
-  {anchor: () => vis('#layout-switch'), placement: 'bottom', title: 'Every photo, in one place',
-   body: 'The list under it holds all her photos, safe-for-work and NSFW kept apart. Open any photo whose step is unlocked. The A, B and C buttons try three layouts while we choose.'},
+  {anchor: () => vis('#tiers'), placement: 'left', title: 'Every photo, in one place',
+   body: 'This list holds all her photos, with safe-for-work and NSFW kept in separate sections. Open any photo whose step is unlocked.'},
   {anchor: priceAnchor, placement: 'left', title: 'Every button shows its price',
    body: 'Generating spends tokens from your allowance. The price is shown next to the button before you click, and anything that fails comes back to you.'},
   {anchor: () => vis('.info'), placement: 'bottom', title: 'The i icons explain everything',
@@ -1873,7 +1868,7 @@ const PHOTO_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" s
 function vs(key) { return (cur.views || {})[key] || {display: 'locked'}; }
 function isNsfw(v) { return v.group === 'nsfw'; }
 function imgById(id) { return (cur.images || []).find(i => i.id === id); }
-function viewTile(v, tag) {
+function viewTile(v) {
   const st = vs(v.key), c = canonOf(v.key), t = curStep();
   const from = v.parents.length ? 'from ' + v.parents.map(p => viewDef(p) ? viewDef(p).label : p).join(' + ') : 'base';
   const mode = MODE_LABEL[st.mode];
@@ -1882,36 +1877,22 @@ function viewTile(v, tag) {
     <div class="vt">${c ? `<img src="${esc(c.url)}" alt="">` : PHOTO_ICON}</div>
     <div class="view-t"><div class="view-n">${esc(v.label)}${info('view:' + v.key)}</div>
       <div class="view-f">${esc(from)}</div>
-      <div class="view-s"><span class="st ${st.display}">${STATUS_LABEL[st.display] || 'Locked'}</span>${mode ? `<span class="st">${mode}</span>` : ''}${tag ? `<span class="st tag ${tag.toLowerCase()}">${tag}</span>` : ''}</div></div></button>`;
+      <div class="view-s"><span class="st ${st.display}">${STATUS_LABEL[st.display] || 'Locked'}</span>${mode ? `<span class="st">${mode}</span>` : ''}</div></div></button>`;
 }
-// The list of every photo, laid out one of three ways while the layout is being chosen.
-let layout = 'A', partsTab = null, partsOpen = {sfw: true, nsfw: null};
-try { layout = localStorage.getItem('ch2-layout') || 'A'; } catch (e) {}
-const LAYOUTS = [['A', 'Sections'], ['B', 'Tabs'], ['C', 'One list']];
-function setLayout(k) { layout = k; try { localStorage.setItem('ch2-layout', k); } catch (e) {} renderBody(); decorateInfo(); }
-function renderLayoutSwitch() {
-  el('layout-switch').innerHTML = '<span class="hint">All photos</span>' + LAYOUTS.map(([k, l]) =>
-    `<button type="button" class="chip" aria-pressed="${layout === k}" onclick="setLayout('${k}')">${k} · ${l}</button>`).join('') + info('layout');
-}
+// The list of every photo: safe-for-work and NSFW in their own collapsible sections.
+let partsOpen = {sfw: true, nsfw: null};
 function partsList() {
   const t = curStep(), onNsfw = !!(t && t.nsfw);
   const sfw = cat.views.filter(v => !isNsfw(v)), nsfw = cat.views.filter(isNsfw);
-  const grid = (list, tag) => `<div class="views">${list.map(v => viewTile(v, tag)).join('')}</div>`;
+  const grid = list => `<div class="views">${list.map(v => viewTile(v)).join('')}</div>`;
   const count = list => `${list.filter(v => vs(v.key).status === 'approved').length}/${list.length}`;
   const sfwBlock = [['face', 'Face'], ['body', 'Body']].map(([g, label]) => {
     const l = sfw.filter(v => v.group === g);
     return l.length ? `<h3 class="tier-h">${label}</h3>${grid(l)}` : '';
   }).join('');
-  if (layout === 'C') return `<div class="views">${cat.views.map(v => viewTile(v, isNsfw(v) ? 'NSFW' : 'SFW')).join('')}</div>`;
-  if (layout === 'B') {
-    const tab = partsTab || (onNsfw ? 'NSFW' : 'SFW');
-    return `<div class="parts-tabs" role="tablist">${[['SFW', sfw], ['NSFW', nsfw]].filter(([n, l]) => l.length).map(([n, l]) =>
-      `<button type="button" class="chip" role="tab" aria-pressed="${tab === n}" onclick="partsTab='${n}';renderBody();decorateInfo()">${n} · ${count(l)}</button>`).join('')}</div>`
-      + (tab === 'NSFW' && nsfw.length ? grid(nsfw) : sfwBlock);
-  }
   const nsfwOpen = partsOpen.nsfw === null ? onNsfw : partsOpen.nsfw;
-  return `<details class="parts" ${partsOpen.sfw ? 'open' : ''} ontoggle="partsOpen.sfw=this.open"><summary>Safe for work · ${count(sfw)}</summary>${sfwBlock}</details>`
-    + (nsfw.length ? `<details class="parts" ${nsfwOpen ? 'open' : ''} ontoggle="partsOpen.nsfw=this.open"><summary>NSFW · ${count(nsfw)}</summary>${grid(nsfw)}</details>` : '');
+  return `<details class="parts" ${partsOpen.sfw ? 'open' : ''} ontoggle="partsOpen.sfw=this.open"><summary>Safe for work \u00b7 ${count(sfw)}</summary>${sfwBlock}</details>`
+    + (nsfw.length ? `<details class="parts" ${nsfwOpen ? 'open' : ''} ontoggle="partsOpen.nsfw=this.open"><summary>NSFW \u00b7 ${count(nsfw)}</summary>${grid(nsfw)}</details>` : '');
 }
 // One row per photo in the current step, each with its own Generate.
 function shotRow(v) {
@@ -1948,7 +1929,6 @@ function renderBody() {
   el('body-summary').textContent = `${LEVEL_LABEL[cur.nsfw_level]} · ${ok} of ${req.length} required approved · v${cur.version}` +
     (waiting ? ` · ${waiting} waiting for your approval` : '');
   if (isPhotos()) {
-    renderLayoutSwitch();
     el('tiers').innerHTML = partsList();
     paintStepCard();
   }
@@ -1988,7 +1968,7 @@ function openView(key) {
     return say(`Finish ${need ? need.nav : 'the earlier steps'} first.`, 'err');
   }
   selView = key;
-  if (t.key !== step) { step = t.key; partsTab = null; render(); } else renderBody();
+  if (t.key !== step) { step = t.key; render(); } else renderBody();
 }
 function closeDrawer() { selView = null; renderBody(); }
 function refTile(i) {
