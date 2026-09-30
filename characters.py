@@ -910,7 +910,9 @@ def content_clause(sheet, level, body_type='female'):
 def resolve_status(view, parents):
     """Display status of one view row. `view` and each parent are dicts with
     view_key, status, version and (view only) parent_versions."""
-    if any(p['status'] != 'approved' for p in parents):
+    # A view with new options waiting, or generating, still has its approved
+    # photo, so what is built from it is not held back.
+    if any(p['status'] != 'approved' and not p.get('has_photo') for p in parents):
         return 'locked'
     seen = view.get('parent_versions') or {}
     if any(p['view_key'] in seen and p['version'] > seen[p['view_key']] for p in parents):

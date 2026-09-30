@@ -375,6 +375,20 @@ def test_vulva_looks():
         CH.LOOK_FILES = saved
 
 
+def test_a_view_with_options_waiting_keeps_its_children_open():
+    def row(k, status, photo=False):
+        return {'view_key': k, 'status': status, 'version': 1, 'parent_versions': {}, 'has_photo': photo}
+    def tree(face):
+        rows = {k: row(k, 'not_started') for k in CH.topo_order()}
+        rows['face_front'] = face
+        return CH.resolve_all(rows, level='sfw')
+    check('options waiting do not lock what the approved photo feeds',
+          tree(row('face_front', 'review', True))['face_three_quarter'] == 'not_started')
+    check('generating does not either', tree(row('face_front', 'generating', True))['body_front'] == 'not_started')
+    check('no photo yet still locks', tree(row('face_front', 'review'))['face_three_quarter'] == 'locked')
+    check('its own status still shows on the view itself', tree(row('face_front', 'review', True))['face_front'] == 'review')
+
+
 def test_pubic_and_vulva_lead_to_the_nude():
     def row(k, status, v=1):
         return {'view_key': k, 'status': status, 'version': v, 'parent_versions': {}}
@@ -498,6 +512,7 @@ if __name__ == '__main__':
     test_prompt_audit()
     test_reference_images_follow_the_approved_photo()
     test_face_angles_hang_off_the_face()
+    test_a_view_with_options_waiting_keeps_its_children_open()
     test_pubic_and_vulva_lead_to_the_nude()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
