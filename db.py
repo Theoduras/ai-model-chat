@@ -49,7 +49,10 @@ def _build_database_url():
 DATABASE_URL = _build_database_url()
 
 _connect_args = {'check_same_thread': False} if DATABASE_URL.startswith('sqlite') else {}
-engine = create_engine(DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True)
+_pool_args = {} if DATABASE_URL.startswith('sqlite') else {
+    'pool_size': 10, 'max_overflow': 10, 'pool_recycle': 1800}
+engine = create_engine(DATABASE_URL, connect_args=_connect_args, pool_pre_ping=True,
+                       **_pool_args)
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 Base = declarative_base()
 
@@ -424,9 +427,6 @@ class Visit(Base):
     city = Column(String(120))
 
 
-Index('ix_visits_created', Visit.created_at)
-
-
 class XEvent(Base):
     """One row per X (Twitter) action taken through the site — who connected or
     operated which persona's X account, from which IP/geo, and when."""
@@ -444,9 +444,6 @@ class XEvent(Base):
     country_code = Column(String(8))
     region = Column(String(120))
     city = Column(String(120))
-
-
-Index('ix_xevents_created', XEvent.created_at)
 
 
 class XMessage(Base):
@@ -733,6 +730,11 @@ class User(Base):
     # Set when an admin hands out a time-boxed trial. One per account, ever:
     # its presence is what refuses a second one.
     trial_at = Column(DateTime)
+
+    # Lapsed-account lifecycle: when the heads-up email went out for the current
+    # lapse, and when the content was deleted (see account_lifecycle.py).
+    lapse_notified_at = Column(DateTime)
+    content_purged_at = Column(DateTime)
 
     # When a Free account was first shown the welcome discount. One window per
     # account, ever, stamped server-side so a reload cannot restart the clock.
@@ -2353,6 +2355,7 @@ def list_register_links(session, limit=200):
 
 def init_db():
     Base.metadata.create_all(engine)
+    drop_duplicate_indexes()
     for table, model in (('users', User), ('saved_personas', SavedPersona),
                          ('payments', Payment), ('invites', Invite),
                          ('demo_events', DemoEvent), ('fan_profiles', FanProfile),
@@ -2625,6 +2628,32 @@ def list_x_known_user_ids(session, persona):
     rows = session.query(XMessage.x_user_id).filter(
         XMessage.persona == persona).distinct().all()
     return {r[0] for r in rows if r[0]}
+
+
+LOG_RETENTION_DAYS = 30
+
+
+def prune_logs(session, days=LOG_RETENTION_DAYS):
+    """Drop analytics and support rows past the window. token_ledger, fan_events
+    and payments are never here: people bought those balances and sales."""
+    cutoff = _now() - datetime.timedelta(days=days)
+    deleted = 0
+    for model in (Visit, XEvent, DemoEvent, LinkClick, ReferralClick, SupportMessage):
+        deleted += session.query(model).filter(model.created_at < cutoff).delete(
+            synchronize_session=False)
+    return deleted
+
+
+def drop_duplicate_indexes():
+    """These two duplicated the index=True one on the same column, which only
+    costs a second write per insert. New databases never create them."""
+    from sqlalchemy import text
+    for name in ('ix_visits_created', 'ix_xevents_created'):
+        try:
+            with engine.begin() as conn:
+                conn.execute(text(f'DROP INDEX IF EXISTS {name}'))
+        except Exception:
+            pass
 
 
 def prune_x_data(session, days=14):
