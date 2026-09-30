@@ -633,6 +633,7 @@
               <span class="dl" data-info="drawer:refs">References</span>
               <p class="hint" style="margin:2px 0 8px;">Approved photos sent with the prompt. The model copies her face, skin and body from them.</p>
               <div class="ref-line" id="vp-refs"></div>
+              <p class="hint" id="vp-refs-n" style="margin:6px 0 0;"></p>
             </div>
             <div class="up-card">
               <strong data-info="drawer:upload">Use your own reference photo</strong>
@@ -2169,6 +2170,7 @@ function renderViewPanel() {
     own.map(refTile).join('') +
     (refPop ? `<div class="ref-pop" onclick="event.stopPropagation()">${refErr ? `<div class="ref-err">${esc(refErr)}</div>` : ''}${approved.map(o => { const c = canonOf(o.key);
       return `<button type="button" aria-pressed="${chosen.includes(c.id)}" onclick="toggleRef('${c.id}')"><img src="${esc(c.url)}" alt=""><span>${esc(o.label)}</span><i>${chosen.includes(c.id) ? '✓' : ''}</i></button>`; }).join('')}</div>` : '');
+  el('vp-refs-n').textContent = refCountText(v, st);
   const fl = k => ((cat.features || []).find(f => f.key === k) || {}).label || k;
   // Only traits this level offers; the rest were never pickable here.
   const traits = (v.traits || []).filter(k => (cat.features || []).some(f => f.key === k));
@@ -2243,6 +2245,25 @@ function renderAnatomy(v, locked) {
     <p class="hint" style="margin:0;">This photo is made from that choice. <a href="#" onclick="go('intimate');return false;">Choose it in Intimate details</a>, then come back to generate.</p>`;
 }
 let refPop = false;
+// What is actually sent, by the server's own rule: a chosen list goes as chosen;
+// the default list also carries her own approved photo and her uploads.
+function refCountText(v, st) {
+  const parts = [], mine = images(v.key, 'reference').length;
+  if (st.references) parts.push([st.references.length, 'chosen']);
+  else {
+    const par = v.parents.filter(p => canonOf(p)).length;
+    if (par) parts.push([par, 'built from']);
+    if (canonOf(v.key)) parts.push([1, 'its current approved photo']);
+    if (v.group === 'face' && v.key !== 'face_front') parts.push([images('face_front', 'reference').length, 'face uploads']);
+    if (!(v.zoom && !(v.uses || []).includes('face'))) parts.push([images('', 'reference').length, 'general uploads']);
+  }
+  if (mine) parts.push([mine, 'uploaded for this photo']);
+  const look = (cat.looks || []).find(l => l.views.includes(v.key) && (cur.sheet || {})[l.key]);
+  if (look) parts.push([1, 'anatomy example']);
+  const shown = parts.filter(([n]) => n);
+  const total = shown.reduce((a, [n]) => a + n, 0);
+  return total ? `Sends ${total} photo${total === 1 ? '' : 's'}: ${shown.map(([n, l]) => `${n} ${l}`).join(', ')}.` : 'Sends no photos.';
+}
 function toggleRefPop(e) { e.stopPropagation(); refPop = !refPop; refErr = ''; renderViewPanel(); }
 document.addEventListener('click', () => { if (refPop) { refPop = false; renderViewPanel(); } });
 document.addEventListener('keydown', e => { if (e.key === 'Escape' && refPop) { refPop = false; renderViewPanel(); } });

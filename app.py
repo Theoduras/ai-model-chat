@@ -31729,17 +31729,21 @@ def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
             by_id = {i.id: i for i in s.query(CharacterImage).filter(
                 CharacterImage.id.in_([r['image_id'] for r in now]))}
             picked = [by_id[r['image_id']] for r in now if r['image_id'] in by_id]
-        if not chosen or not picked:
-            picked = [canon[d] for d in v.get('parents', ()) if d in canon]
-        if view_key in canon:
-            picked.append(canon[view_key])
+        picked_by_creator = bool(chosen and picked)
+        if not picked_by_creator:
+            picked = [canon[d] for d in CH.level_parents(v, row.nsfw_level) if d in canon]
         picked += _char_images(s, char_id, view=view_key, role='reference')
-        if v.get('group') == 'face' and view_key != 'face_front':
-            picked += _char_images(s, char_id, view='face_front', role='reference')
-        if not (v.get('zoom') and 'face' not in v.get('uses', ())):
-            # General uploads are mostly her face; a body close-up that gets
-            # one draws that face into the frame.
-            picked += _char_images(s, char_id, view='', role='reference')
+        if not picked_by_creator:
+            # Only the default set carries extras the drawer does not list: a
+            # chosen list is sent exactly as chosen.
+            if view_key in canon:
+                picked.append(canon[view_key])
+            if v.get('group') == 'face' and view_key != 'face_front':
+                picked += _char_images(s, char_id, view='face_front', role='reference')
+            if not (v.get('zoom') and 'face' not in v.get('uses', ())):
+                # General uploads are mostly her face; a body close-up that gets
+                # one draws that face into the frame.
+                picked += _char_images(s, char_id, view='', role='reference')
         urls = [u for u in (_char_ref_url(i) for i in picked) if u]
         crop = _CHAR_CROPS.pop(char_id + ':' + view_key, None)
         if crop:
@@ -32581,10 +32585,18 @@ def api_character_generate(char_id):
         dressed = CH.outfits(sheet) if '{outfit}' in v['framing'] else [None]
         owned = {i.id for i in _char_images(s, row.id, view='', role='outfit')}
         dressed = [o for o in dressed if not (o or '').startswith('upload:') or o[7:] in owned] or ['Bodysuit']
+        chosen_refs = state[view_key].get('references')
+        if chosen_refs:
+            by_img = {i.id: i.view for i in _char_images(s, row.id)}
+            ref_views = tuple(by_img.get(r['image_id']) for r in chosen_refs)
+        else:
+            canon_views = set(_char_canonicals(s, row.id))
+            ref_views = tuple(d for d in CH.level_parents(v, row.nsfw_level) if d in canon_views)
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
                                         outfit=o, blend=blend,
-                                        match=match, look=bool(look), level=row.nsfw_level) for o in dressed]
+                                        match=match, look=bool(look), level=row.nsfw_level,
+                                        ref_views=ref_views) for o in dressed]
         parent_versions = {p: state[p]['version'] for p in v['parents']}
         key = row.key
     finally:

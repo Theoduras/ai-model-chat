@@ -67,8 +67,10 @@ def test_prompts():
         p = CH.build_view_prompt(v['key'], FULL_SHEET, 31, True)
         check(f"{v['key']} adult clause", 'Fictional adult woman, 31 years old' in p)
         if v['rating'] != 'explicit':
+            # A character whose level is this view's rating never hears explicit words.
+            at = CH.build_view_prompt(v['key'], FULL_SHEET, 31, True, level=v['rating'])
             check(f"{v['key']} no explicit words",
-                  not any(w in p for w in CH._fragments(FULL_SHEET, ('pubic', 'vulva', 'anus'))))
+                  not any(w in at for w in CH._fragments(FULL_SHEET, ('pubic', 'vulva', 'anus'))))
     shapes = {'body_shape': 'Pear', 'glute_shape': 'Heart-shaped', 'face_shape': 'Triangle',
               'ethnicity': 'East Asian', 'apparent_age': '30s'}
     text = CH.describe(shapes, 'sfw')
@@ -352,22 +354,23 @@ def test_vulva_looks():
                 pass
         check('looks only at explicit', len(CH.catalogue('explicit')['looks']) == 4 and not CH.catalogue('moderate')['looks']
               and not CH.catalogue('sfw')['looks'])
-        check('closed look required for the nude at explicit', CH.look_for('explicit', 'nude_front') == 'vulva_look')
+        check('closed look required for the closed vagina at explicit', CH.look_for('explicit', 'vulva_closed') == 'vulva_look')
+        check('the nude takes the vulva from the approved photo, not a second example', not CH.look_for('explicit', 'nude_front'))
         check('open look required for the open view', CH.look_for('explicit', 'vulva_open') == 'vulva_open_look')
         check('anus looks required for their views', CH.look_for('explicit', 'anus_closed') == 'anus_look'
               and CH.look_for('explicit', 'anus_open') == 'anus_open_look')
         check('look not required below explicit', not CH.look_for('moderate', 'nude_front'))
         check('look not required for a dressed view', not CH.look_for('explicit', 'body_front'))
         closed, opened = CH.LOOKS['vulva_look'][3], CH.LOOKS['vulva_open_look'][3]
-        check('look reaches the nude prompt', closed in CH.build_view_prompt('nude_front', {}, 25, True, look=True))
+        check('look reaches the closed vagina prompt', closed in CH.build_view_prompt('vulva_closed', {}, 25, True, look=True))
         check('open look reaches the open prompt', opened in CH.build_view_prompt('vulva_open', {}, 25, True, look=True))
         check('look stays off a dressed view', 'last reference' not in CH.build_view_prompt('body_front', {}, 25, True, look=True))
-        check('no look, no clause', closed not in CH.build_view_prompt('nude_front', {}, 25, True))
+        check('no look, no clause', closed not in CH.build_view_prompt('vulva_closed', {}, 25, True))
         check('look never in content text', 'last reference' not in CH.describe({'vulva_look': '2'}, 'explicit'))
         check('look path only for our files', CH.look_path('vulva/2') and not CH.look_path('vulva/9')
               and not CH.look_path('../vulva/2') and not CH.look_path('vulva_open/../vulva/1'))
         CH.LOOK_FILES = {k: () for k in CH.LOOKS}
-        check('no examples, nothing required', not CH.look_for('explicit', 'nude_front'))
+        check('no examples, nothing required', not CH.look_for('explicit', 'vulva_closed'))
     finally:
         CH.LOOK_FILES = saved
 
@@ -390,6 +393,45 @@ def test_pubic_and_vulva_lead_to_the_nude():
     check('catalogue hides explicit parents at topless',
           next(v for v in CH.catalogue('moderate')['views'] if v['key'] == 'nude_front')['parents']
           == ['body_front', 'breasts', 'nipples'])
+
+
+def test_prompt_audit():
+    """Every intimate choice a view uses reaches its prompt at the levels that may
+    say it, and none reaches it above. Cup size is the one breast word a clothed
+    full-body photo also carries, so it is left out of the comparison."""
+    intimate = ('breasts', 'nipples', 'pubic', 'vulva', 'anus')
+    feats = CH.features()
+    def words(key, g):
+        return CH._fragments({key: FULL_SHEET[key]}, (g,)) if key in FULL_SHEET else []
+    for level in CH.LEVEL_KEYS:
+        for v in CH.views_for_level(level):
+            p = CH.build_view_prompt(v['key'], FULL_SHEET, 31, True, level=level)
+            uses = set(v['uses'])
+            kept = set(CH.traits(v['key']))
+            for k, (_, g, _) in feats.items():
+                if g not in intimate or k in ('cup', 'pubic_density'):
+                    continue
+                allowed = CH._rank(CH.GROUP_LEVEL[g]) <= CH._rank(level)
+                for w in words(k, g):
+                    if g in uses and allowed and k in kept:
+                        check(f"{v['key']}@{level} says {k}", w in p)
+                    if not allowed:
+                        check(f"{v['key']}@{level} keeps {k} out", w not in p)
+        frags = CH._fragments(FULL_SHEET, CH.allowed_groups(level))
+        check(f'no repeated fragment at {level}', len(frags) == len(set(frags)))
+    nude = CH.build_view_prompt('nude_front', FULL_SHEET, 31, True, level='explicit')
+    hair = dict(FULL_SHEET, pubic_style='Trimmed', pubic_density='Dense')
+    dense = CH.build_view_prompt('nude_front', hair, 31, True, level='explicit')
+    check('the nude at explicit carries the pubic style and density',
+          CH._fragments({'pubic_style': 'Trimmed'}, ('pubic',))[0] in dense and CH.PUBIC_DENSITY_WORDS['Dense'] in dense)
+    topless = CH.build_view_prompt('nude_front', FULL_SHEET, 31, True, level='moderate')
+    check('the nude at topless does not', not any(f in topless for f in CH._fragments({'pubic_style': 'Trimmed'}, ('pubic',))))
+    clause = CH.REF_CLAUSES['nude_front'][2]
+    check('reference clause only when both close-ups are sent',
+          clause not in CH.build_view_prompt('nude_front', {}, 25, True, level='explicit', ref_views=('pubic',))
+          and clause in CH.build_view_prompt('nude_front', {}, 25, True, level='explicit', ref_views=('pubic', 'vulva_closed'))
+          and clause not in CH.build_view_prompt('nude_front', {}, 25, True, level='moderate', ref_views=('pubic', 'vulva_closed')))
+    check('no anatomy example sentence on the nude', 'last reference' not in nude)
 
 
 def test_reference_images_follow_the_approved_photo():
@@ -453,6 +495,7 @@ if __name__ == '__main__':
     test_vulva_looks()
     test_presets()
     test_cup_in_body_photos()
+    test_prompt_audit()
     test_reference_images_follow_the_approved_photo()
     test_face_angles_hang_off_the_face()
     test_pubic_and_vulva_lead_to_the_nude()

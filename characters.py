@@ -389,7 +389,7 @@ _LOOK_TAIL = (' in the last reference image — its shape only, in her own skin 
               'anatomy close-up, not her face or body.')
 # sheet key: (folder, label, views, prompt text)
 LOOKS = {
-    'vulva_look': ('vulva', 'Vagina, closed', ('nude_front', 'vulva_closed'),
+    'vulva_look': ('vulva', 'Vagina, closed', ('vulva_closed',),
                    'Her vulva has the same shape as the vulva' + _LOOK_TAIL),
     'vulva_open_look': ('vulva_open', 'Vagina, open', ('vulva_open',),
                         'Her open vulva has the same shape as the open vulva' + _LOOK_TAIL),
@@ -666,7 +666,7 @@ def _fragments(sheet, groups, body_type='female'):
                 continue
             frag = (PUBIC_DENSITY_WORDS.get(val, frag) + (' in the strip' if style == 'Landing strip' else '')
                     if style else f'{frag} pubic hair')
-        if frag:
+        if frag and frag not in out:
             out.append(frag)
     return out
 
@@ -769,14 +769,16 @@ def outfit_text(sheet, outfit=None):
 
 def build_view_prompt(key, sheet, age, has_reference, body_type='female',
                       mode='reference', strength=None, outfit=None, blend=False,
-                      match=False, look=False, level='explicit'):
+                      match=False, look=False, level='explicit', ref_views=()):
     v = for_level(view(key, body_type), level)
     if not v:
         raise CharacterError('Unknown view.')
     if '{outfit}' in v['framing']:
         v = dict(v, framing=v['framing'].replace('{outfit}', outfit_text(sheet, outfit)))
     uses = tuple(v['uses']) + (() if 'face' in v['uses'] else ('body',))
-    groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(v['rating']))
+    # What may be said follows the character's level, not the view's rating: the
+    # nude is rated Topless but at Explicit it shows her pubic hair too.
+    groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(level))
     keep = set(traits(key, body_type))
     kept = {k: x for k, x in (sheet or {}).items() if k in keep}
     if 'hair_colour' in kept and (sheet or {}).get('hair_colour_hex'):
@@ -836,10 +838,25 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     text = look and next((t for _, _, vs, t in LOOKS.values() if key in vs), '')
     if text:
         body += ' ' + text
+    need, at, clause = REF_CLAUSES.get(key, ((), 'explicit', ''))
+    if clause and _rank(level) >= _rank(at) and all(k in ref_views for k in need):
+        body += ' ' + clause
     zoom = (' Zoomed in: the subject fills the whole frame; no face, no full body, nothing '
             'beyond the subject in shot.' + ('' if 'face' in v['uses'] else
             ' Her face, head and hair are not in the picture at all.')) if v.get('zoom') else ''
     return (lead + zoom + body + ' ' + STUDIO + ' ' + adult_clause(age)).strip()
+
+
+# What a reference photo is for, said in the prompt only when that photo is one
+# of the references actually sent. Keyed by view: (views that must be sent, level, text).
+REF_CLAUSES = {
+    'nude_front': (('pubic', 'vulva_closed'), 'explicit',
+                   'Her pubic area and vulva match the close-up reference images exactly.'),
+    'vulva_closed': (('pubic',), 'explicit',
+                     'Her pubic hair and skin match the pubic-area close-up reference image exactly.'),
+    'vulva_open': (('vulva_closed',), 'explicit',
+                   'It is the same vulva as in the closed-vulva reference image, now opened.'),
+}
 
 
 def job_level(shot, scene):
