@@ -33,7 +33,7 @@
     .info-slot { display: inline-flex; }
     .info-pop { position: fixed; z-index: 120; max-width: 300px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg); font-size: .82rem; line-height: 1.45; color: var(--text-2); }
     .info-pop strong { display: block; margin-bottom: 4px; color: var(--text); font-size: .86rem; }
-    .info-pop p { margin: 0; }
+    .info-pop p { margin: 0; white-space: pre-line; }
     .step-shots { display: flex; flex-direction: column; gap: 8px; }
     .step-shot { display: flex; align-items: center; gap: 10px; padding: 8px; border: 1px solid var(--border-soft); border-radius: var(--r-md); background: var(--surface-2); }
     .step-shot[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); }
@@ -526,8 +526,8 @@
         <div class="field"><label for="f-name">Name</label><input id="f-name" type="text" maxlength="80" oninput="markDirty()"></div>
         <div class="field"><label for="f-age">Age</label><input id="f-age" type="number" min="18" max="80" oninput="markDirty()">
           <span class="hint">Must be 18 or over. Every prompt states she is a fictional adult of this age.</span></div>
-        <div class="field"><label>Explicitness level</label><div class="chips" id="level-chips"></div>
-          <span class="hint">Sets which body photos are required.</span></div>
+        <div class="field"><label data-info="basics:level">Explicitness level</label><div class="chips" id="level-chips"></div>
+          <span class="hint" id="level-hint"></span></div>
         <div class="field"><label for="f-notes">Notes (optional)</label><input id="f-notes" type="text" maxlength="400" oninput="markDirty()"></div>
       </section>
     </div>
@@ -578,7 +578,7 @@
     <div class="ch-cols ch-check" data-step="check" hidden>
       <div class="ch-side">
         <div class="ch-shot"><img id="check-img" alt="Selected face option"></div>
-        <p class="hint" data-info="step:photos_face">After she is approved, the next step generates three more angles of her face.</p>
+        <p class="hint" data-info="step:photos_face">After she is approved, an optional step lets you add three more angles of her face for extra control.</p>
       </div>
       <section class="form-section ch-check-card">
         <div class="ch-check-head ch-inline">
@@ -855,6 +855,10 @@ document.addEventListener('keydown', e => {
 });
 const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const LEVEL_LABEL = {sfw: 'SFW', moderate: 'Topless', explicit: 'Explicit'};
+const LEVEL_HINT = {
+  sfw: 'Clothed only: face and full-body photos. No Intimate steps.',
+  moderate: 'Adds breasts and nipples, and topless full-body photos in panties. No pubic hair, vulva or anus.',
+  explicit: 'Everything: adds pubic hair, vulva and anus, and full nude photos.'};
 let chars = [], filter = 'all', cur = null, cat = null, personas = [];
 let step = 'describe', batch = 4, pickedFace = '', selView = '', uploadView = '', uploadRole = '';
 let confirmed = new Set();
@@ -1075,17 +1079,17 @@ async function reload() {
 function go(s) {
   if (dirty && s !== step) return confirmLeave(() => go(s));
   syncSteps();
-  if (s !== 'basics' && s !== 'describe' && s !== 'pick' && !canonOf('face_front') && s !== 'check') s = 'describe';
-  if (s === 'describe' && !canonOf('face_front') && basicsWhy()) s = 'basics';
   if (s === 'face') s = canonOf('face_front') || pickedFace ? 'check' : 'pick';
-  let idx = STEPS.findIndex(x => x.key === s);
+  let idx = STEPS.findIndex(x => x.key === s), refused = '';
   if (idx < 0) idx = STEPS.findIndex(x => x.key === 'body');
-  if (idx > 3 && !stepOpen(idx)) {
-    const open = STEPS.map((x, j) => j).filter(j => j > 3 && stepOpen(j));
-    idx = open.find(j => !stepDone(j)) ?? open[open.length - 1] ?? 3;
+  if (!stepOpen(idx)) {
+    refused = openWhy(idx);
+    const open = STEPS.map((x, j) => j).filter(j => stepOpen(j));
+    idx = open.find(j => !stepDone(j) && !STEPS[j].optional) ?? open[open.length - 1] ?? 0;
   }
   s = STEPS[idx].key;
   if (s !== step) { lastMsg = ['', '']; if (TOUR && TOUR.on()) TOUR.end(true); }
+  if (refused) lastMsg = [refused, 'err'];
   const t = STEPS[idx];
   step = s;
   if (!t.views) selView = '';
@@ -1117,14 +1121,15 @@ function render() {
 }
 // ── Help (the i icons) ──────────────────────────────────────────────────────
 const HELP = {
+  'basics:level': ['Explicitness level', 'How far her photos may go. It decides which steps, choices and photos exist for her, what her prompts may say, and how far content made for her can go.\n\nSFW: clothed only. Face and full-body photos (plus hands and feet). There are no Intimate steps, and no intimate word ever reaches a prompt.\n\nTopless: adds breasts and nipples (choices and photos) and topless full-body photos in panties. No pubic hair, vulva or anus.\n\nExplicit: adds pubic hair, vulva and anus (choices, examples and photos) and full nude photos.\n\nYou can raise it later to unlock more steps. Lowering it hides those steps but keeps the photos. A persona linked to her is set to the same level for chat.'],
   'step:basics': ['About her', 'Her name, age and how explicit her photos may be. Age must be 18+. The level decides which steps exist: at Safe for work the Intimate steps do not appear at all.'],
   'step:describe': ['Design her face', 'Build her face from drawings, or blend 2 to 6 face photos into a new face. This step only sets up the face; the next step generates options for it.'],
   'step:pick': ['Pick her face', 'Choose the option that looks most like her. Options you do not pick delete themselves after 3 days, and you can regenerate if none is right.'],
   'step:check': ['Check & approve', 'Tick every feature that matches what you chose. Approving runs an adult-appearance check and locks her face; every later photo copies it.'],
-  'step:body': ['Body profile', 'Her overall shape: a preset, her breast size, and the individual features. Every body photo is made from this, so finish it before generating anything.'],
+  'step:body': ['Body profile', 'Her overall shape: a preset, her breast size, and the individual features. You can set this before her face is done. Every body photo is made from it, so finish it before generating any.'],
   'step:photos_body': ['Body photos', 'Her clothed full-body photos, starting with the front. The back, side, hands and feet are built from the front, so they unlock once it is approved. All of them must be approved to move on.'],
-  'step:photos_face': ['Face angles', 'Three-quarter, profile and smiling, each built from her approved face. Approve all three to open the body steps.'],
-  'step:intimate': ['Intimate details', 'Nipples, pubic hair, vulva and anus. Choose all of it now: the intimate photos are generated from these choices, so nothing is generated first and then corrected. Breast size is set in Body profile.'],
+  'step:photos_face': ['Face angles (optional)', 'Not required. Three-quarter, profile and smiling, each built from her approved face. They give the generator more of her face to copy, for extra control over how she looks turned or smiling. Skip them if her front face is enough.'],
+  'step:intimate': ['Intimate details', 'What your level allows: breasts and nipples at Topless, plus pubic hair, vulva and anus at Explicit. You can choose these before her face is done. Choose all of it before generating: the intimate photos are generated from these choices, so nothing is generated first and then corrected. Breast size is set in Body profile.'],
   'step:photos_intimate': ['Intimate photos', 'Each photo is built from the ones it depends on (the lock message says which) and from your intimate details. Approve them top to bottom.'],
   'step:finish': ['Accept & link', 'Review her full set, accept this version, then link her to a persona so every photo that persona sends looks like her.'],
   'body:mode': ['Body source', 'Create with the builder: pick her shape from drawings. Match reference bodies: upload photos and hers is made similar to them, never a copy. Her face is always her own.'],
@@ -1253,9 +1258,9 @@ const ALL_STEPS = [
    sub: 'Choose the option that looks most like her. Not right? Regenerate, or change her features. Options you do not pick delete themselves after 3 days.'},
   {key: 'check', stage: 'face', nav: 'Check & approve', title: 'Check every feature',
    sub: 'Tick each feature that matches what you chose. Approving runs the adult-appearance check and locks her face in.'},
-  {key: 'photos_face', stage: 'face', nav: 'Face angles', title: 'Approve her face angles',
+  {key: 'photos_face', stage: 'face', optional: true, nav: 'Face angles (optional)', title: 'Extra face angles (optional)',
    views: ['face_three_quarter', 'face_profile', 'face_smile'],
-   sub: 'Other angles of her face: three-quarter, profile and smiling, each built from her approved face. Generate and approve all three; the body steps open after that.'},
+   sub: 'Not required. Her front face is enough to continue. Extra angles give the generator more of her face to copy, so it has more to work from when she is turned or smiling in later photos. Add them if you want that extra control, or skip.'},
   {key: 'body', stage: 'body', nav: 'Body profile', title: 'What is her body like?',
    sub: 'Start from a preset, set her breast size right under it, then fine-tune. Every body photo is made from this, so finish it before generating.'},
   {key: 'photos_body', stage: 'body', nav: 'Body photos', title: 'Approve her body photos',
@@ -1301,7 +1306,7 @@ function nextPhoto() {
 }
 // The first step a returning creator still has work in.
 function resumeStep() {
-  const j = STEPS.findIndex((x, i) => i > 3 && x.key !== 'finish' && stepOpen(i) && !stepDone(i));
+  const j = STEPS.findIndex((x, i) => i > 3 && x.key !== 'finish' && !x.optional && stepOpen(i) && !stepDone(i));
   return STEPS[j < 0 ? STEPS.length - 1 : j].key;
 }
 function basicsWhy() {
@@ -1317,21 +1322,37 @@ function stepDone(i) {
   if (k === 'describe') return face || images('face_front').length > 0;
   if (k === 'pick') return face || !!pickedFace;
   if (k === 'check') return face;
-  if (k === 'body') return face && (seenChoice('body') || !!canonOf('body_front'));
-  if (k === 'intimate') return face && (seenChoice('intimate') || cat.views.some(v => v.group === 'nsfw' && canonOf(v.key)));
+  if (k === 'body') return seenChoice('body') || !!canonOf('body_front');
+  if (k === 'intimate') return seenChoice('intimate') || cat.views.some(v => v.group === 'nsfw' && canonOf(v.key));
   if (t.views) return stepViews(t).every(v => vs(v.key).status === 'approved');
   return accepted();
 }
 // The same gates go() applies, so the rail never offers a step it would refuse.
-// A step opens once every step before it is done; earlier ones stay open.
+// Choosing (name, body, intimate) is open from the start; a photo step opens
+// once her face is approved and the choices it is built from are made. Optional
+// steps never hold the next one back.
+const stepDoneKey = key => { const j = STEPS.findIndex(x => x.key === key); return j >= 0 && stepDone(j); };
 function stepOpen(i) {
   const k = STEPS[i].key, face = !!canonOf('face_front');
   if (k === 'basics') return true;
-  if (k === 'describe') return !basicsWhy();
+  if (k === 'describe' || k === 'body' || k === 'intimate') return !basicsWhy();
   if (k === 'pick') return face || images('face_front').length > 0;
   if (k === 'check') return face || !!pickedFace;
-  if (k === 'finish') return cur.status === 'complete' && STEPS.slice(0, i).every((x, j) => stepDone(j));
-  return face && STEPS.slice(0, i).every((x, j) => stepDone(j));
+  if (k === 'photos_face') return face;
+  if (k === 'photos_body') return face && stepDoneKey('body');
+  if (k === 'photos_intimate') return face && stepDoneKey('photos_body') && stepDoneKey('intimate');
+  if (k === 'finish') return cur.status === 'complete' && STEPS.every((x, j) => j >= i || x.optional || stepDone(j));
+  return false;
+}
+function openWhy(i) {
+  const k = STEPS[i].key, face = !!canonOf('face_front');
+  if (k === 'describe' || k === 'body' || k === 'intimate') return basicsWhy();
+  if (k === 'pick' || k === 'check') return 'Generate her face first.';
+  if (k.startsWith('photos_') && !face) return 'Approve her face first \u2014 every photo is built from it.';
+  if (k === 'photos_body') return 'Finish Body profile first.';
+  if (k === 'photos_intimate') return stepDoneKey('photos_body') ? 'Finish Intimate details first.' : 'Finish Body photos first.';
+  if (k === 'finish') return 'Approve every required photo first.';
+  return '';
 }
 // What Continue is waiting for, so a greyed button is never a mystery.
 function stepWhy(i) {
@@ -1345,7 +1366,7 @@ function stepWhy(i) {
     if (miss.length) return `Pick an example for ${miss.map(l => l.label.toLowerCase()).join(', ')} to continue.`;
     if (cat.features.some(f => f.key === 'pubic_style') && !sheet.pubic_style) return 'Choose her pubic hair style to continue.';
   }
-  if (t.views) {
+  if (t.views && !t.optional) {
     const vws = stepViews(t), left = vws.filter(v => vs(v.key).status !== 'approved');
     const sel = selView && t.views.includes(selView) && viewDef(selView);
     const pick = sel && vs(sel.key).status !== 'approved' ? sel : !sel && left.length ? left[0] : null;
@@ -1400,15 +1421,26 @@ async function stepNext() {
   if (stepWhy(i)) return;
   if (SAVED_STEPS.includes(STEPS[i].key) && !(await saveSheet())) return;
   if (STEPS[i].key === 'body' || STEPS[i].key === 'intimate') PageWizard.markSeen(setupKey(), STEPS[i].key);
-  if (STEPS[i].views && nextPhoto()) {
+  if (STEPS[i].views && !STEPS[i].optional && nextPhoto()) {
     selView = nextPhoto().key;
     lastMsg = ['', ''];
     return render();
   }
   if (i === STEPS.length - 1) return finishGuide();
-  go(STEPS[i + 1].key);
+  let j = i + 1;
+  while (j < STEPS.length && !stepOpen(j)) j++;
+  if (j < STEPS.length) return go(STEPS[j].key);
+  // Nothing further is open yet: carry on with what the next steps are waiting for.
+  const back = STEPS.findIndex((x, k) => k !== i && stepOpen(k) && !stepDone(k) && !x.optional);
+  if (back >= 0) {
+    go(STEPS[back].key);
+    lastMsg = [`Saved. Next up: ${STEPS[back].nav}.`, 'ok'];
+    return say(...lastMsg);
+  }
+  go(STEPS[i].key);
 }
 function continueLabel() {
+  if (isPhotos() && curStep().optional && nextPhoto()) return 'Skip for now \u2192';
   const v = isPhotos() && nextPhoto();
   return v && v.key !== selView ? `Continue to ${v.label} \u2192` : 'Continue \u2192';
 }
@@ -1482,7 +1514,9 @@ const STEP_TIPS = {
     {anchor: '#ch-rail', placement: 'right', title: 'Welcome: one step at a time',
      body: 'The steps on the left are the order to work in. Each step explains itself when you open it, and the next one opens when you press Continue.'},
     {anchor: '#f-name', placement: 'bottom', title: 'Start with who she is',
-     body: 'Give her a name and an age (18 or over), then choose how explicit her photos may be. The level decides whether the Intimate steps exist.'},
+     body: 'Give her a name and an age (18 or over). Every prompt states she is a fictional adult of this age.'},
+    {anchor: '#level-chips', placement: 'bottom', title: 'Explicitness level',
+     body: 'This sets how far her photos may go. SFW is clothed only. Topless adds breasts, nipples and topless full-body photos. Explicit adds pubic hair, vulva, anus and full nude photos. It decides which steps and choices appear here and what her prompts may say. You can raise it later.'},
     foot(['Then continue', 'Press Save & continue when name, age and level are set. The line above the button tells you if something is missing.'])],
   describe: () => [
     {anchor: '#face-features', placement: 'right', title: 'Design her face',
@@ -1517,7 +1551,11 @@ const PHOTO_TIPS = () => [
   {anchor: '#ch-rail .rail-sub', placement: 'right', title: 'Her photos are in the menu',
    body: 'Every photo of this step is listed under it in the menu, with its status. Tap one to open it. A photo unlocks once the ones it is built from are approved.'},
   foot(['Approve all to move on', 'Continue opens the next step once every photo in this one is approved. The line above says which one is missing.'])];
-['photos_body', 'photos_face', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
+['photos_body', 'photos_intimate'].forEach(k => { STEP_TIPS[k] = PHOTO_TIPS; });
+STEP_TIPS.photos_face = () => [
+  {anchor: '#step-card', placement: 'left', title: 'Optional: extra control over her face',
+   body: 'You do not need these. Her front face is already enough to continue. Extra angles give the generator more of her face to copy when she is turned or smiling, so add them only if you want that extra control.'},
+  foot(['Skip whenever you like', 'Press Skip for now to go on to her body. You can come back to these angles at any time.'])];
 const TODO_ANCHOR = {basics: '#f-name', describe: '#face-features', pick: '#face-opts', check: '.ch-check-card',
   body: '#presets', intimate: '#prof-intimate', photos_body: '#step-card', photos_face: '#step-card',
   photos_intimate: '#step-card', finish: '#fin-accept-row'};
@@ -1774,6 +1812,7 @@ function renderBasics() {
   el('f-age').value = cur.age; el('f-notes').value = cur.notes || '';
   el('level-chips').innerHTML = cat.levels.map(l => `<button type="button" class="chip" aria-pressed="${cur.nsfw_level === l.key}"
     onclick="saveSheet({nsfw_level:'${l.key}'})">${l.label}</button>`).join('');
+  el('level-hint').textContent = (LEVEL_HINT[cur.nsfw_level] || '') + ' It decides which steps exist; tap the i for the details.';
 }
 async function linkPersona(slug) {
   try {
@@ -2003,10 +2042,7 @@ function intimateForm(sizeKey) {
 function openView(key) {
   const t = stepOfView(key), i = STEPS.indexOf(t);
   if (!t) return;
-  if (!stepOpen(i)) {
-    const need = STEPS.find((x, j) => j < i && !stepDone(j));
-    return say(`Finish ${need ? need.nav : 'the earlier steps'} first.`, 'err');
-  }
+  if (!stepOpen(i)) return say(openWhy(i), 'err');
   selView = key;
   step = t.key;
   render();
