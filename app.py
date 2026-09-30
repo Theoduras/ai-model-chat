@@ -21053,7 +21053,11 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
     if not cfg.get('enabled') or not wishes.looks_like_wish(text):
         return None
     owner = _wish_owner(persona)
-    if not owner or time.time() - _fv_wish_busy.get(f'{persona}:{fan_uuid}', 0) < 300:
+    if not owner:
+        _fv_trace(persona, 'ppv', f'{who}: wish ignored — persona not owned by the super admin',
+                  fan=fan_key)
+        return None
+    if time.time() - _fv_wish_busy.get(f'{persona}:{fan_uuid}', 0) < 300:
         return None
     if _fv_wish_unpaid(persona, fan_uuid):
         _fv_trace(persona, 'guardrail', f'{who}: last wish not bought — no new one',
@@ -21063,6 +21067,7 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
         persona, wishes.CLASSIFY_INSTRUCTION.format(text=text[:500]),
         max_tokens=250, temperature=0.2))
     if not wish:
+        _fv_trace(persona, 'ppv', f'{who}: not a wish: "{text[:60]}"', fan=fan_key)
         return None
     term = wishes.blocked(text, wish['scene'], wish['outfit'])
     if term:
@@ -21073,6 +21078,9 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
         return None
     wish['owner'] = owner
     wish['price'] = wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)
+    _fv_trace(persona, 'ppv', f'{who}: wish detected: {wish["scene"]} — generating '
+                              f'({"explicit" if wish["explicit"] else "safe"}, '
+                              f'${wish["price"] / 100:g})', fan=fan_key)
     _fv_wish_busy[f'{persona}:{fan_uuid}'] = time.time()
     return wish
 
