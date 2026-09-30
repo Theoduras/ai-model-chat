@@ -15,7 +15,8 @@
   <script src="/js/character-visuals.js?v=2"></script>
   <script src="/js/page-wizard.js"></script>
   <script>
-    if (window.self !== window.top) document.documentElement.classList.add('in-workspace');
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
   </script>
   <style>
     .v2-badge { position: fixed; left: 12px; top: 6px; z-index: 60; padding: 4px 10px; border-radius: 999px; font-size: .7rem; font-weight: 700; letter-spacing: .04em; background: var(--accent); color: #fff; opacity: .9; pointer-events: none; }
