@@ -800,7 +800,7 @@ PAGES = {
         'live': True,
         'title': 'Character Lock: Consistent AI Character Creator | Velvetfunneler.com',
         'description': ('Build your AI character once in the character creator and lock her in. Every photo '
-                        'and clip after that keeps the same face and body, safe or explicit.'),
+                        'and video after that keeps the same face and body, safe or explicit.'),
         'eyebrow': 'Live now · Character creator',
         'h1_pre': 'Lock in your character once,',
         'h1_accent': 'and every generation stays true to them.',
@@ -835,8 +835,8 @@ PAGES = {
              'body': 'A safe-for-work shot only ever gets safe-for-work views and words. Nothing explicit leaks into it.'},
             {'icon': '🗂️', 'title': 'Versioned',
              'body': 'Each approval saves a version, and every job keeps a snapshot, so a later change never alters past work.'},
-            {'icon': '🎬', 'title': 'Clips stay her too',
-             'body': 'A clip starts from a photo you already kept, or picks her identity straight from the character.'},
+            {'icon': '🎬', 'title': 'Videos stay her too',
+             'body': 'A video starts from a photo you already kept, or picks her identity straight from the character.'},
             {'icon': '✅', 'title': 'Adult check built in',
              'body': 'Her face and full-body photos must pass an adult check before they can be approved.'},
         ],
@@ -846,11 +846,11 @@ PAGES = {
         'steps': [
             {'title': 'Build her', 'body': 'Follow the steps in the character creator and approve a photo for each view.'},
             {'title': 'Lock her in', 'body': 'Her approved views and features become her identity for every generation.'},
-            {'title': 'Create', 'body': 'Open the studio and generate photos and clips. She stays the same in every one.'},
+            {'title': 'Create', 'body': 'Open the studio and generate photos and videos. She stays the same in every one.'},
         ],
         'faq': [
             {'q': 'What is Character Lock?',
-             'a': 'Her approved character views and features, sent with every generation so the face and body stay the same across every photo and clip.'},
+             'a': 'Her approved character views and features, sent with every generation so the face and body stay the same across every photo and video.'},
             {'q': 'Do I need to train a model?',
              'a': 'No. There is no LoRA and no fine-tuning. The lock works from her approved photos, from the first one onward.'},
             {'q': 'What if I change her later?',
@@ -862,7 +862,7 @@ PAGES = {
         ],
         'related': _related('character-lock', ['ai-image-generator', 'ai-content-planner', 'fanvue-ai-chatter', 'velvetchat-share-link']),
         'close_h2': 'Build her once. Keep her forever.',
-        'close_sub': 'One character, locked in, behind every photo and clip you make.',
+        'close_sub': 'One character, locked in, behind every photo and video you make.',
     },
 
     'onlyfans-ai-chatbot': {
