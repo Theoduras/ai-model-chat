@@ -115,7 +115,7 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `POST /api/admin/push/subscribe` | JSON | Register this browser for support push alerts |
 | `GET /{tool-slug}` | — | Free tools (`free_tools.TOOLS`); each CTA goes through its own `/signup-tool-…` link |
 | `POST /api/tools/generate` | JSON | Public PPV-caption / DM-opener generator (whitelisted input, rate-limited per IP) |
-| `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL |
+| `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL; `/c/{handle}` is her chat without site nav or support bubble |
 | `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`) |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
@@ -386,6 +386,12 @@ Stay completely in character. Never mention being an AI.
   lives in app settings (or `VAPID_PRIVATE_KEY`); replacing it orphans every
   subscription. Presence ("Online now") is the support bubble's poll, stamped at
   most once a minute into `users.last_seen_at`.
+- **Bio pages live on a neutral domain** (`BIO_DOMAINS`, default `velvt.online`,
+  links `velvt.online/<handle>`) so a fan cannot trace a creator back to the
+  platform. `_bio_domain_gate` runs before every other hook and serves only her
+  page, `/c/<handle>` and what those load; everything else 404s there. Never add
+  platform branding to `bio.html`, `js/bio-render.js` or the `/c/` chat. The chat
+  keeps its small AI tag (EU AI Act Art. 50 disclosure).
 - Fanvue, OnlyFans and Discord DMs share one reply engine through the platform
   adapters (`_Platform` in `app.py`): a platform says where its state is keyed,
   how a chat reads, and how a message goes out. New platform work belongs in an

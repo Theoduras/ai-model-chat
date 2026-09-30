@@ -358,6 +358,7 @@ body.page-chat {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.ai-tag { margin-left: 6px; padding: 0 5px; border: 1px solid var(--border); border-radius: 4px; font-size: 10px; font-weight: 700; letter-spacing: .04em; }
 
 .header-status-chip {
   font-size: 11px;

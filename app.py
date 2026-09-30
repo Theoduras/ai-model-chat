@@ -7,6 +7,7 @@ import platform_pages
 import free_tools
 import copy
 import json
+import html as html_mod
 import re
 import logging
 import hashlib
@@ -7704,8 +7705,100 @@ def bio_page(handle):
     with open(os.path.join(BASE_DIR, 'bio.html'), encoding='utf-8') as f:
         html = f.read()
     blob = json.dumps(data).replace('<', '\\u003c')
-    title = (data.get('name') or 'Links').replace('<', '').replace('&', '&amp;')
-    return html.replace('__BIO_TITLE__', title).replace('/*__BIO_DATA__*/null', blob)
+    attr = lambda v: html_mod.escape(v or '', quote=True)
+    return (html.replace('__BIO_TITLE__', attr(data.get('name') or 'Links'))
+            .replace('__BIO_DESC__', attr(data.get('bio')))
+            .replace('__BIO_ICON__', attr(f'/link-{handle}/pic'))
+            .replace('/*__BIO_DATA__*/null', blob))
+
+
+# Fans must not be able to trace her page back to this platform, so on the bio
+# domain nothing but her page, her chat and what those two load is served; the
+# root and every marketing or app page 404.
+BIO_DOMAINS = {d.strip().lower() for d in
+               os.environ.get('BIO_DOMAINS', 'velvt.online').split(',') if d.strip()}
+_BIO_ASSETS = ('/js/bio-render.js', '/css/style.css', '/css/lazy.css',
+               '/js/skeleton.js', '/js/theme.js')
+_BIO_API_RE = re.compile(r'^/api/personas/[a-z0-9_-]+(/avatar|/images|/media/[A-Za-z0-9_-]+/image)?$')
+
+
+def _on_bio_domain():
+    host = (request.host or '').split(':')[0].lower()
+    return host in BIO_DOMAINS or host.removeprefix('www.') in BIO_DOMAINS
+
+
+def _bio_link_base():
+    return f'https://{sorted(BIO_DOMAINS)[0]}/' if BIO_DOMAINS else _callback_origin() + '/link-'
+
+
+def _bio_domain_gate():
+    if not _on_bio_domain():
+        return None
+    path, method = request.path or '/', request.method
+    m = re.match(r'^/([a-z0-9][a-z0-9_-]{1,28}[a-z0-9])$', path)
+    if m and method in ('GET', 'HEAD') and path != '/chat' and not path.startswith('/link-'):
+        return bio_page(m.group(1))
+    if (path.startswith(('/link-', '/c/')) or path in _BIO_ASSETS
+            or (_BIO_API_RE.match(path) and method in ('GET', 'HEAD'))
+            or (path == '/chat' and method in ('POST', 'HEAD'))):
+        return None
+    return ('Not found', 404)
+
+
+# First in line, ahead of the sign-in gates: their redirect to /login would
+# otherwise answer on the bio domain before this could 404 it.
+app.before_request_funcs.setdefault(None, []).insert(0, _bio_domain_gate)
+
+
+@app.route('/link-<handle>/pic')
+def bio_pic(handle):
+    """Her picture at a plain URL, for the tab icon and link previews, so an
+    uploaded photo is not inlined three times over."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        url = _bio_public(row)['avatar_url']
+    finally:
+        s.close()
+    if url.startswith('data:'):
+        import base64
+        mime, b64 = url[5:].split(';base64,', 1)
+        resp = Response(base64.b64decode(b64), mimetype=mime)
+        resp.headers['Cache-Control'] = 'public, max-age=3600'
+        return resp
+    return redirect(url)
+
+
+@app.route('/c/<handle>')
+def bio_chat(handle):
+    """Her chat as the bio page opens it: one model, no site navigation, no
+    support bubble, her name and picture in the tab."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        data = _bio_public(row)
+        slug, row_handle = row.slug, row.handle
+    finally:
+        s.close()
+    with open(os.path.join(BASE_DIR, 'chat.html'), encoding='utf-8') as f:
+        html = f.read()
+    for tag in ('<link rel="stylesheet" href="/css/site-nav.css">',
+                '<script src="/js/site-nav.js" defer></script>',
+                '<script src="/js/devnav.js" defer></script>',
+                '<nav data-site-nav="inline" class="sn-links sn-inline"></nav>'):
+        html = html.replace(tag, '')
+    html = re.sub(r'<link rel="icon"[^>]*>\s*', '', html)
+    name = html_mod.escape(data.get('name') or '', quote=True)
+    head = (f'<link rel="icon" href="/link-{html_mod.escape(row_handle, quote=True)}/pic">'
+            f'<script>window.__FAN = {json.dumps({"persona": slug})};</script>')
+    html = html.replace('<title>Chat</title>', f'<title>{name}</title>{head}', 1)
+    return html
 
 
 @app.route('/link-<handle>/go/<bid>')
@@ -7727,7 +7820,7 @@ def bio_click(handle, bid):
         row.clicks_json = json.dumps(clicks)
         s.commit()
         if block['type'] == 'chat':
-            return redirect(f'/chat?persona={urllib.parse.quote(row.slug)}&only=1')
+            return redirect(f'/c/{row.handle}')
         return redirect(block.get('url') or f'/link-{row.handle}')
     finally:
         s.close()
@@ -7751,7 +7844,7 @@ def api_bio_get(slug):
         row = _bio_row(s, slug, create=True)
         return jsonify({'handle': row.handle, 'config': json.loads(row.config_json or '{}'),
                         'views': row.views or 0, 'clicks': json.loads(row.clicks_json or '{}'),
-                        'origin': _callback_origin(),
+                        'origin': _callback_origin(), 'link_base': _bio_link_base(),
                         'vault': [{'id': i, 'thumb': f'/api/personas/{slug}/media/{i}/image'}
                                   for i in _bio_sfw_vault(slug)]})
     finally:

@@ -114,7 +114,7 @@
 
     <div class="card">
       <span class="lbl">Your link</span>
-      <div class="handle" id="handle-box"><span id="handle-pre">velvetfunneler.com/link-</span><input id="handle" maxlength="30" autocomplete="off" spellcheck="false" oninput="checkHandle()"></div>
+      <div class="handle" id="handle-box"><span id="handle-pre"></span><input id="handle" maxlength="30" autocomplete="off" spellcheck="false" oninput="checkHandle()"></div>
       <div class="row" style="justify-content:space-between;">
         <span class="msg" id="handle-msg">Put this in your Instagram, TikTok or X bio.</span>
         <div class="row"><button class="chip" onclick="copyLink()" id="copy-btn">Copy link</button><a class="chip" id="open-link" target="_blank" rel="noopener" style="text-decoration:none;">Open ↗</a></div>
@@ -412,10 +412,10 @@ function uploadImage(input) {
 }
 
 // ── Handle, save, stats ──
-function linkUrl() { return data.origin.replace(/\/$/, '') + '/link-' + $('handle').value.trim().toLowerCase(); }
+function linkUrl() { return data.link_base + $('handle').value.trim().toLowerCase(); }
 function showLink() {
-  $('handle-pre').textContent = data.origin.replace(/^https?:\/\//, '').replace(/\/$/, '') + '/link-';
-  $('open-link').href = '/link-' + (data.handle || '');
+  $('handle-pre').textContent = data.link_base.replace(/^https?:\/\//, '');
+  $('open-link').href = data.link_base + (data.handle || '');
   $('live-url').textContent = linkUrl().replace(/^https?:\/\//, '');
 }
 function checkHandle() {

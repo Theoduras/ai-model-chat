@@ -42,7 +42,6 @@
     '@keyframes bioPulse{50%{transform:scale(1.025)}}' +
     '.bio-h{margin:10px 0 -2px;font-size:13px;letter-spacing:.14em;text-transform:uppercase;font-weight:700;opacity:.8;text-align:center}' +
     '.bio-note{margin:0;text-align:center;font-size:14px;opacity:.85;white-space:pre-line;max-width:44ch}' +
-    '.bio-foot{margin-top:auto;padding-top:28px;font-size:12px;opacity:.6;color:inherit;text-decoration:none}' +
     '.bio-gate{position:absolute;inset:0;z-index:10;display:flex;align-items:center;justify-content:center;padding:28px;background:rgba(10,6,9,.6);backdrop-filter:blur(18px)}' +
     '.bio-gate>div{max-width:320px;width:100%;text-align:center;color:#fff;display:flex;flex-direction:column;gap:12px;font-family:system-ui,sans-serif}' +
     '.bio-gate b{font-size:44px;line-height:1}.bio-gate p{margin:0;font-size:14px;opacity:.9}' +
@@ -145,10 +144,6 @@
       inner.appendChild(a);
     });
     if (soc.children.length && !socTop) inner.appendChild(soc);
-    var foot = el('a', 'bio-foot', 'velvetfunneler.com');
-    foot.href = 'https://velvetfunneler.com/?ref=bio'; foot.target = '_blank'; foot.rel = 'noopener';
-    if (opts.preview) foot.onclick = function (e) { e.preventDefault(); };
-    inner.appendChild(foot);
     root.appendChild(inner);
     mount.appendChild(root);
     if (!opts.preview && cfg.gate === 'page' && !adultOk()) gate(root);
