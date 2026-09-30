@@ -109,7 +109,7 @@ RUNWARE_VIDEO_MODELS = {
     'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
     # Video edit: the clip and up to four photos, addressed in the prompt as
     # @Image1.. Id and fields are from public docs, not the live catalogue.
-    'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@3-omni-pro'),
+    'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@o3-pro'),
 }
 KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
 # The safe-work models that take her photos as `inputs.referenceImages` beside
