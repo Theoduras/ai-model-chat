@@ -18472,7 +18472,13 @@ def _fv_ensure_webhook(persona, force=False):
         made = _fanvue_call(persona, 'POST', '/webhooks/subscriptions',
                             body={'url': url, 'events': wanted})
     except Exception as e:
-        made, why = None, _fv_error_text(e)
+        # detail keeps only Fanvue's "message" ("Bad Request"); the field
+        # errors that say what was wrong are in the rest of the body.
+        try:
+            body_text = (e.read() or b'').decode(errors='ignore')[:300]
+        except Exception:
+            body_text = ''
+        made, why = None, body_text or _fv_error_text(e)
         # One unknown event fails the whole call, taking the rest with it, so
         # find the one Fanvue will not take by leaving each out in turn.
         if getattr(e, 'code', None) == 400 and len(wanted) > 1:
