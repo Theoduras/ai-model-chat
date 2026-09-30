@@ -33904,7 +33904,7 @@ UNDRESS_PROMPT = (
 
 @app.route('/api/generate/undress', methods=['POST'])
 def api_generate_undress():
-       """One still taken to fully nude, as a Seedream 4.5 edit of itself.
+    """One still taken to fully nude, as a Seedream 4.5 edit of itself.
 
     Accepts a generated or uploaded photo that belongs to this persona."""
     blocked = _require_active()
