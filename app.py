@@ -3750,7 +3750,12 @@ h2{font-size:1rem;margin-bottom:14px}
 <input type="hidden" name="action" value="tokens">
 <label>Tokens</label><input type="number" name="tokens" min="1" max="1000000" required>
 <label>Note (optional)</label><input type="text" name="note" maxlength="200">
-<button type="submit">Give tokens</button></form></div>
+<button type="submit">Give tokens</button></form>
+<form method="post" action="/admin/users/{{ u.id }}" style="margin-top:14px">
+<input type="hidden" name="action" value="tokens_remove">
+<label>Remove tokens</label><input type="number" name="tokens" min="1" max="1000000" required>
+<label>Note (optional)</label><input type="text" name="note" maxlength="200">
+<button type="submit">Remove tokens</button></form></div>
 {% endif %}
 <div class="card" style="margin-top:16px"><h2>Set password</h2>
 <p class="sub">Replaces the password immediately. Tell them out of band.</p>
@@ -5080,6 +5085,23 @@ def admin_user_detail(uid):
                     saved = f'{int(raw):,} tokens added.'
                     logger.info('ADMIN TOKEN GIFT by=%s target=%s tokens=%s',
                                 me['email'], u.email, raw)
+
+            elif action == 'tokens_remove':
+                raw = (request.form.get('tokens') or '').strip()
+                if not me.get('is_super_admin'):
+                    error = 'Only the super admin can remove tokens.'
+                elif not raw.isdigit() or not 0 < int(raw) <= 1_000_000:
+                    error = 'Enter a whole number of tokens, 1 to 1,000,000.'
+                else:
+                    from db import token_balance, token_debit
+                    ws = _owned_workspace_id(s, u)
+                    n = min(int(raw), max(token_balance(s, ws), 0))
+                    note = (request.form.get('note') or '').strip()
+                    token_debit(s, ws, n, 'remove:' + me['id'], kind='adjust',
+                                note=note or 'Removed by ' + me['email'])
+                    saved = f'{n:,} tokens removed.'
+                    logger.info('ADMIN TOKEN REMOVE by=%s target=%s tokens=%s',
+                                me['email'], u.email, n)
 
             elif action == 'trial':
                 err = _grant_trial(s, u)

@@ -1350,7 +1350,7 @@ def expiring_balance(session, workspace_id, at=None):
     return max(0, total), soonest
 
 
-def token_debit(session, workspace_id, amount, source, note=''):
+def token_debit(session, workspace_id, amount, source, note='', kind='spend'):
     """Reserve tokens for a job. Returns False without posting anything when
     the balance will not cover it, so an unaffordable job never reaches the
     provider.
@@ -1367,10 +1367,10 @@ def token_debit(session, workspace_id, amount, source, note=''):
     expiring, when = expiring_balance(session, workspace_id)
     from_grant = min(amount, expiring) if when else 0
     if from_grant:
-        token_post(session, workspace_id, -from_grant, 'spend', source=source,
+        token_post(session, workspace_id, -from_grant, kind, source=source,
                     expires_at=when, note=note)
     if amount - from_grant:
-        token_post(session, workspace_id, -(amount - from_grant), 'spend',
+        token_post(session, workspace_id, -(amount - from_grant), kind,
                     source=source, note=note)
     return True
 
