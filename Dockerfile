@@ -8,19 +8,9 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
-# Chrome first: it is the slowest layer and the one that changes least, so with
-# --cache-from it is reused on every build that only touches Python or source.
-# Below a requirements.txt that changes often it would be re-downloaded instead.
-RUN apt-get update --fix-missing && apt-get install -y --no-install-recommends \
-    wget \
-    xvfb \
-    xauth \
-    fonts-liberation \
-    && wget -q -O /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_amd64.deb \
-    && apt-get install -y --no-install-recommends /tmp/chrome.deb \
-    && rm /tmp/chrome.deb \
-    && apt-get clean && rm -rf /var/lib/apt/lists/* /var/cache/apt/* /usr/share/doc /usr/share/man
-
+# No Chrome or Xvfb here: sign-in runs on the browser service (Dockerfile.browser),
+# which the app reaches through ONLYFANS_BROWSER_URL. Set that on every service
+# that runs this image, or the sign-in windows have no browser to open.
 COPY requirements.txt .
 # --no-compile: PYTHONDONTWRITEBYTECODE already keeps the runtime from writing
 # .pyc, so the ones pip bakes in are dead weight in the image.

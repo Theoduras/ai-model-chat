@@ -61,7 +61,7 @@ steps:
         if [ -f /workspace/.reuse ]; then exit 0; fi
         IMG=${_AR_HOSTNAME}/$PROJECT_ID/${_AR_REPOSITORY}/$REPO_NAME/${_SERVICE_NAME}
         docker build -t "$$IMG:$COMMIT_SHA" -t "$$IMG:latest" \
-          --cache-from "$$IMG:latest" -f Dockerfile .
+          --cache-from "$$IMG:latest" -f Dockerfile.browser .
 
   - name: gcr.io/cloud-builders/docker
     id: Push
@@ -102,8 +102,8 @@ steps:
       # a Chrome with a profile on a filesystem that is also this container's
       # memory. At 2Gi the second one ended the container, which reads from the
       # app as "her browser answered nothing" moments after a sign-in.
-      - --cpu=2
-      - --memory=4Gi
+      - --cpu=1
+      - --memory=2Gi
       - --quiet
 
 substitutions:
