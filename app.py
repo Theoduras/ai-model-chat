@@ -30707,6 +30707,67 @@ def _clip_views(char, picked, model):
     return keys, [role(k) for k in keys]
 
 
+def _gen_video_prompt(slug, spec):
+    """The words a clip job would be sent with, built the way the submit path
+    builds them but without signing a URL, for the studio's Advanced panel.
+    The reference roles are the ones the job would name, not a promise of
+    which photos survive the provider's cap."""
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    model = spec.get('model')
+    motion = spec.get('motion', '') or spec.get('prompt_extra', '')
+    char = spec.get('character')
+    picked = spec.get('identity_media') or []
+    if job == 'swap' or (job == 'reel' and spec.get('source_path')):
+        text = motion if job == 'swap' else (spec.get('prompt_extra') or motion)
+        if not imagegen.locks_identity(model):
+            return imagegen.build_swap_prompt(
+                text, preserve=imagegen.preserves_source('swap', model),
+                place=spec.get('place') or '')
+        if char and spec.get('identity') == 'character':
+            roles = _clip_views(char, spec.get('character_views'), model)[1]
+        else:
+            roles = (['face'] if imagegen.wants_face_only(model)
+                     else ['body'] if imagegen.wants_body_only(model)
+                     else ['face', 'body'])
+        roles = list(roles) + ['other'] * len(picked)
+        if imagegen.wants_body_only(model):
+            roles = roles[:1]
+        cap = imagegen.ref_cap(model)
+        extras = []
+        if cap > 1 and not imagegen.wants_body_only(model):
+            extras = [k for k, ref in (('outfit', spec.get('outfit_ref')),
+                                       ('location', spec.get('location_ref'))) if ref]
+        roles = roles[:max(1, cap - len(extras))]
+        roles = (roles + extras)[:cap]
+        return imagegen.build_swap_prompt(
+            text, preserve=imagegen.preserves_source('swap', model), roles=roles,
+            place=spec.get('place') or '', at_images=imagegen.uses_at_images(model))
+    if job == 'reel':
+        return imagegen.build_reel_prompt(
+            spec.get('prompt_extra') or motion,
+            has_photo=bool(spec.get('reference_media')), character=bool(char or picked))
+    if job == 'extend':
+        return imagegen.build_extend_prompt(spec.get('extend_mode'), motion)
+    if job == 'multiref':
+        return imagegen.build_multiref_prompt(
+            spec.get('prompt_extra') or motion, len(spec.get('scene_media') or []))
+    return imagegen.build_video_prompt(motion)
+
+
+def _gen_own_video_prompt(spec):
+    """The creator's edited clip prompt, with the preserve clause put back if
+    she took it out: that clause is ours, never hers to remove."""
+    text = spec['video_prompt']
+    job = spec.get('job') or ('swap' if spec['kind'] == 'swap' else 'animate')
+    keeps = imagegen.preserves_source(
+        'swap' if job in ('swap', 'reel') else job, spec.get('model'))
+    if (keeps and (job == 'swap' or spec.get('source_path'))
+            and not (spec.get('place') or spec.get('location_ref'))
+            and imagegen.PRESERVE_CLAUSE not in text):
+        text = imagegen.PRESERVE_CLAUSE + ' ' + text
+    return text
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
@@ -30763,6 +30824,10 @@ def _gen_spec(slug, body, user):
         'smudges': bool(body.get('smudges')),
         'outfit_ref': _studio_outfit(slug, body.get('outfit_ref')) and str(body['outfit_ref']),
         'place': (body.get('place') or '').strip()[:200],
+        # Only an edited clip prompt comes through here; an untouched one is
+        # rebuilt by the job from the choices, exactly as the preview was.
+        'video_prompt': (body.get('video_prompt') or '').strip()[:2000]
+                        if kind != 'image' else '',
         'location_ref': (_studio_location(slug, body.get('location_ref'))
                          and str(body['location_ref'])),
         'zoom': (body.get('zoom') or '').strip().lower(),
@@ -33068,6 +33133,27 @@ def api_generate_prompt():
     return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
 
 
+@app.route('/api/generate/video-prompt', methods=['POST'])
+def api_generate_video_prompt():
+    """The prompt a clip would be sent with, for the Advanced panel. Validated
+    through `_gen_spec` like the job itself, so nothing refused there shows."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = dict(request.get_json(silent=True) or {})
+    body.pop('video_prompt', None)
+    slug = _studio_outfit_slug(body.get('persona'))
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    try:
+        spec = _gen_spec(slug, body, _current_user())
+        if spec.get('identity') == 'character' and not spec.get('character'):
+            spec['character'] = _character_snapshot(slug)
+        return jsonify({'ok': True, 'prompt': _gen_video_prompt(slug, spec)})
+    except (imagegen.GenerationError, CR.PricingError) as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+
+
 @app.route('/api/generate/direction', methods=['POST'])
 def api_generate_direction():
     """One line of direction for the next still — pose, expression, what she
@@ -33428,6 +33514,8 @@ def _gen_start(job_id, slug, spec, workspace):
                         at_images=imagegen.uses_at_images(spec.get('model')))
                     if refs:
                         call['reference_urls'] = refs
+                if spec.get('video_prompt'):
+                    call['prompt'] = _gen_own_video_prompt(spec)
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
@@ -33908,10 +33996,13 @@ def _job_json(job, session_db):
             'expires_at': row.expires_at.isoformat() if row.expires_at else '',
         })
     try:
-        job_name = (json.loads(job.spec_json or '{}') or {}).get('job') or ''
+        spec = json.loads(job.spec_json or '{}') or {}
     except ValueError:
-        job_name = ''
+        spec = {}
+    job_name = spec.get('job') or ''
+    model = str(spec.get('model') or '')
     return {'id': job.id, 'kind': job.kind, 'job': job_name, 'status': job.status,
+            'model': model, 'engine': CR.MODEL_LABELS.get(model, model),
             'tokens': job.tokens, 'error': job.error or '',
             'persona': job.slug, 'media': media,
             'created_at': job.created_at.isoformat() if job.created_at else ''}
@@ -34027,11 +34118,21 @@ def _studio_photos(kind):
         import base64
         import io
         from PIL import Image
-        raw = str(body.get('image') or '')
-        if len(raw) > _STUDIO_PHOTO_MAX_CHARS:
-            return jsonify({'ok': False, 'error': 'That photo is too large (12 MB at most)'}), 413
+        media_id = str(body.get('media_id') or '').strip()[:40]
+        if media_id:
+            blob, _ = _draft_media_bytes(slug, media_id)
+            if not blob:
+                return jsonify({'ok': False, 'error': 'That photo is not in her vault'}), 404
+        else:
+            raw = str(body.get('image') or '')
+            if len(raw) > _STUDIO_PHOTO_MAX_CHARS:
+                return jsonify({'ok': False, 'error': 'That photo is too large (12 MB at most)'}), 413
+            try:
+                blob = base64.b64decode(raw.split(',', 1)[-1])
+            except Exception:
+                return jsonify({'ok': False, 'error': 'That is not an image'}), 400
         try:
-            img = Image.open(io.BytesIO(base64.b64decode(raw.split(',', 1)[-1])))
+            img = Image.open(io.BytesIO(blob))
             img = img.convert('RGB')
             img.thumbnail((1536, 1536), Image.LANCZOS)
             out = io.BytesIO()
@@ -34042,6 +34143,15 @@ def _studio_photos(kind):
         s = _db_session()
         try:
             s.add(model(slug=slug, gcs_path=path))
+            # A new upload also lands in her vault, so one photo can be
+            # picked again anywhere; one taken from the vault is already there.
+            if not media_id:
+                from db import PersonaMedia
+                s.add(PersonaMedia(
+                    slug=slug, kind='image', mime='image/jpeg', approved=True,
+                    purpose=kind[:-1],
+                    image_data='data:image/jpeg;base64,'
+                               + base64.b64encode(out.getvalue()).decode()))
             s.commit()
         finally:
             s.close()
@@ -34121,6 +34231,40 @@ def api_generate_outfit_delete(outfit_id):
 @app.route('/api/generate/locations/<location_id>', methods=['DELETE'])
 def api_generate_location_delete(location_id):
     return _studio_photo_delete('locations', location_id)
+
+
+@app.route('/api/generate/describe-place', methods=['POST'])
+def api_generate_describe_place():
+    """One line saying where a location photo was taken, for a clip's "Change
+    the place". A place photo carries no one explicit, so it may go to Google."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = _studio_outfit_slug(body.get('persona'))
+    row = slug and _studio_location(slug, body.get('location_id'))
+    if not row:
+        return jsonify({'ok': False, 'error': 'Unknown place photo'}), 404
+    if not client:
+        return jsonify({'ok': False, 'error': 'Describing photos is not set up'}), 503
+    import base64
+    try:
+        data = storage.get(row.gcs_path)
+        resp = client.models.generate_content(
+            model=MODEL_NAME,
+            contents=[{'role': 'user', 'parts': [
+                {'text': 'Describe only the place in this photo as one short scene '
+                         'line for a video prompt, under 20 words: the setting, '
+                         'time of day, light and mood. Ignore any people in it. '
+                         'No preamble, no quotes.'},
+                {'inline_data': {'mime_type': 'image/jpeg',
+                                 'data': base64.b64encode(data).decode()}}]}],
+            config=_no_thinking(types.GenerateContentConfig(temperature=0.3)))
+        line = (_gemini_text(resp) or '').strip().strip('"').splitlines()[0][:200]
+    except Exception as e:
+        logger.warning('describe place failed: %s', str(e)[:200])
+        return jsonify({'ok': False, 'error': 'Could not read that photo. Type the place instead.'}), 502
+    return jsonify({'ok': True, 'place': line})
 
 
 @app.route('/api/generate/look', methods=['POST'])
