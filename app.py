@@ -2338,7 +2338,7 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # The chatbot side of the product, for plans without the `chatbot` capability
 # (Free is content creation only). These are not in _PAID_* because Demo, which
 # has the capability, must keep reaching them as it always has.
-_CHATBOT_PREFIXES = ('/planner', '/embed-setup', '/api/growth', '/discord',
+_CHATBOT_PREFIXES = ('/planner', '/embed-setup', '/api/bio', '/api/growth', '/discord',
                      '/instagram', '/tiktok', '/reddit', '/api/discord',
                      '/api/instagram', '/api/tiktok', '/api/reddit')
 _PERSONA_SUB_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)(?:/|$)')
@@ -7503,6 +7503,297 @@ def register_link_click(code):
     finally:
         s.close()
     return redirect('/register')
+
+
+# ── Link in bio: /link-<handle> ─────────────────────────────────────────────
+# One public page per persona for a social bio. The handle is the creator's to
+# change; the page is one JSON blob rendered client-side by js/bio-render.js,
+# which the editor's live preview shares so the two never drift.
+
+_BIO_HANDLE_RE = re.compile(r'^[a-z0-9][a-z0-9_-]{1,28}[a-z0-9]$')
+_BIO_RESERVED = {'admin', 'support', 'velvetfunneler', 'velvetfunnel', 'help',
+                 'login', 'register', 'api', 'www', 'official'}
+_BIO_IMG_RE = re.compile(r'^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$')
+_BIO_SOCIALS = ('instagram', 'x', 'tiktok', 'telegram', 'fanvue', 'onlyfans',
+                'fansly', 'reddit', 'discord', 'youtube', 'twitch', 'snapchat',
+                'threads', 'spotify', 'amazon', 'email', 'website')
+_BIO_CHOICES = {
+    'bg_type': ('solid', 'gradient', 'image'),
+    'btn_style': ('fill', 'glass', 'outline', 'shadow'),
+    'radius': ('square', 'round', 'pill'),
+    'avatar_shape': ('circle', 'rounded', 'cover'),
+    'socials_pos': ('top', 'bottom'),
+    'gate': ('off', 'button', 'page'),
+    'font_title': ('Caveat', 'Fraunces', 'Syne', 'DM Sans', 'Playfair Display',
+                   'Bebas Neue', 'Pacifico', 'Space Mono'),
+    'font_body': ('DM Sans', 'Inter', 'Lora', 'Space Mono', 'Nunito'),
+}
+_BIO_COLOR_RE = re.compile(r'^#[0-9a-fA-F]{6}$')
+_BIO_DEFAULT_THEME = {
+    'preset': 'peach', 'bg_type': 'gradient', 'bg1': '#ffe9dd', 'bg2': '#f2c7e3',
+    'bg_image': None, 'text': '#4a2733', 'btn_bg': '#fff9f6', 'btn_text': '#4a2733',
+    'accent': '#8d3f5c', 'btn_style': 'fill', 'radius': 'round',
+    'avatar_shape': 'rounded', 'font_title': 'Caveat', 'font_body': 'DM Sans',
+    'socials_pos': 'top',
+}
+
+
+def _bio_handle_error(handle, slug):
+    if not _BIO_HANDLE_RE.match(handle or ''):
+        return 'Use 3 to 30 letters, numbers, - or _.'
+    if handle in _BIO_RESERVED:
+        return 'That name is reserved.'
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == handle).first()
+        if row and row.slug != slug:
+            return 'Already taken.'
+    finally:
+        s.close()
+    return ''
+
+
+def _bio_sfw_vault(slug):
+    """Her approved safe-work stills: the only vault media a public page may show."""
+    from db import list_persona_media
+    s = _db_session()
+    try:
+        return [r.id for r in _approved_only(list_persona_media(s, slug))
+                if (r.kind or 'image') == 'image' and (r.rating or '') == 'sfw']
+    except Exception:
+        return []
+    finally:
+        s.close()
+
+
+def _bio_url(u):
+    u = (u or '').strip()[:1000]
+    if u and not re.match(r'^(https?://|mailto:)', u, re.I):
+        u = 'https://' + u
+    p = urllib.parse.urlparse(u)
+    if p.scheme.lower() == 'mailto':
+        return u if '@' in u else ''
+    return u if p.scheme.lower() in ('http', 'https') and '.' in p.netloc else ''
+
+
+def _bio_image(img, vault):
+    """{src: upload|vault, ...} → the same shape, or None. Uploads arrive
+    resized by the editor; vault picks must be her own safe-work stills."""
+    if not isinstance(img, dict):
+        return None
+    if img.get('src') == 'upload':
+        data = img.get('data') or ''
+        if len(data) <= 900_000 and _BIO_IMG_RE.match(data):
+            return {'src': 'upload', 'data': data}
+    elif img.get('src') == 'vault' and img.get('id') in vault:
+        return {'src': 'vault', 'id': img['id']}
+    return None
+
+
+def _bio_clean(cfg, slug):
+    cfg = cfg if isinstance(cfg, dict) else {}
+    vault = set(_bio_sfw_vault(slug))
+    s = lambda v, n: str(v or '').strip()[:n]
+    out = {'name': s(cfg.get('name'), 60), 'bio': s(cfg.get('bio'), 300),
+           'avatar': _bio_image(cfg.get('avatar'), vault),
+           'gate': cfg.get('gate') if cfg.get('gate') in _BIO_CHOICES['gate'] else 'off'}
+    socials = []
+    for so in (cfg.get('socials') or [])[:17]:
+        if isinstance(so, dict) and so.get('net') in _BIO_SOCIALS:
+            url = _bio_url(('mailto:' + s(so.get('url'), 200).removeprefix('mailto:'))
+                           if so['net'] == 'email' else so.get('url'))
+            if url:
+                socials.append({'net': so['net'], 'url': url})
+    out['socials'] = socials
+    blocks, seen = [], set()
+    for b in (cfg.get('blocks') or [])[:60]:
+        if not isinstance(b, dict) or b.get('type') not in ('chat', 'link', 'header', 'text'):
+            continue
+        bid = re.sub(r'[^a-z0-9]', '', str(b.get('id') or '').lower())[:12] or secrets.token_hex(4)
+        if bid in seen:
+            bid = secrets.token_hex(4)
+        seen.add(bid)
+        nb = {'id': bid, 'type': b['type'], 'hidden': bool(b.get('hidden'))}
+        if b['type'] == 'text':
+            nb['text'] = s(b.get('text'), 500)
+        else:
+            nb['title'] = s(b.get('title'), 80)
+        if b['type'] in ('chat', 'link'):
+            nb['spotlight'] = bool(b.get('spotlight'))
+            nb['adult'] = bool(b.get('adult'))
+            nb['thumb'] = _bio_image(b.get('thumb'), vault)
+        if b['type'] == 'link':
+            nb['url'] = _bio_url(b.get('url'))
+        blocks.append(nb)
+    out['blocks'] = blocks
+    theme = dict(_BIO_DEFAULT_THEME)
+    t = cfg.get('theme') if isinstance(cfg.get('theme'), dict) else {}
+    theme['preset'] = s(t.get('preset'), 20)
+    for k in ('bg1', 'bg2', 'text', 'btn_bg', 'btn_text', 'accent'):
+        if _BIO_COLOR_RE.match(str(t.get(k) or '')):
+            theme[k] = t[k]
+    for k, opts in _BIO_CHOICES.items():
+        if k != 'gate' and t.get(k) in opts:
+            theme[k] = t[k]
+    theme['bg_image'] = _bio_image(t.get('bg_image'), vault)
+    out['theme'] = theme
+    return out
+
+
+def _bio_default(slug):
+    pc = load_persona_config(slug)
+    return {'name': pc.get('name') or slug, 'bio': '', 'avatar': None, 'gate': 'off',
+            'socials': [], 'theme': dict(_BIO_DEFAULT_THEME),
+            'blocks': [{'id': 'chat', 'type': 'chat', 'title': 'Talk to me privately',
+                        'spotlight': True, 'adult': False, 'thumb': None, 'hidden': False}]}
+
+
+def _bio_row(s, slug, create=False):
+    from db import BioPage
+    row = s.query(BioPage).filter(BioPage.slug == slug).first()
+    if row or not create:
+        return row
+    base = re.sub(r'[^a-z0-9_-]', '', (load_persona_config(slug).get('name') or slug).lower().replace(' ', '-'))[:24].strip('-_') or slug[:24].strip('-_')
+    base = base if len(base) >= 3 else (base + 'xxx')[:3]
+    handle, n = base, 1
+    while _bio_handle_error(handle, slug):
+        n += 1
+        handle = f'{base}{n}'
+    row = BioPage(slug=slug, handle=handle, config_json=json.dumps(_bio_default(slug)))
+    s.add(row)
+    s.commit()
+    return row
+
+
+def _bio_public(row):
+    """What the public page gets: the config with hidden blocks dropped and
+    every image resolved to a URL."""
+    cfg = json.loads(row.config_json or '{}')
+    def img(i):
+        if not i:
+            return None
+        return i['data'] if i['src'] == 'upload' else f'/api/personas/{row.slug}/media/{i["id"]}/image'
+    cfg['avatar_url'] = img(cfg.get('avatar')) or f'/api/personas/{row.slug}/avatar'
+    cfg['theme']['bg_image_url'] = img(cfg['theme'].get('bg_image'))
+    blocks = []
+    for b in cfg.get('blocks', []):
+        if b.get('hidden') or (b['type'] == 'link' and not b.get('url')):
+            continue
+        b['thumb_url'] = img(b.get('thumb'))
+        b['href'] = f'/link-{row.handle}/go/{b["id"]}' if b['type'] in ('chat', 'link') else ''
+        blocks.append(b)
+    cfg['blocks'] = blocks
+    return cfg
+
+
+@app.route('/link-<handle>')
+def bio_page(handle):
+    from db import BioPage
+    handle = (handle or '').lower()
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == handle).first()
+        if not row:
+            return ('Not found', 404)
+        row.views = (row.views or 0) + 1
+        s.commit()
+        data = _bio_public(row)
+    finally:
+        s.close()
+    with open(os.path.join(BASE_DIR, 'bio.html'), encoding='utf-8') as f:
+        html = f.read()
+    blob = json.dumps(data).replace('<', '\\u003c')
+    title = (data.get('name') or 'Links').replace('<', '').replace('&', '&amp;')
+    return html.replace('__BIO_TITLE__', title).replace('/*__BIO_DATA__*/null', blob)
+
+
+@app.route('/link-<handle>/go/<bid>')
+def bio_click(handle, bid):
+    """Counts the click and forwards to the stored URL, never to one from the
+    request, so this cannot be used as an open redirect."""
+    from db import BioPage
+    s = _db_session()
+    try:
+        row = s.query(BioPage).filter(BioPage.handle == (handle or '').lower()).first()
+        if not row:
+            return ('Not found', 404)
+        block = next((b for b in json.loads(row.config_json or '{}').get('blocks', [])
+                      if b.get('id') == bid and not b.get('hidden')), None)
+        if not block or block['type'] not in ('chat', 'link'):
+            return redirect(f'/link-{row.handle}')
+        clicks = json.loads(row.clicks_json or '{}')
+        clicks[bid] = clicks.get(bid, 0) + 1
+        row.clicks_json = json.dumps(clicks)
+        s.commit()
+        if block['type'] == 'chat':
+            return redirect(f'/chat?persona={urllib.parse.quote(row.slug)}&only=1')
+        return redirect(block.get('url') or f'/link-{row.handle}')
+    finally:
+        s.close()
+
+
+def _bio_access(slug):
+    user = _current_user()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or not _can_edit_persona(slug, user) \
+            or slug not in _all_persona_slugs():
+        return jsonify({'error': 'Persona not found'}), 404
+    return None
+
+
+@app.route('/api/bio/<slug>', methods=['GET'])
+def api_bio_get(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    s = _db_session()
+    try:
+        row = _bio_row(s, slug, create=True)
+        return jsonify({'handle': row.handle, 'config': json.loads(row.config_json or '{}'),
+                        'views': row.views or 0, 'clicks': json.loads(row.clicks_json or '{}'),
+                        'origin': _callback_origin(),
+                        'vault': [{'id': i, 'thumb': f'/api/personas/{slug}/media/{i}/image'}
+                                  for i in _bio_sfw_vault(slug)]})
+    finally:
+        s.close()
+
+
+@app.route('/api/bio/<slug>', methods=['POST'])
+def api_bio_save(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    body = request.get_json(silent=True) or {}
+    handle = str(body.get('handle') or '').strip().lower()
+    err = _bio_handle_error(handle, slug)
+    if err:
+        return jsonify({'error': err, 'field': 'handle'}), 400
+    cfg = _bio_clean(body.get('config'), slug)
+    blob = json.dumps(cfg)
+    if len(blob) > 4_000_000:
+        return jsonify({'error': 'Images are too large. Use fewer or smaller photos.'}), 413
+    s = _db_session()
+    try:
+        row = _bio_row(s, slug, create=True)
+        row.handle = handle
+        row.config_json = blob
+        s.commit()
+    except Exception:
+        s.rollback()
+        return jsonify({'error': 'Already taken.', 'field': 'handle'}), 409
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'handle': handle, 'config': cfg})
+
+
+@app.route('/api/bio/<slug>/handle')
+def api_bio_handle(slug):
+    denied = _bio_access(slug)
+    if denied:
+        return denied
+    handle = (request.args.get('h') or '').strip().lower()
+    err = _bio_handle_error(handle, slug)
+    return jsonify({'ok': not err, 'error': err})
 
 
 @app.route('/trial/<code>')

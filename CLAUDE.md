@@ -115,6 +115,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `POST /api/admin/push/subscribe` | JSON | Register this browser for support push alerts |
 | `GET /{tool-slug}` | — | Free tools (`free_tools.TOOLS`); each CTA goes through its own `/signup-tool-…` link |
 | `POST /api/tools/generate` | JSON | Public PPV-caption / DM-opener generator (whitelisted input, rate-limited per IP) |
+| `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL |
+| `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`) |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---

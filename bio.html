@@ -1,0 +1,25 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <title>__BIO_TITLE__</title>
+  <meta property="og:title" content="__BIO_TITLE__">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <style>html,body{margin:0;height:100%}#bio{min-height:100%;display:flex;flex-direction:column}#bio>.bio{flex:1}</style>
+  <script src="/js/bio-render.js"></script>
+</head>
+<body>
+<div id="bio"></div>
+<script>
+  var BIO = /*__BIO_DATA__*/null;
+  if (BIO) {
+    renderBio(document.getElementById('bio'), BIO);
+    var t = BIO.theme || {};
+    document.body.style.background = t.bg1 || '#fff';
+  }
+</script>
+</body>
+</html>
