@@ -471,13 +471,36 @@ def test_video_negative_prompt():
         IG._post = real_post
 
 
+def test_video_prompt_is_not_cut():
+    print('video prompt length')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    script = ' '.join(f'Shot {n}: she walks and looks back.' for n in range(1, 50))
+    check('the script is longer than a still may carry',
+          A.GEN_PROMPT_MAX < len(script) < A.GEN_VIDEO_PROMPT_MAX)
+    reel = A._gen_spec('lilith', {'job': 'reel', 'prompt': script,
+                                  'rating': 'sfw'}, None)
+    check('a reel keeps the whole script', reel['prompt_extra'] == script)
+    still = A._gen_spec('lilith', {'kind': 'image', 'prompt': script,
+                                   'rating': 'sfw'}, None)
+    check('a still is still capped at its own limit',
+          len(still['prompt_extra']) == A.GEN_PROMPT_MAX)
+    huge = A._gen_spec('lilith', {'job': 'reel', 'prompt': 'x' * 5000,
+                                  'rating': 'sfw'}, None)
+    check('a clip prompt is capped at the long limit',
+          len(huge['prompt_extra']) == A.GEN_VIDEO_PROMPT_MAX)
+    text = A.imagegen.build_reel_prompt(script, character=True)
+    check('the built reel prompt carries the script to the end',
+          script in text and text.endswith('realistic motion.'))
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
                test_ledger, test_equivalents,
                test_stripe_minimums, test_test_pack_is_not_for_sale,
-               test_video_negative_prompt):
+               test_video_negative_prompt, test_video_prompt_is_not_cut):
         fn()
     print()
     if FAILURES:

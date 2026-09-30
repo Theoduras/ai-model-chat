@@ -30635,6 +30635,12 @@ def _gen_media_urls(slug, media_ids):
     return out
 
 
+# A still's prompt is a few words unless the studio writes the whole text
+# (`prompt_mode == 'full'`); a clip's is a script, so it gets the long limit.
+GEN_PROMPT_MAX = 600
+GEN_VIDEO_PROMPT_MAX = 2000
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
@@ -30662,7 +30668,8 @@ def _gen_spec(slug, body, user):
     level = 'sfw' if (body.get('rating') or '').strip().lower() == 'sfw' else 'explicit'
     spec = {'kind': kind, 'slug': slug, 'job': job,
             'reference_media': (body.get('reference_media') or '').strip(),
-            'prompt_extra': (body.get('prompt') or '').strip()[:600],
+            'prompt_extra': (body.get('prompt') or '').strip()[
+                :GEN_PROMPT_MAX if kind == 'image' else GEN_VIDEO_PROMPT_MAX],
             'negative_extra': (body.get('negative') or '').strip()[:600],
             'addons': []}
 
