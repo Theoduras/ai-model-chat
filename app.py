@@ -33924,7 +33924,8 @@ def api_generate_undress():
     try:
         row = get_persona_media(s, media_id) if media_id else None
         ok = (row is not None and row.slug == slug and (row.kind or 'image') == 'image'
-                            and row.source in ('generated', 'uploaded') and bool(row.gcs_path))
+              and (row.source or '') in ('generated', 'uploaded', 'upload')
+              and bool(row.gcs_path or row.image_data))
         size = _undress_aspect(row) if ok else ''
     finally:
         s.close()
