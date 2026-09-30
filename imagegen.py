@@ -1694,8 +1694,8 @@ class RunwareProvider(Provider):
                 task['fps'] = int(spec['fps'])
             kling = {'characterOrientation': spec.get('orientation') or 'video',
                      'keepOriginalSound': spec.get('keep_sound', True) is not False}
-            if spec.get('place') or spec.get('location_ref'):
-                kling['backgroundSource'] = 'input_image'
+            # Kling takes no background parameter; a new place rides in the
+            # prompt, which build_swap_prompt writes from `place`.
             task['providerSettings'] = {'klingai': kling}
         elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
