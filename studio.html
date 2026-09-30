@@ -2036,6 +2036,7 @@ async function uploadAudio(input) {
 // sound itself; it keeps, drops or swaps the clip's track, or lip-syncs after.
 function soundOffered() {
   const m = engineModel();
+  if (m === 'kling-3-0-omni') return true;
   return !CLIP_MODELS.includes(m) && !(genDrive && genJob === 'reel');
 }
 

@@ -1194,15 +1194,26 @@ def build_swap_prompt(motion='', preserve=False, roles=None, place='',
             'reference images, keeping her face and body consistent with them. '
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
+    if at_images:
+        # Omni links its inputs only by tag: untagged, it follows the place
+        # line and leaves the person in the clip as she was.
+        tags = ', '.join(f'@Image{n}' for n, r in enumerate(roles or [], 1)
+                         if r not in ('outfit', 'location')) or '@Image1'
+        base = (f'Edit @Video1: replace the woman in @Video1 with the woman shown '
+                f'in {tags}, keeping her face and body exactly as in those images. '
+                'Keep the original motion, framing, pacing and lighting exactly as '
+                'they are in @Video1.')
     new_place = bool(place.strip()) or 'location' in (roles or [])
     if new_place:
+        clip = '@Video1' if at_images else 'the video'
         base = base.replace(
             'Keep the original motion, framing, pacing and lighting exactly as '
-            'they are in the video.',
+            f'they are in {clip}.',
             'Keep the original motion, timing and camera movement exactly as '
-            'they are in the video, but set the scene in a different place.')
+            f'they are in {"@Video1" if at_images else "the video"}, but set the '
+            'scene in a different place.')
         if place.strip():
-            base += f' Set in: {place.strip()}.'
+            base += f' Set in: {place.strip().rstrip(".")}.'
     if roles is not None:
         base = ' '.join(part for part in (base, IDENTITY_CLAUSE,
                                           _roles_sentence(roles, at_images)) if part)
@@ -1346,6 +1357,13 @@ def _ffmpeg(video, args, audio=None):
 
 def strip_audio(video):
     return _ffmpeg(video, ['-an', '-c:v', 'copy', '-movflags', '+faststart'])
+
+
+def copy_audio(video, source):
+    """The source clip's own track on a clip regenerated from it."""
+    return _ffmpeg(video, ['-map', '0:v:0', '-map', '1:a:0?', '-c:v', 'copy',
+                           '-c:a', 'aac', '-shortest', '-movflags', '+faststart'],
+                   audio=source)
 
 
 def mux_audio(video, audio):
