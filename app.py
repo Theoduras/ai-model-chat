@@ -21723,6 +21723,7 @@ def _plat_round_body(plat, persona):
         if exclude_creators and is_creator:
             actions['skipped_creators'] += 1
             log.append(f'{who}: skipped (is a creator)')
+            _skip_note(plat, persona, fan_uuid, who, 'is a creator')
             continue
         if only and (handle or '').lower() not in only:
             log.append(f'{who}: skipped (not in only-list)')
@@ -21730,14 +21731,17 @@ def _plat_round_body(plat, persona):
         if inc_lists is not None and fan_uuid not in inc_lists:
             actions['skipped_lists'] += 1
             log.append(f'{who}: skipped (not in the included list(s))')
+            _skip_note(plat, persona, fan_uuid, who, 'not in the included list(s)')
             continue
         if fan_uuid in exc_lists:
             actions['skipped_lists'] += 1
             log.append(f'{who}: skipped (in an excluded list)')
+            _skip_note(plat, persona, fan_uuid, who, 'in an excluded list')
             continue
         if online_only and not plat.online(chat, online_grace):
             actions['skipped_offline'] += 1
             log.append(f'{who}: skipped (offline)')
+            _skip_note(plat, persona, fan_uuid, who, 'offline')
             continue
         fan_key = plat.fan_key(fan_uuid)
         try:
@@ -22457,6 +22461,21 @@ def _claim_msg(plat, persona, fan_uuid, msg_id, ttl=600):
         return n == 1
     finally:
         s.close()
+
+
+_skip_noted = {}
+
+
+def _skip_note(plat, persona, fan_uuid, who, reason):
+    """Put a skipped chat in the activity log, once an hour per fan and reason:
+    the round's own log is never shown, so a fan the bot ignored looked like a
+    fan it never saw."""
+    key = (plat.slug, persona, fan_uuid, reason)
+    if time.time() - _skip_noted.get(key, 0) < 3600:
+        return
+    _skip_noted[key] = time.time()
+    _plat_trace(plat, persona, 'skipped', f'{who}: skipped ({reason})',
+                plat.fan_key(fan_uuid))
 
 
 def _plat_round_now(plat, persona, block=False):
