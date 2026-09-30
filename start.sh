@@ -10,10 +10,13 @@
 # DISPLAY is exported only once the socket is really there. A display that fails to
 # come up leaves the app serving normally with a headless sign-in, which is worth much
 # more than a container that will not start.
-Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+# The app image has no Xvfb (no sign-in browser); only the browser image starts one.
+if command -v Xvfb >/dev/null 2>&1; then
+    Xvfb :99 -screen 0 1920x1080x24 -nolisten tcp >/dev/null 2>&1 &
+fi
 
 n=0
-while [ $n -lt 20 ]; do
+while command -v Xvfb >/dev/null 2>&1 && [ $n -lt 20 ]; do
     if [ -e /tmp/.X11-unix/X99 ]; then
         DISPLAY=:99
         export DISPLAY
@@ -23,7 +26,9 @@ while [ $n -lt 20 ]; do
     sleep 0.25
 done
 
-[ -n "$DISPLAY" ] || echo 'no display: the OnlyFans sign-in browser will be headless' >&2
+if [ -z "$DISPLAY" ] && command -v Xvfb >/dev/null 2>&1; then
+    echo 'no display: the OnlyFans sign-in browser will be headless' >&2
+fi
 
 # Threads, not workers: every request this serves is waiting on something else
 # -- Gemini, a platform's API, or, for a sign-in window, the browser service one

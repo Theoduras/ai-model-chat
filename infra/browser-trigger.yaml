@@ -34,6 +34,7 @@ includedFiles:
   - of_session.py
   - start.sh
   - Dockerfile
+  - Dockerfile.browser
   - requirements.txt
   - cloudbuild.browser.yaml
 
