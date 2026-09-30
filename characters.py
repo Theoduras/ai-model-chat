@@ -751,6 +751,11 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     if 'hair_colour' in kept and (sheet or {}).get('hair_colour_hex'):
         kept['hair_colour_hex'] = sheet['hair_colour_hex']
     frags = _fragments(kept, groups, body_type)
+    if ('body' in uses and 'breasts' not in groups and not v.get('zoom') and (sheet or {}).get('cup')
+            and _rank(level) >= _rank('moderate')):
+        # Cup size is a breasts-group word, but a clothed full-body photo has to
+        # show it too or every later nude is generated from the wrong bust.
+        frags += _fragments({'cup': sheet['cup']}, ('breasts',), body_type)
     if 'face' not in v['uses'] and (sheet or {}).get('skin_tone'):
         # Skin tone alone: the face group would also add default makeup,
         # which pulls a face into a body close-up.

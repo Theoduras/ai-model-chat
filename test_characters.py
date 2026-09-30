@@ -365,6 +365,17 @@ def test_vulva_looks():
         CH.LOOK_FILES = saved
 
 
+def test_cup_in_body_photos():
+    sheet = {'cup': 'DD', 'bust': 'Large', 'height': '165–175 cm'}
+    def prompt(key, level):
+        return CH.build_view_prompt(key, sheet, 25, True, level=level)
+    check('cup reaches body_front at moderate', 'DD-cup' in prompt('body_front', 'moderate'))
+    check('cup reaches body_back at explicit', 'DD-cup' in prompt('body_back', 'explicit'))
+    check('cup never reaches a safe-work prompt', 'DD-cup' not in prompt('body_front', 'sfw'))
+    check('cup not in face shots', 'DD-cup' not in prompt('face_front', 'explicit'))
+    check('cup not in hands close-up', 'DD-cup' not in prompt('hands', 'explicit'))
+
+
 def test_presets():
     feats = CH.features()
     body = [k for k, f in feats.items() if f[1] == 'body']
@@ -397,5 +408,6 @@ if __name__ == '__main__':
     test_content_prompts()
     test_vulva_looks()
     test_presets()
+    test_cup_in_body_photos()
     print('FAILED' if FAILURES else 'OK', len(FAILURES))
     raise SystemExit(1 if FAILURES else 0)
