@@ -293,9 +293,9 @@ Stay completely in character. Never mention being an AI.
   the creator picks her identity from the character build (safe-work views
   only) or the vault references, and it then runs on a model in
   `imagegen.REFERENCE_VIDEO_MODELS`. An uploaded video makes it a replace —
-  `p-video-replace` by default, `p-video-animate` to regenerate her in its
-  motion. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and P-Video-Animate
-  were added from Runware's public docs, prices included, **not** its live
+  `p-video-replace` by default (P-Video-Animate was removed: its safety check
+  crashes the provider worker). Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and
+  Kling 3.0 Omni were added from Runware's public docs, prices included, **not** its live
   catalogue: confirm them with `imagegen.search_models` once a key is reachable.
   A safe-work **Swap** defaults to Kling motion control (2.6 Pro, 3.0 Pro
   selectable, same docs-only caveat): her one full-body photo performs the

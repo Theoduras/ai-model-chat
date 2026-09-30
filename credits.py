@@ -93,7 +93,6 @@ VIDEO_COST_USD_PER_SECOND = {
     # Runware's published list prices, unmeasured. A rung a model does not
     # serve carries its dearest real one: video_size snaps it to a rung it
     # does serve, and the quote must never have been below that.
-    'p-video-animate': {'480p': 0.06, '720p': 0.03, '1080p': 0.06},
     'seedance-2-0': {'480p': 0.07, '720p': 0.16, '1080p': 0.40},
     'seedance-2-0-fast': {'480p': 0.06, '720p': 0.13, '1080p': 0.13},
     'minimax-h3': {'480p': 0.13, '720p': 0.08, '1080p': 0.13},
@@ -102,6 +101,7 @@ VIDEO_COST_USD_PER_SECOND = {
     # Kling motion control runs at 1080p only; every rung snaps there.
     'kling-2-6-mc': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
     'kling-3-0-mc': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
+    'kling-3-0-omni': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -227,7 +227,6 @@ MODEL_LABELS = {
     'seedance-2-5': 'Seedance 2.5',
     'p-video-replace': 'Replace her in the clip',
     'ml-face-swap': 'Replace her in the clip — explicit',
-    'p-video-animate': 'Her photo performs the clip',
     'seedance-2-0': 'Seedance 2.0',
     'seedance-2-0-fast': 'Seedance 2.0 Fast',
     'minimax-h3': 'MiniMax H3',
@@ -235,6 +234,7 @@ MODEL_LABELS = {
     'wan-3-0': 'Wan 3.0',
     'kling-2-6-mc': 'Kling 2.6 motion control',
     'kling-3-0-mc': 'Kling 3.0 motion control',
+    'kling-3-0-omni': 'Kling 3.0 Omni edit',
 }
 
 # Which ratings each model actually serves, measured against the provider rather
@@ -263,7 +263,6 @@ VIDEO_MODEL_RATINGS = {
     # module raised it. The crash is the refusal, so this model is safe work.
     'p-video-replace': ('sfw',),
     # Mainstream moderated providers, never probed explicit.
-    'p-video-animate': ('sfw',),
     'seedance-2-0': ('sfw',),
     'seedance-2-0-fast': ('sfw',),
     'minimax-h3': ('sfw',),
@@ -271,6 +270,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-3-0': ('sfw',),
     'kling-2-6-mc': ('sfw',),
     'kling-3-0-mc': ('sfw',),
+    'kling-3-0-omni': ('sfw',),
     # ModelsLab's face swap, not Runware -- an uncensored provider running an
     # actual swap rather than a regeneration. Runware carries no explicit
     # replace model at all (confirmed against its own catalogue), so this is the

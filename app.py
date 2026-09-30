@@ -30763,6 +30763,7 @@ def _gen_spec(slug, body, user):
         'expression': (body.get('expression') or '').strip().lower(),
         'smudges': bool(body.get('smudges')),
         'outfit_ref': _studio_outfit(slug, body.get('outfit_ref')) and str(body['outfit_ref']),
+        'place': (body.get('place') or '').strip()[:200],
         'location_ref': (_studio_location(slug, body.get('location_ref'))
                          and str(body['location_ref'])),
         'zoom': (body.get('zoom') or '').strip().lower(),
@@ -30951,11 +30952,10 @@ def _gen_spec(slug, body, user):
             if not src:
                 raise imagegen.GenerationError(
                     'That motion clip is no longer there. Upload it again.')
-            # Wan 2.7 and P-Video-Animate take a reference video as motion
-            # guidance while still conditioning on her photo, which is what
-            # this job needs -- a true replace takes no motion guidance.
-            if model != 'p-video-animate':
-                model = CR.VIDEO_EDIT_MODEL
+            # Wan 2.7 takes a reference video as motion guidance while still
+            # conditioning on her photo, which is what this job needs -- a
+            # true replace takes no motion guidance.
+            model = CR.VIDEO_EDIT_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
@@ -30993,10 +30993,9 @@ def _gen_spec(slug, body, user):
                  'motion': (body.get('motion') or '')[:300]})
     return spec
 
-# Under staging/ deliberately: that is the one prefix both the GCS
-# lifecycle rule and the Blob purge already sweep, so an uploaded clip
-# expires in three days without a second cleanup path to forget.
-VIDEO_SOURCE_PREFIX = 'staging/video-source'
+# Under kept/, outside the three-day staging sweep: an uploaded clip is listed
+# in the studio for reuse and goes only when its creator deletes it.
+VIDEO_SOURCE_PREFIX = 'kept/video-source'
 VIDEO_SOURCE_MAX_BYTES = 200 * 1024 * 1024
 
 
@@ -31163,8 +31162,8 @@ def api_persona_video_source(slug):
     never a path or a URL: the job API takes the id and reads the duration it
     prices from the row, so nothing a caller sends can decide what a swap costs.
 
-    The bytes go to staging so the existing three-day sweep clears them. An
-    uploaded clip is working material, not vault media.
+    The bytes go under kept/ and stay until deleted (see the list route), so a
+    clip can be reused. It is working material, not vault media.
     """
     blocked = _require_admin()
     if blocked:
@@ -31272,6 +31271,63 @@ def api_persona_video_source(slug):
                     'url': storage.signed_url(path) or '',
                     'poster_url': (storage.signed_url(poster_path) or '')
                                   if poster_path else ''})
+
+
+@app.route('/api/personas/<slug>/video-sources', methods=['GET'])
+def api_persona_video_sources(slug):
+    """The clips this persona has uploaded, newest first, for reuse."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or (mine is not None and slug not in mine):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        rows = (s.query(VideoSource).filter_by(slug=slug)
+                .order_by(VideoSource.created_at.desc()).limit(60).all())
+        out = []
+        for r in rows:
+            try:
+                url = storage.signed_url(r.gcs_path) or ''
+                poster = (storage.signed_url(r.poster_gcs_path) or '') if r.poster_gcs_path else ''
+            except Exception:
+                url = poster = ''
+            out.append({'id': r.id, 'source': r.id, 'seconds': int(r.seconds or 0),
+                        'width': int(r.width or 0), 'height': int(r.height or 0),
+                        'resolution': _video_rung(int(r.height or 0), int(r.width or 0)),
+                        'url': url, 'poster_url': poster})
+        return jsonify({'ok': True, 'sources': out})
+    finally:
+        s.close()
+
+
+@app.route('/api/personas/<slug>/video-sources/<source_id>', methods=['DELETE'])
+def api_persona_video_source_delete(slug, source_id):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', slug or '') or (mine is not None and slug not in mine):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    from db import SessionLocal, VideoSource
+    s = SessionLocal()
+    try:
+        row = s.query(VideoSource).filter_by(id=source_id, slug=slug).first()
+        if not row:
+            return jsonify({'ok': False, 'error': 'Not found'}), 404
+        for path in (row.gcs_path, row.poster_gcs_path):
+            if path:
+                try:
+                    storage.delete(path)
+                except Exception:
+                    logger.warning('video source object not deleted: %s', path)
+        s.delete(row)
+        s.commit()
+        return jsonify({'ok': True})
+    finally:
+        s.close()
 
 
 def _video_source_row(slug, source_id):
@@ -33342,15 +33398,32 @@ def _gen_start(job_id, slug, spec, workspace):
                                 job_id, len(refs), role or 'face+body', ref_model)
                     if refs and imagegen.wants_body_only(spec.get('model')):
                         refs = [imagegen.fit_reference(refs[0])]
-                    refs = refs[:imagegen.ref_cap(spec.get('model'))]
-                    if imagegen.locks_identity(spec.get('model')):
-                        call['prompt'] = imagegen.build_swap_prompt(
-                            motion if job == 'swap'
-                            else (spec.get('prompt_extra') or motion),
-                            preserve=imagegen.preserves_source(
-                                'swap', spec.get('model')),
-                            roles=(roles or [])[:len(refs)]
-                            if roles and len(roles) >= len(refs) else [])
+                    cap = imagegen.ref_cap(spec.get('model'))
+                    roles = (roles or [])[:len(refs)]
+                    roles = roles + ['other'] * (len(refs) - len(roles))
+                    extras = []
+                    if cap > 1 and not imagegen.wants_body_only(spec.get('model')):
+                        for kind_, row_ in (
+                                ('outfit', _studio_outfit(slug, spec.get('outfit_ref'))),
+                                ('location', _studio_location(slug, spec.get('location_ref')))):
+                            url_ = row_ and _char_path_url(row_.gcs_path, 'image/jpeg')
+                            if url_:
+                                extras.append((kind_, url_))
+                    keep = max(1, cap - len(extras))
+                    refs, roles = refs[:keep], roles[:keep]
+                    for kind_, url_ in extras[:cap - len(refs)]:
+                        refs.append(url_)
+                        roles.append(kind_)
+                    refs = refs[:cap]
+                    call['prompt'] = imagegen.build_swap_prompt(
+                        motion if job == 'swap'
+                        else (spec.get('prompt_extra') or motion),
+                        preserve=imagegen.preserves_source(
+                            'swap', spec.get('model')),
+                        roles=roles if imagegen.locks_identity(
+                            spec.get('model')) else None,
+                        place=spec.get('place') or '',
+                        at_images=imagegen.uses_at_images(spec.get('model')))
                     if refs:
                         call['reference_urls'] = refs
                 provider_job, result = provider.submit_video(call)

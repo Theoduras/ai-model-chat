@@ -455,18 +455,28 @@
           </select></label>
         <div class="gen-f" id="gen-swap-cvpick-row"><span class="gen-refcap-lbl">Character view (up to 3)</span>
           <div class="anim-strip" id="gen-swap-cvpick"></div>
-          <span class="hint">Kling uses only the first. A clothed view
+          <span class="hint gen-kling-hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-swap-idpick-row"><span class="gen-refcap-lbl">Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-swap-idpick"></div></div>
-        <div class="gen-f"><span>Upload</span>
-          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
+        <div class="gen-f"><span>Your clips</span>
+          <div class="gen-outfits gen-cliplib" data-into="swap"></div>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Upload a clip
           <input type="file" id="gen-swap-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0])"></label></div>
         <div id="gen-swap-have" class="gen-stackform" style="display:none">
           <video id="gen-swap-player" controls muted playsinline
                  class="gen-clip"></video>
           <span class="hint" id="gen-swap-meta"></span>
+        </div>
+        <div class="gen-clip-extras" style="display:none">
+          <label class="gen-f"><span>Change the place (optional)</span>
+            <input type="text" class="gen-clip-place" maxlength="200"
+                   placeholder="a rooftop bar at night, neon on wet concrete"></label>
+          <div class="gen-f gen-clip-photos"><span>Outfit photo</span>
+            <div class="gen-outfits gen-clip-outfits"></div></div>
+          <div class="gen-f gen-clip-photos"><span>Location photo</span>
+            <div class="gen-outfits gen-clip-locations"></div></div>
         </div>
         <label class="gen-f"><span id="gen-swap-motion-label">Motion</span>
           <input type="text" id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
@@ -488,7 +498,7 @@
         <label class="gen-f"><span>What happens in it</span>
           <textarea id="gen-reel-prompt" rows="4" maxlength="2000"
             placeholder="she walks through a night market, neon signs behind her, looking back once"></textarea></label>
-        <div class="gen-f"><span>Start from a photo (optional)</span>
+        <div class="gen-f" id="gen-reel-photo-row"><span>Start from a photo (optional)</span>
           <div class="anim-strip" id="gen-reel-photo"></div>
           <span class="hint">A reel may run from the words alone.
             With her photos it shows her, and a photo is the person she
@@ -500,7 +510,7 @@
           </select></label>
         <div class="gen-f" id="gen-reel-cvpick-row"><span class="gen-refcap-lbl">Character view (up to 3)</span>
           <div class="anim-strip" id="gen-reel-cvpick"></div>
-          <span class="hint">Kling uses only the first. A clothed view
+          <span class="hint gen-kling-hint">Kling uses only the first. A clothed view
             passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span class="gen-refcap-lbl">Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
@@ -532,9 +542,21 @@
 
       <div id="gen-video-drive" class="gen-stackform" style="display:none">
         <div class="gen-f"><span id="gen-drive-label">Motion clip (optional)</span>
-          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Choose a clip
+          <div class="gen-outfits gen-cliplib" data-into="drive"></div>
+          <label class="btn btn-ghost btn-sm gen-file" style="align-self:flex-start;">Upload a clip
           <input type="file" id="gen-drive-file" accept="video/mp4,video/quicktime"
                  onchange="uploadSwapSource(this.files[0], 'drive')"></label></div>
+        <video id="gen-drive-player" controls muted playsinline class="gen-clip" style="display:none"></video>
+        <div class="gen-clip-extras" style="display:none">
+          <label class="gen-f"><span>Change the place (optional)</span>
+            <input type="text" class="gen-clip-place" maxlength="200"
+                   placeholder="a rooftop bar at night, neon on wet concrete"></label>
+          <div class="gen-f gen-clip-photos"><span>Outfit photo</span>
+            <div class="gen-outfits gen-clip-outfits"></div></div>
+          <div class="gen-f gen-clip-photos"><span>Location photo</span>
+            <div class="gen-outfits gen-clip-locations"></div></div>
+        </div>
+
         <span class="hint" id="gen-drive-note">Upload a clip and
           her photo performs its motion instead of being animated freely. The clip
           only supplies movement — it is never shown to a fan.</span>
@@ -582,7 +604,7 @@
           <div class="gen-chips" id="gen-aspects"></div>
           <span class="hint" id="gen-aspect-note"></span>
         </div>
-        <div class="gen-f"><span>Sound</span>
+        <div class="gen-f" id="gen-audio-row"><span>Sound</span>
           <div class="gen-chips" id="gen-audio-modes"></div>
           <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
                  oninput="genQuote()"
@@ -876,6 +898,7 @@ function renderOutfits() {
         onclick="event.stopPropagation(); deleteOutfit('${o.id}')">&times;</button>
     </span>`).join('') +
     `<button type="button" class="gen-outfit-add" onclick="el('gen-outfit-file').click()">+ Upload</button>`;
+  document.querySelectorAll('.gen-clip-outfits').forEach(b => { b.innerHTML = el('gen-outfits').innerHTML; });
 }
 
 function renderPhoneSeg() {
@@ -948,6 +971,7 @@ function renderLocations() {
         onclick="event.stopPropagation(); deleteLocation('${o.id}')">&times;</button>
     </span>`).join('') +
     `<button type="button" class="gen-outfit-add" onclick="el('gen-location-file').click()">+ Upload</button>`;
+  document.querySelectorAll('.gen-clip-locations').forEach(b => { b.innerHTML = el('gen-locations').innerHTML; });
   el('gen-scene').disabled = !!genLocation;
   el('gen-location-note').textContent = genLocation
     ? 'Using your photo of the place — “Where is she” is off while it is picked.'
@@ -997,10 +1021,89 @@ async function deleteLocation(id) {
   refreshShot();
 }
 
+
+// Clips she has uploaded, kept for reuse, and the photos that go with them.
+let genClips = [];
+
+async function loadClips() {
+  if (!slug()) return;
+  try {
+    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources')).json();
+    genClips = d.sources || [];
+  } catch (e) { genClips = []; }
+  renderClipLib();
+}
+
+function renderClipLib() {
+  document.querySelectorAll('.gen-cliplib').forEach(box => {
+    const into = box.dataset.into;
+    const cur = (into === 'drive' ? genDrive : genSwap) || {};
+    box.innerHTML = genClips.map(c => `
+      <span class="gen-outfit" role="button" tabindex="0" aria-pressed="${c.id === cur.id}"
+            title="${c.seconds}s, ${c.resolution}" onclick="pickClip('${c.id}', '${into}')">
+        ${c.poster_url ? `<img src="${esc(c.poster_url)}" alt="Clip">` : ''}
+        <b style="position:absolute;left:3px;bottom:3px;font-size:11px;background:#000a;padding:0 4px;border-radius:4px">${c.seconds}s</b>
+        <button type="button" class="x" aria-label="Delete clip"
+          onclick="event.stopPropagation(); deleteClip('${c.id}')">&times;</button>
+      </span>`).join('') || '<span class="hint">No clips yet.</span>';
+  });
+}
+
+function pickClip(id, into) {
+  const c = genClips.find(x => x.id === id);
+  if (!c) return;
+  const on = ((into === 'drive' ? genDrive : genSwap) || {}).id === id;
+  if (into === 'drive') genDrive = on ? null : c; else genSwap = on ? null : c;
+  renderGenForm();
+}
+
+async function deleteClip(id) {
+  await fetch('/api/personas/' + encodeURIComponent(slug()) + '/video-sources/' + id, { method: 'DELETE' });
+  if ((genDrive || {}).id === id) genDrive = null;
+  if ((genSwap || {}).id === id) genSwap = null;
+  await loadClips();
+  renderGenForm();
+}
+
+// Extra photos and a place only where the running model can use them.
+function syncClipExtras() {
+  const swap = genJob === 'swap';
+  const has = swap ? !!genSwap : (genJob === 'reel' && !!genDrive);
+  const m = engineModel();
+  const photos = has && refCap() > 1 && !KLING_MC.includes(m);
+  document.querySelectorAll('.gen-clip-extras').forEach(box => {
+    const mine = box.closest('#gen-swap-form') ? swap : !swap;
+    box.style.display = has && mine ? '' : 'none';
+    box.querySelectorAll('.gen-clip-photos').forEach(r => { r.style.display = photos ? '' : 'none'; });
+  });
+  const kling = m.startsWith('kling-');
+  document.querySelectorAll('.gen-kling-hint').forEach(h => { h.style.display = KLING_MC.includes(m) ? '' : 'none'; });
+  const startRow = el('gen-reel-photo-row');
+  if (startRow) startRow.style.display = genDrive ? 'none' : '';
+  const pl = el('gen-drive-player');
+  if (pl) {
+    pl.style.display = genDrive && genJob !== 'swap' ? '' : 'none';
+    if (genDrive && pl.src !== genDrive.url) pl.src = genDrive.url || '';
+  }
+  renderClipLib();
+}
+
+function clipExtrasPayload() {
+  const swap = genJob === 'swap';
+  const box = document.querySelector(swap ? '#gen-swap-form .gen-clip-extras' : '#gen-video-drive .gen-clip-extras');
+  const shown = box && box.style.display !== 'none';
+  const photos = shown && refCap() > 1 && !KLING_MC.includes(engineModel());
+  return {
+    place: shown ? (box.querySelector('.gen-clip-place').value || '').trim() : '',
+    outfit_ref: photos ? genOutfit : '', location_ref: photos ? genLocation : '',
+  };
+}
+
 async function loadPersona() {
   if (!slug()) return;
   loadOutfits();
   loadLocations();
+  loadClips();
   genIdentityTouched = false;
   try {
     const d = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
@@ -1126,7 +1229,14 @@ function videoModels() {
   }
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const rt = (genPrices && genPrices.video_ratings) || {};
-  const serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
+  let serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
+  if (genJob === 'reel') {
+    // Only what can run with what is set up: a clip-only model needs a clip,
+    // and a clip takes only the models that use one.
+    const ok = m => genDrive ? (CLIP_MODELS.includes(m) || m === 'wan-2-7')
+      : !CLIP_MODELS.includes(m) && (!reelChar() || REF_VIDEO_MODELS.includes(m));
+    serves = serves.filter(ok);
+  }
   return serves.length ? serves : list;
 }
 
@@ -1506,6 +1616,7 @@ function renderGenForm() {
   el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
   syncIdentity();
   syncSwapKling();
+  syncClipExtras();
   el('gen-drive-label').textContent = genJob === 'reel'
     ? 'Video to put her in (optional)' : 'Motion clip (optional)';
   renderAspects();
@@ -1600,7 +1711,13 @@ function renderImageRes() {
 // in front of one of those is a control that changes nothing, which reads as a
 // promise the clip will not keep.
 function aspectModel() {
-  return genMake === 'swap' ? swapModel() : videoModel();
+  return genMake === 'swap' ? swapModel()
+    : genJob === 'reel' ? videoModelNow() : videoModel();
+}
+
+// The model this form will actually run, after the server's own moves.
+function engineModel() {
+  return genJob === 'swap' ? swapModel() : genJob === 'reel' ? videoModelNow() : videoModel();
 }
 
 function aspectOffered() {
@@ -1684,6 +1801,8 @@ function renderAudioModes() {
   const note = el('gen-audio-note');
   const field = el('gen-audio-prompt');
   if (!box || !genPrices) return;
+  const rowA = el('gen-audio-row');
+  if (rowA) rowA.style.display = soundOffered() ? '' : 'none';
   const modes = genPrices.audio_modes || [];
   box.innerHTML = [''].concat(modes).map(m =>
     `<button type="button" class="gen-chip" aria-pressed="${m === (genAudio.mode || '')}"
@@ -1706,8 +1825,15 @@ function pickAudio(mode) {
   renderGenForm();
 }
 
+// A model that replaces the person in a clip, or moves her by it, only keeps
+// or drops the clip's own sound; there is nothing to generate.
+function soundOffered() {
+  const m = engineModel();
+  return !CLIP_MODELS.includes(m) && !(genDrive && genJob === 'reel');
+}
+
 function audioPayload() {
-  if (!genAudio.mode) return null;
+  if (!genAudio.mode || !soundOffered()) return null;
   return { mode: genAudio.mode, prompt: (el('gen-audio-prompt') || {}).value || '' };
 }
 
@@ -1881,7 +2007,7 @@ function swapModel() {
 function syncSwapKling() {
   const kling = genJob === 'swap' && swapModel().startsWith('kling-');
   el('gen-swap-kling').style.display = kling ? 'flex' : 'none';
-  el('gen-swap-sound-row').style.display = swapModel() === 'kling-2-6-mc' ? 'flex' : 'none';
+  el('gen-swap-sound-row').style.display = KLING_MC.includes(swapModel()) ? 'flex' : 'none';
   el('gen-swap-motion-label').textContent = kling ? 'Scene and look (optional)' : 'Motion';
   el('gen-swap-motion').placeholder = kling
     ? 'same room, soft daylight, she smiles at the end'
@@ -2005,7 +2131,8 @@ function swapTakesDuration() {
 // a reel onto one of these before quoting, so the price shown follows it.
 const REF_VIDEO_MODELS = ['wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
-const CLIP_MODELS = ['p-video-replace', 'p-video-animate', 'kling-3-0-mc', 'kling-2-6-mc'];
+const KLING_MC = ['kling-3-0-mc', 'kling-2-6-mc'];
+const CLIP_MODELS = ['p-video-replace', 'kling-3-0-omni'].concat(KLING_MC);
 
 // How many of her photos the running model takes (imagegen.ref_cap).
 function refCap() {
@@ -2081,7 +2208,6 @@ function videoModelNow() {
     if (reelChar() && !REF_VIDEO_MODELS.includes(m)) return 'wan-2-7';
     return m;
   }
-  if (genJob === 'animate' && genDrive && videoModel() === 'p-video-animate') return 'p-video-animate';
   return genDrive ? ((genPrices && genPrices.explicit_swap_model) || videoModel())
                   : videoModel();
 }
@@ -2113,7 +2239,7 @@ function renderSwapForm() {
   el('gen-swap-limits').textContent =
     `Up to ${SWAP_LIMITS.mb} MB and ${swapMaxSeconds()} seconds, as MP4 or MOV. ` +
     'Her face comes from the reference slots above, so there is nothing to pick here. ' +
-    'The clip you upload is working material: it is swept after three days and never reaches a fan.';
+    'Uploaded clips are kept for reuse until you delete them, and never reach a fan.';
   const have = el('gen-swap-have');
   have.style.display = genSwap ? 'flex' : 'none';
   if (!genSwap) return;
@@ -2540,7 +2666,7 @@ async function jobPayload() {
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
       keep_sound: el('gen-swap-sound').checked,
-    });
+    }, clipExtrasPayload());
   }
   const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
   Object.assign(base, { resolution: resv, seconds: videoSecondsNow() });
@@ -2552,7 +2678,7 @@ async function jobPayload() {
       identity: identityOf('reel'),
       identity_media: identityOf('reel') === 'vault' ? genIdPick : [],
       character_views: identityOf('reel') === 'character' ? genCvPick : [],
-    });
+    }, clipExtrasPayload());
   }
   if (genJob === 'multiref') {
     return Object.assign(base, {

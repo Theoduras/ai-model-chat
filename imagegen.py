@@ -95,7 +95,6 @@ RUNWARE_VIDEO_MODELS = {
                                  'prunaai:p-video@replace'),
     # Read off Runware's public model pages, not its live catalogue -- confirm
     # with search_models() before trusting one in production.
-    'p-video-animate': os.getenv('RW_MODEL_VIDEO_ANIMATE', 'prunaai:p-video@animate'),
     'seedance-2-0': os.getenv('RW_MODEL_SEEDANCE_20', 'bytedance:seedance@2.0'),
     'seedance-2-0-fast': os.getenv('RW_MODEL_SEEDANCE_20_FAST',
                                    'bytedance:seedance@2.0-fast'),
@@ -105,6 +104,9 @@ RUNWARE_VIDEO_MODELS = {
     # Kling motion control: her one photo performs the uploaded clip.
     'kling-2-6-mc': os.getenv('RW_MODEL_KLING_26_MC', 'klingai:kling-video@2.6-pro'),
     'kling-3-0-mc': os.getenv('RW_MODEL_KLING_30_MC', 'klingai:kling-video@3-pro'),
+    # Video edit: the clip and up to four photos, addressed in the prompt as
+    # @Image1.. Id and fields are from public docs, not the live catalogue.
+    'kling-3-0-omni': os.getenv('RW_MODEL_KLING_30_OMNI', 'klingai:kling-video@3-omni-pro'),
 }
 KLING_MOTION_MODELS = ('kling-2-6-mc', 'kling-3-0-mc')
 # The safe-work models that take her photos as `inputs.referenceImages` beside
@@ -115,7 +117,7 @@ REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
 # round trip carrying every reference photo before `_send` strips it.
 NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
 # Models that only work on a clip the creator uploaded.
-CLIP_ONLY_MODELS = ('p-video-replace', 'p-video-animate')
+CLIP_ONLY_MODELS = ('p-video-replace',)
 DEFAULT_VIDEO_MODEL = 'wan-2-5'
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -147,19 +149,19 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
     'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                        'p-video-replace', 'p-video-animate',
-                        'kling-3-0-mc', 'kling-2-6-mc'), 'needs': (),
+                        'p-video-replace',
+                        'kling-3-0-mc', 'kling-2-6-mc', 'kling-3-0-omni'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
     'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc', 'p-video-replace',
-                        'ml-face-swap', 'wan-2-7'),
+                        'ml-face-swap', 'wan-2-7', 'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
-    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                           'p-video-animate'), 'needs': ('first_frame',),
+    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0'),
+                'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
                 'note': 'An approved still becomes a clip.'},
@@ -267,15 +269,11 @@ MODEL_VIDEO_FIELDS = {
     'wan-2-7': {'shape': os.getenv('RW_VIDEO_SHAPE', 'inputs'),
                 'source': os.getenv('RW_VIDEO_SOURCE_FIELD', 'inputVideo'),
                 'refs': os.getenv('RW_VIDEO_REF_FIELD', 'referenceImages')},
-    # Her photo performs the uploaded clip's motion: both go in as references,
-    # and like the replace it runs the clip's own length at a named rung.
-    'p-video-animate': {'shape': 'replace', 'in_source': 'referenceVideos',
-                        'in_refs': 'referenceImages'},
     **{m: {'shape': 'motion', 'in_source': 'referenceVideos',
            'in_refs': 'referenceImages'} for m in ('kling-2-6-mc', 'kling-3-0-mc')},
     **{m: {'shape': 'inputs', 'source': 'inputVideo', 'refs': 'referenceImages'}
        for m in ('seedance-2-0', 'seedance-2-0-fast', 'minimax-h3',
-                 'minimax-h3-fast', 'wan-3-0')},
+                 'minimax-h3-fast', 'wan-3-0', 'kling-3-0-omni')},
 }
 
 # referenceImages takes up to 30 and referenceVideos up to 10, nested.
@@ -289,7 +287,6 @@ MAX_VIDEO_REFERENCES = 30
 # the provider charges for it.
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
-    'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
 }
 
 
@@ -445,7 +442,7 @@ MODEL_VIDEO_SIZES = {
                    (2560, 1440), (1920, 1440), (1440, 1440), (1440, 1920),
                    (1440, 2560)),
     **{m: ((1920, 1080), (1080, 1920), (1440, 1440))
-       for m in ('kling-2-6-mc', 'kling-3-0-mc')},
+       for m in ('kling-2-6-mc', 'kling-3-0-mc', 'kling-3-0-omni')},
     'minimax-h3-fast': ((864, 480), (640, 480), (480, 480), (480, 640), (480, 864)),
 }
 
@@ -481,7 +478,6 @@ MODEL_VIDEO_SECONDS = {
     # The source clip's own length, whatever it is: this model is never told a
     # duration, so nothing here may shorten what it will be billed for.
     'p-video-replace': (1, 60),
-    'p-video-animate': (1, 60),
     'seedance-2-0': (4, 15),
     'seedance-2-0-fast': (4, 15),
     'minimax-h3': (4, 15),
@@ -489,6 +485,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-3-0': (2, 15),
     'kling-2-6-mc': (1, 60),
     'kling-3-0-mc': (1, 60),
+    'kling-3-0-omni': (3, 15),
 }
 
 
@@ -519,7 +516,8 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5}
+MODEL_REF_CAP = {'kling-2-6-mc': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+                 'kling-3-0-omni': 4}
 
 # The studio offers a handful of her views, not thirty, so a model that takes
 # that many is still asked for the few a creator would actually tick.
@@ -1149,7 +1147,8 @@ IDENTITY_CLAUSE = (
     'beautify, slim, smooth, age or restyle her, and do not add, remove or '
     'alter any feature or body part. Keep the clothing from the video.')
 
-_ROLE_SAID = {'face': 'shows her face', 'body': 'shows her full body'}
+_ROLE_SAID = {'face': 'shows her face', 'body': 'shows her full body',
+              'outfit': 'shows her outfit', 'location': 'shows the location'}
 
 
 def locks_identity(model_key):
@@ -1159,18 +1158,24 @@ def locks_identity(model_key):
     return model_key not in KLING_MOTION_MODELS and model_key != EXPLICIT_SWAP_MODEL
 
 
-def _roles_sentence(roles):
+def uses_at_images(model_key):
+    return model_key == 'kling-3-0-omni'
+
+
+def _roles_sentence(roles, at_images=False):
     """Which reference image is which, by position: the payload has no other way
     to tell a model that one photograph is her face and another her body."""
     if not roles:
         return ''
-    parts = [f'reference image {n} ' + _ROLE_SAID.get(role, 'is another view of her')
+    name = '@Image{n}' if at_images else 'reference image {n}'
+    parts = [name.format(n=n) + ' ' + _ROLE_SAID.get(role, 'is another view of her')
              for n, role in enumerate(roles, 1)]
     text = '; '.join(parts)
-    return text[0].upper() + text[1:] + '. All of them are the same woman.'
+    return text[0].upper() + text[1:] + '. All the images of her are the same woman.'
 
 
-def build_swap_prompt(motion='', preserve=False, roles=None):
+def build_swap_prompt(motion='', preserve=False, roles=None, place='',
+                      at_images=False):
     """Instruction text for an edit, not for a still coming to life: the model
     is being told whose face to carry over, and what to leave alone.
 
@@ -1185,10 +1190,19 @@ def build_swap_prompt(motion='', preserve=False, roles=None):
             'reference images, keeping her face and body consistent with them. '
             'Keep the original motion, framing, pacing and lighting exactly as '
             'they are in the video.')
+    new_place = bool(place.strip()) or 'location' in (roles or [])
+    if new_place:
+        base = base.replace(
+            'Keep the original motion, framing, pacing and lighting exactly as '
+            'they are in the video.',
+            'Keep the original motion, timing and camera movement exactly as '
+            'they are in the video, but set the scene in a different place.')
+        if place.strip():
+            base += f' Set in: {place.strip()}.'
     if roles is not None:
         base = ' '.join(part for part in (base, IDENTITY_CLAUSE,
-                                          _roles_sentence(roles)) if part)
-    if preserve:
+                                          _roles_sentence(roles, at_images)) if part)
+    if preserve and not new_place:
         base = base + ' ' + PRESERVE_CLAUSE
     return (base + ' ' + motion.strip()) if motion.strip() else base
 
@@ -1467,6 +1481,9 @@ def _strip_param(tasks, key):
     for task in tasks:
         if task.pop(key, None) is not None:
             gone = True
+        for provider in (task.get('providerSettings') or {}).values():
+            if isinstance(provider, dict) and provider.pop(key, None) is not None:
+                gone = True
         inputs = task.get('inputs')
         if not isinstance(inputs, dict):
             continue
@@ -1621,9 +1638,10 @@ class RunwareProvider(Provider):
             # the scene. A duration, a size or a negative prompt is refused.
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
-            kling = {'characterOrientation': spec.get('orientation') or 'video'}
-            if model_key == 'kling-2-6-mc':
-                kling['keepOriginalSound'] = spec.get('keep_sound', True) is not False
+            kling = {'characterOrientation': spec.get('orientation') or 'video',
+                     'keepOriginalSound': spec.get('keep_sound', True) is not False}
+            if spec.get('place') or spec.get('location_ref'):
+                kling['backgroundSource'] = 'input_image'
             task['providerSettings'] = {'klingai': kling}
         elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as

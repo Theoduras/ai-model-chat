@@ -522,6 +522,61 @@ def test_swap_identity():
           == ['body_front'])
 
 
+def test_clip_library_and_places():
+    print('clip library and places')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    IG = A.imagegen
+    check('clips are stored outside the staging sweep',
+          A.VIDEO_SOURCE_PREFIX.startswith('kept/'))
+    check('the animate model is gone',
+          all('p-video-animate' not in m for m in CR.JOB_MODELS.values())
+          and 'p-video-animate' not in CR.VIDEO_PRICES
+          and 'p-video-animate' not in IG.RUNWARE_VIDEO_MODELS)
+    check('Omni is a swap and reel option, not the default',
+          'kling-3-0-omni' in CR.JOB_MODELS['swap'] and CR.DEFAULT_SWAP_MODEL != 'kling-3-0-omni'
+          and IG.ref_cap('kling-3-0-omni') == 4)
+    p = IG.build_swap_prompt('x', preserve=True, roles=['face', 'body', 'location'],
+                             place='a rooftop bar')
+    check('a place drops the keep-the-background wording',
+          IG.PRESERVE_CLAUSE not in p and 'Set in: a rooftop bar.' in p
+          and 'shows the location' in p and 'lighting exactly' not in p)
+    check('no place keeps it', IG.PRESERVE_CLAUSE in IG.build_swap_prompt('x', preserve=True))
+    check('Omni names images with @', '@Image1' in IG.build_swap_prompt(
+        '', roles=['face'], at_images=True))
+    sent = []
+    real = IG._post
+    IG._post = lambda url, payload, headers, timeout=IG.TIMEOUT: (
+        sent.append(payload[1]) or {'data': [{'videoURL': 'https://example.test/c.mp4'}]})
+    try:
+        prov = IG.RunwareProvider(key='test')
+        base = {'job': 'swap', 'model': 'kling-3-0-mc', 'source_url': 'https://x/c.mp4',
+                'reference_urls': ['data:image/png;base64,AAAA']}
+        prov.submit_video(dict(base))
+        kling = sent[-1]['providerSettings']['klingai']
+        check('Kling 3.0 keeps the clip sound', kling.get('keepOriginalSound') is True)
+        check('no background choice without a place', 'backgroundSource' not in kling)
+        prov.submit_video(dict(base, place='a beach'))
+        check('a place takes the background from her photo',
+              sent[-1]['providerSettings']['klingai'].get('backgroundSource') == 'input_image')
+        calls = []
+
+        def refuse(url, payload, headers, timeout=IG.TIMEOUT):
+            t = payload[1]
+            calls.append(t)
+            if 'backgroundSource' in t.get('providerSettings', {}).get('klingai', {}):
+                return {'errors': [{'message': "Unsupported use of 'backgroundSource' parameter."}]}
+            return {'data': [{'videoURL': 'https://example.test/c.mp4'}]}
+
+        IG._post = refuse
+        prov.submit_video(dict(base, place='a beach'))
+        check('a refused provider setting is dropped and resent',
+              len(calls) == 2 and 'backgroundSource' not in
+              calls[-1]['providerSettings']['klingai'])
+    finally:
+        IG._post = real
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -529,7 +584,7 @@ if __name__ == '__main__':
                test_ledger, test_equivalents,
                test_stripe_minimums, test_test_pack_is_not_for_sale,
                test_video_negative_prompt, test_video_prompt_is_not_cut,
-               test_swap_identity):
+               test_swap_identity, test_clip_library_and_places):
         fn()
     print()
     if FAILURES:
