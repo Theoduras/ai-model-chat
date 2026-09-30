@@ -217,6 +217,22 @@ Stay completely in character. Never mention being an AI.
   either host. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
   they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+- **Free is the content-creation plan: characters, the studio and token
+  top-ups, nothing chatbot.** Its `chatbot` capability is False (True on every
+  other plan, admins and grandfathered accounts included) and `personas` is 0.
+  `_require_entitlement` refuses chatbot work for it — persona writes, the
+  planner, share link and the Discord/Instagram/TikTok/Reddit/growth surfaces in
+  `_CHATBOT_PREFIXES` — with a 402 carrying `free: true` (the upgrade offer) or,
+  for a page, a redirect to `/pricing`. The dashboard shows those rows greyed
+  with a "Subscribers only" label and opens the studio as home. It keeps its 15
+  one-time tokens and can buy packs.
+- **Characters are unlimited on every plan; personas are what a plan limits.**
+  A character's own persona is a hidden `studio_only` home (`_CHAR_HOME`),
+  skipped by `_persona_count` and the persona lists (except `?studio=1`), so it
+  never uses a persona slot. `/api/characters/<id>/studio` with `{persona: true}`
+  turns it into a real persona and is the step `_persona_cap_blocked` guards;
+  `/link` moves the content onto an existing persona and drops the home.
+  `_char_json` reports `persona` as '' while a character has only its home.
 - **Generation and characters are open to every active plan; video is not.**
   `/studio`, `/characters` and the `/api/generate/*` and `/api/characters*`
   routes go through `_require_active` (404 for an inactive account). Only

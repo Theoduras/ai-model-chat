@@ -264,6 +264,8 @@
     .gen-job[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
     .gen-job[disabled] { cursor: not-allowed; }
     .gen-job[disabled] b, .gen-job[disabled] small { opacity: .55; }
+    .gen-soon.gen-sub-only { position: static; display: inline-block; white-space: nowrap; }
+    .gen-soon.gen-sub-only[hidden] { display: none; }
     .gen-soon {
       position: absolute; top: 9px; right: 9px; font-size: 0.6rem; font-weight: 700; letter-spacing: .04em;
       text-transform: uppercase; padding: 2px 7px; border-radius: 999px; background: var(--surface-2); color: var(--text-2);
@@ -603,6 +605,7 @@
       <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(true)">Select all</button>
       <button type="button" class="btn btn-ghost btn-sm" onclick="vaultSelectAll(false)">Clear</button>
       <button type="button" class="btn btn-primary btn-sm" id="fv-open-btn" onclick="openFanvueUpload()" disabled>Upload to Fanvue</button>
+      <span class="gen-soon gen-sub-only" id="fv-sub-only" hidden>Subscribers only</span>
     </div>
     <div class="vault-grid" id="vault-grid"></div>
     <span class="hint">Everything here is approved: uploads plus whatever was kept from a
@@ -721,11 +724,17 @@ const GEN_SHOT_LABELS = {
 };
 const GEN_RES_LABELS = { '2k': '2K', '4k': '4K' };
 
+let chatbotOff = false;
 async function init() {
+  try {
+    const me = await (await fetch('/api/me')).json();
+    chatbotOff = (me.capabilities || {}).chatbot === false;
+    el('fv-sub-only').hidden = !chatbotOff;
+  } catch (e) {}
   try {
     const list = await (await fetch('/api/personas?studio=1')).json();
     const rows = (Array.isArray(list) ? list : (list.personas || []))
-      .filter(p => !(p.config || {}).content_vault);
+      .filter(p => !(p.config || {}).content_vault && !(p.config || {}).studio_only);
     let chars = [];
     try {
       chars = ((await (await fetch('/api/characters')).json()).characters || [])
@@ -2716,7 +2725,7 @@ function renderVaultTools() {
   el('vault-select-btn').textContent = vaultSelecting ? 'Cancel' : 'Select';
   el('vault-select-tools').hidden = !vaultSelecting;
   el('vault-picked').textContent = n ? `${n} selected` : 'Tap items to select';
-  el('fv-open-btn').disabled = !n;
+  el('fv-open-btn').disabled = !n || chatbotOff;
 }
 
 function openFanvueUpload() {

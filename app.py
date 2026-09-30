@@ -1416,16 +1416,18 @@ def _monthly_tokens_line(key):
 
 _BASE_TIERS = {
     FREE_TIER_KEY: {'name': 'Free', 'price': 0,
-                    'blurb': 'Try it with one persona, no card needed. '
-                             f'{CR.FREE_CREDITS} tokens on us.',
-                    'features': ['1 × AI Persona', '1 × Character Creator',
+                    'blurb': 'Content creation only: unlimited characters, generated '
+                             f'with tokens. {CR.FREE_CREDITS} tokens on us.',
+                    'features': ['Unlimited Character Creator',
                                  'Generation Studio access',
                                  _tokens_line(f'{CR.FREE_CREDITS} generation tokens '
                                               'to get started (one-time)',
                                               CR.FREE_CREDITS),
+                                 'Buy more tokens any time',
                                  'Community support'],
                     'capabilities': {
-                        'personas': 1,
+                        'personas': 0,
+                        'chatbot': False,
                         'seats': 1,
                         'platforms': [],
                         'phases_max': 10,
@@ -1446,6 +1448,7 @@ _BASE_TIERS = {
                                  'No platform connection \u2014 Fanvue needs a paid plan'],
                     'capabilities': {
                         'personas': None,
+                        'chatbot': True,
                         'seats': 1,
                         'platforms': [],
                         'phases_max': 10,
@@ -1457,7 +1460,7 @@ _BASE_TIERS = {
                     }},
     'starter': {'name': 'Starter', 'price': 49,
                 'blurb': 'One persona on every platform, fully monetised.',
-                'features': ['1 × AI Persona', '1 × Character Creator',
+                'features': ['1 × AI Persona', 'Unlimited Character Creator',
                              'Every social media platform integration',
                              'Generation Studio access',
                              'Social media funnel to paid pages',
@@ -1470,6 +1473,7 @@ _BASE_TIERS = {
                              'Email support'],
                 'capabilities': {
                     'personas': 1,
+                    'chatbot': True,
                     'seats': 1,
                     'platforms': None,
                     'phases_max': 3,
@@ -1482,7 +1486,7 @@ _BASE_TIERS = {
     'pro': {'name': 'Pro', 'price': 149,
             'blurb': 'Five personas, every platform.',
             'features': ['Everything in Starter, plus:',
-                         '5 × AI Persona', '5 × Character Creator',
+                         '5 × AI Persona', 'Unlimited Character Creator',
                          '2 team seats',
                          'Media tagging',
                          'Up to 10 funnel phases with photo rates',
@@ -1491,6 +1495,7 @@ _BASE_TIERS = {
                          'Priority support'],
             'capabilities': {
                 'personas': 5,
+                'chatbot': True,
                 'seats': 2,
                 'platforms': None,
                 'phases_max': 10,
@@ -1503,7 +1508,7 @@ _BASE_TIERS = {
     'agency': {'name': 'Agency', 'price': 349,
                'blurb': 'Fifteen personas and a team to run them.',
                'features': ['Everything in Pro, plus:',
-                            '15 × AI Persona', '15 × Character Creator',
+                            '15 × AI Persona', 'Unlimited Character Creator',
                             '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
@@ -1511,6 +1516,7 @@ _BASE_TIERS = {
                             'Dedicated support'],
                'capabilities': {
                    'personas': 15,
+                   'chatbot': True,
                    'seats': 6,
                    'platforms': None,
                    'phases_max': 10,
@@ -1563,7 +1569,7 @@ G3 = 'Team & support'
 
 # Custom is quote-only, so it has no capabilities of its own to enforce; these
 # exist only so the feature matrix can describe it beside the plans that do.
-CUSTOM_CAPS = {'personas': None, 'seats': None, 'platforms': None,
+CUSTOM_CAPS = {'personas': None, 'chatbot': True, 'seats': None, 'platforms': None,
                'phases_max': None, 'outfit_lock': True,
                'scheduled_followups': True, 'analytics': True,
                'ppv_reconcile': True, 'tokens_month': None}
@@ -1575,18 +1581,20 @@ def _paid(c):
 
 FEATURE_ROWS = [
     (G1, 'AI personas',
-     lambda c: ('Unlimited AI Personas' if c['personas'] is None
-                else f"{c['personas']} × AI Persona"),
-     'Every persona is her own character, with her own voice, photos, funnel and '
-     'connected account. Your plan sets how many you can run at once.'),
+     lambda c: (False, 'Starter and up') if not c['chatbot'] else (
+         'Unlimited AI Personas' if c['personas'] is None
+         else f"{c['personas']} × AI Persona"),
+     'A persona is a character you connect a chatbot and your accounts to, with '
+     'her own voice, funnel and connected account. Your plan sets how many you '
+     'can run at once; the characters you build are not limited.'),
     (G1, 'Character Creator',
-     lambda c: ('Unlimited Character Creator' if c['personas'] is None
-                else f"{c['personas']} × Character Creator"),
+     lambda c: 'Unlimited Character Creator',
      'Build her look once — face, body, style — and approve it. Every '
      'photo and clip is generated from that approved character, so she looks '
-     'the same in every set.'),
+     'the same in every set. Build as many characters as you like on every plan.'),
     (G1, 'AI persona builder',
-     lambda c: 'Visual builder, or generate backstory, voice and triggers',
+     lambda c: 'Visual builder, or generate backstory, voice and triggers'
+     if c['chatbot'] else (False, 'Starter and up'),
      'Fill in a form — name, age, backstory, archetype, warmth, escalation '
      'pace — and the system prompt behind every reply is written for you. '
      'Stuck? Generate the backstory, speech style and triggers, then edit what '
@@ -1604,16 +1612,18 @@ FEATURE_ROWS = [
     (G1, 'Content Vault',
      lambda c: ('Unlimited uploads, SFW and NSFW sets'
                 + ('' if c['_key'] == 'starter' else ', media tagging'))
-     if _paid(c) else (False, 'Starter and up'),
+     if _paid(c) else 'Everything you generate, kept in one place',
      'Upload your own sets and mark them SFW or NSFW. From Pro, tag every photo '
      'and clip so the funnel picks the right one for the moment and never '
      'sends a fan the same photo twice.'),
     (G1, 'Live chat engine',
-     lambda c: 'Memory of the fan, in-character replies, tone matching',
+     lambda c: 'Memory of the fan, in-character replies, tone matching'
+     if c['chatbot'] else (False, 'Starter and up'),
      'She remembers what a fan told her, answers in character and matches his '
      'tone, so the conversation reads like a person rather than a bot.'),
     (G1, 'Test chat + shareable landing page',
-     lambda c: 'Talk to her yourself and send fans a hosted landing page',
+     lambda c: 'Talk to her yourself and send fans a hosted landing page'
+     if c['chatbot'] else (False, 'Starter and up'),
      'Talk to her yourself before any fan does, and send fans a hosted page '
      'where they can start chatting straight away.'),
     (G2, 'Social media funnel',
@@ -1708,6 +1718,7 @@ def _feature_matrix():
                     'cta': ('Coming soon' if tier.get('coming_soon') else
                             'Start free' if key == FREE_TIER_KEY else 'Get started'),
                     'highlights': [
+                        {'value': '∞', 'label': 'Characters'},
                         {'value': ('∞' if caps['personas'] is None
                                    else str(caps['personas'])),
                          'label': 'Personas'},
@@ -2024,7 +2035,7 @@ def _activate_plan(session_db, user_row, tier_key, days=None):
     return user_row.expires_at
 
 
-DENIED_CAPS = {'personas': 0, 'seats': 0, 'platforms': [], 'phases_max': 0,
+DENIED_CAPS = {'personas': 0, 'chatbot': False, 'seats': 0, 'platforms': [], 'phases_max': 0,
                'outfit_lock': False, 'scheduled_followups': False,
                'analytics': False, 'ppv_reconcile': False,
                'tokens_month': 0}
@@ -2217,7 +2228,8 @@ def _cap_denied(name, user, extra=None):
 
 def _persona_count(user):
     return len([p for p in db_list_personas(owner_id=_workspace_id(user))
-                if not p.get('config', {}).get('content_vault')])
+                if not p.get('config', {}).get('content_vault')
+                and not p.get('config', {}).get('studio_only')])
 
 
 def _persona_cap_blocked(user):
@@ -2229,7 +2241,10 @@ def _persona_cap_blocked(user):
     used = _persona_count(user)
     if used < int(limit):
         return None
-    return _cap_denied('personas', user, {'used': used, 'limit': int(limit)})
+    extra = {'used': used, 'limit': int(limit)}
+    if (user or {}).get('tier') == FREE_TIER_KEY:
+        extra['free'] = True
+    return _cap_denied('personas', user, extra)
 
 
 def _usage_period():
@@ -2320,6 +2335,30 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
              '/api/fanvue', '/api/onlyfans', '/api/platforms', '/api/visitors',
              '/api/generate',
              '/api/backstory', '/api/config', '/api/whatsapp')
+# The chatbot side of the product, for plans without the `chatbot` capability
+# (Free is content creation only). These are not in _PAID_* because Demo, which
+# has the capability, must keep reaching them as it always has.
+_CHATBOT_PREFIXES = ('/planner', '/embed-setup', '/api/growth', '/discord',
+                     '/instagram', '/tiktok', '/reddit', '/api/discord',
+                     '/api/instagram', '/api/tiktok', '/api/reddit')
+_PERSONA_SUB_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)(?:/|$)')
+
+
+def _chatbot_gated(path, method):
+    """True when this request is chatbot work. A persona write is chatbot work
+    unless the persona is a character's own hidden home or the "Your Content"
+    vault, which the studio and the character builder write to."""
+    if path.startswith(_CHATBOT_PREFIXES):
+        return True
+    if method in ('GET', 'HEAD', 'OPTIONS'):
+        return False
+    m = _PERSONA_SUB_RE.match(path)
+    if not m or m.group(1) == 'copy':
+        return bool(m)
+    saved = db_get_persona(m.group(1))
+    return not (saved and (saved.get('config') or {}).get('studio_only'))
+
+
 # Fan-facing and auth/billing routes stay open. So are inbound webhooks: they
 # arrive from the platform, not a signed-in creator, and carry their own signed
 # proof of origin — a sign-in redirect would just look like a failure to Fanvue.
@@ -2521,6 +2560,8 @@ def _path_needs_plan(path, method):
         return False
     if path.startswith(_PAID_PAGES) or path.startswith(_PAID_API):
         return True
+    if path.startswith(_CHATBOT_PREFIXES):
+        return True
     # chat.html reads personas to render the fan chat, so only writes are gated.
     if path.startswith('/api/personas') and method not in ('GET', 'HEAD', 'OPTIONS'):
         return True
@@ -2579,12 +2620,10 @@ def _require_entitlement(path, method, user, wants_json):
                     if method not in ('GET', 'HEAD', 'OPTIONS') else None)
         if platform is None:
             platform = _PLATFORM_PAGES.get(path)
-            # Free is sold on seeing everything: its pages open read-only and
-            # only the write that would put something live is refused.
-            if platform and user.get('tier') == FREE_TIER_KEY:
-                platform = None
         if platform and platform not in allowed:
             if user.get('tier') == FREE_TIER_KEY:
+                if not wants_json:
+                    return redirect('/pricing')
                 return _cap_denied('platform', user,
                                    {'platform': platform, 'free': True})
             if _is_demo(user):
@@ -2597,6 +2636,12 @@ def _require_entitlement(path, method, user, wants_json):
             if not wants_json:
                 return redirect('/pricing')
             return _cap_denied('platform', user, {'platform': platform})
+
+    if not caps.get('chatbot') and _chatbot_gated(path, method):
+        if not wants_json:
+            return redirect('/pricing')
+        return _cap_denied('chatbot', user,
+                           {'free': user.get('tier') == FREE_TIER_KEY})
 
     cap = _longest_prefix(_CAP_PATHS, path)
     if cap and not caps.get(cap):
@@ -9266,7 +9311,7 @@ def api_personas():
         # listing them by user id hides everything the moment the two differ.
         for sp in db_list_personas(owner_id=_workspace_id(viewer)):
             config = sp.get('config', {})
-            if config.get('content_vault') and not studio:
+            if (config.get('content_vault') or config.get('studio_only')) and not studio:
                 continue
             has_img = _persona_has_photo(sp['slug'], config)
             own.append({
@@ -9328,7 +9373,7 @@ def api_personas():
         if _is_premade(sp['slug']):
             continue  # a committed original shadows any stale DB copy of the same slug
         config = sp.get('config', {})
-        if config.get('content_vault') and not studio:
+        if (config.get('content_vault') or config.get('studio_only')) and not studio:
             continue
         has_img = _persona_has_photo(sp['slug'], config)
         personas.append({
@@ -31498,12 +31543,23 @@ def _char_img_json(img):
             'expires_at': img.expires_at.isoformat() if img.expires_at else ''}
 
 
+def _char_linked_persona(slug):
+    """The persona a character is linked to, or '' while it only has its own
+    hidden home (see _CHAR_HOME): that is not a chatbot persona to show."""
+    if not slug:
+        return ''
+    saved = db_get_persona(slug)
+    if saved and (saved.get('config') or {}).get('studio_only'):
+        return ''
+    return slug
+
+
 def _char_json(s, row, full=False):
     canon = _char_canonicals(s, row.id)
     required = CH.required_views(row.nsfw_level, row.body_type)
     out = {'id': row.id, 'name': row.name, 'age': row.age,
            'nsfw_level': row.nsfw_level, 'body_type': row.body_type,
-           'persona': row.slug or '', 'status': row.status,
+           'persona': _char_linked_persona(row.slug), 'status': row.status,
            'version': row.version or 0,
            'required': len(required),
            'approved_required': len([k for k in required if k in canon]),
@@ -31545,12 +31601,15 @@ def _char_persona_ok(slug):
 
 
 _CHAR_GENDER = {'female': 'Female', 'male': 'Male'}
+# A character's own home for its vault and generations: hidden from the persona
+# lists and not counted against the plan, so characters are unlimited. Linking
+# it to a real persona moves the content and drops this one.
+_CHAR_HOME = {'from_character': True, 'studio_only': True}
 
 
 def _char_to_persona(row, owner_id=None, extra=None):
     """Write the character's name, age, level and gender onto its persona."""
     config = dict(_persona_config(row.slug))
-    config.pop('studio_only', None)
     config.update(extra or {})
     config.update({'name': row.name, 'age': max(int(row.age or 18), 18),
                    'gender': _CHAR_GENDER.get(row.body_type, config.get('gender') or 'Female'),
@@ -32025,24 +32084,12 @@ def api_characters():
             return jsonify({'ok': True, 'characters': out})
         body = request.get_json(silent=True) or {}
         persona = (body.get('persona') or '').strip().lower()
-        if not persona:
-            # A plan at its persona limit would otherwise be refused outright,
-            # though it may own a persona that still has no character.
-            owned = [p['slug'] for p in db_list_personas(owner_id=_workspace_id(user))]
-            if owned:
-                taken = {r[0] for r in s.query(Character.slug)
-                         .filter(Character.slug.in_(owned)).all()}
-                persona = next((p for p in owned if p not in taken), '')
         if persona:
             if not _char_persona_ok(persona):
                 return jsonify({'ok': False, 'error': 'Not your persona'}), 403
             if s.query(Character).filter(Character.slug == persona).first():
                 return jsonify({'ok': False, 'error': 'That persona already has a character.'}), 409
             body = dict(_persona_char_fields(_persona_config(persona)), **body)
-        else:
-            capped = _persona_cap_blocked(user)
-            if capped:
-                return capped
         try:
             clean, warnings = CH.validate(dict(
                 {'name': 'Untitled draft', 'age': 24, 'nsfw_level': 'sfw'}, **body))
@@ -32055,7 +32102,7 @@ def api_characters():
                         nsfw_level=clean['nsfw_level'], notes=clean['notes'],
                         sheet_json=json.dumps(clean['sheet']))
         _char_to_persona(row, _workspace_id(user),
-                         None if persona else {'from_character': True})
+                         None if persona else _CHAR_HOME)
         s.add(row)
         s.commit()
         return jsonify({'ok': True, 'character': _char_json(s, row, full=True),
@@ -32212,7 +32259,7 @@ def _transfer_character(s, char_id, ws, mode):
         for old, fresh in ids.items():
             snap = snap.replace(old, fresh)
         s.add(CharacterVersion(character_id=new.id, number=v.number, snapshot_json=snap))
-    _char_to_persona(new, ws.id, {'from_character': True})
+    _char_to_persona(new, ws.id, _CHAR_HOME)
     s.commit()
     return jsonify({'ok': True, 'id': new.id})
 
@@ -32245,13 +32292,23 @@ def api_character_studio(char_id):
         row = _char_row(s, user, char_id)
         if not row:
             return jsonify({'ok': False, 'error': 'Unknown character'}), 404
-        if not row.slug:
+        # A character's home is hidden and free. Asking for a persona turns it
+        # into a real one, which is the step the plan's persona limit applies to.
+        promote = bool((request.get_json(silent=True) or {}).get('persona'))
+        if promote and _char_linked_persona(row.slug) == row.slug and row.slug:
+            return jsonify({'ok': True, 'slug': row.slug})
+        if promote:
             capped = _persona_cap_blocked(user)
             if capped:
                 return capped
+        if not row.slug:
             row.slug = unique_copy_slug(row.name or 'Character')
-            _char_to_persona(row, _workspace_id(user), {'from_character': True})
+            _char_to_persona(row, _workspace_id(user),
+                             {'from_character': True} if promote else _CHAR_HOME)
             s.commit()
+        elif promote:
+            _char_to_persona(row, _workspace_id(user),
+                             {'from_character': True, 'studio_only': False})
         return jsonify({'ok': True, 'slug': row.slug})
     finally:
         s.close()

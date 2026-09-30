@@ -105,6 +105,86 @@ with A.app.test_request_context():
     session['user_id'] = uid
     check('owner can test', not A._persona_live_blocked('freegirl'))
 
+print('content creation only')
+cid = mkuser('creator@example.com')
+cc = client(cid)
+cc.post('/api/billing/free')
+ids = []
+for n in range(3):
+    r = cc.post('/api/characters', json={'name': f'Girl {n}', 'age': 24})
+    ids.append((r.get_json() or {}).get('character', {}).get('id'))
+    check(f'character {n + 1} created', r.status_code == 200 and ids[-1], r.get_data(as_text=True)[:200])
+with A.app.test_request_context():
+    from flask import session
+    session['user_id'] = cid
+    u = A._current_user()
+    check('characters use no persona slot', A._persona_count(u) == 0, A._persona_count(u))
+    check('free has no chatbot', not A.user_capabilities(u).get('chatbot'))
+homes = [p for p in A.db_list_personas(owner_id=cid) if p['config'].get('studio_only')]
+check('each character has a hidden home', len(homes) == 3, len(homes))
+check('homes stay out of the persona list',
+      cc.get('/api/personas').get_json() in ([], {'personas': []})
+      or not any(p.get('slug') in {h['slug'] for h in homes}
+                 for p in (cc.get('/api/personas').get_json() or [])), 'listed')
+check('studio still lists them', len(cc.get('/api/personas?studio=1').get_json()) >= 3)
+r = cc.post('/api/personas/new-girl', json={'name': 'New Girl'})
+check('free cannot build a persona', r.status_code == 402 and r.get_json().get('free'), r.status_code)
+check('free cannot write a real persona', cc.post('/api/personas/freegirl',
+      json={'name': 'x'}).status_code in (402, 404))
+check('free may write a hidden home', cc.post('/api/personas/' + homes[0]['slug'] + '/references',
+      json={}).status_code != 402)
+for path in ('/api/discord/status', '/api/instagram/status', '/api/growth/queue'):
+    r = cc.post(path, json={})
+    check(f'{path} refused for free', r.status_code == 402, r.status_code)
+for page in ('/planner', '/discord', '/instagram', '/embed-setup'):
+    check(f'{page} sends free to pricing',
+          cc.get(page).status_code == 302 and '/pricing' in cc.get(page).headers['Location'])
+check('free can open the studio', cc.get('/studio').status_code in (200, 302))
+check('free can open characters', cc.get('/characters').status_code == 200)
+tk = cc.get('/api/tokens').get_json()
+check('free can buy tokens', tk.get('can_buy') is True, tk)
+feat = cc.get('/api/features').get_json()
+for key, tier in (feat.get('tiers') or feat).items():
+    row = [f for f in tier['features'] if f['label'] == 'Character Creator'][0]
+    check(f'{key} sells unlimited characters',
+          row['detail'] == 'Unlimited Character Creator' and row['included'], row)
+    check(f'{key} leads with a characters tile',
+          tier['highlights'][0] == {'value': '\u221e', 'label': 'Characters'})
+check('free row for AI personas is off',
+      not [f for f in feat['tiers']['free']['features'] if f['label'] == 'AI personas'][0]['included'])
+
+chars = {c['id']: c for c in cc.get('/api/characters').get_json()['characters']}
+check('a hidden home is not shown as a linked persona', all(c['persona'] == '' for c in chars.values()))
+r = cc.post(f'/api/characters/{ids[0]}/studio', json={})
+check('studio route returns the hidden home', r.status_code == 200 and r.get_json()['slug'] == homes[0]['slug'])
+r = cc.post(f'/api/characters/{ids[0]}/studio', json={'persona': True})
+check('free cannot promote a character to a persona', r.status_code == 402 and r.get_json().get('free'), r.get_data(as_text=True))
+
+pro = mkuser('prolimit@example.com', tier='pro', status='active')
+pc = client(pro)
+for n in range(7):
+    r = pc.post('/api/characters', json={'name': f'Pro {n}', 'age': 24})
+    check(f'pro character {n + 1} not capped', r.status_code == 200, r.status_code)
+with A.app.test_request_context():
+    from flask import session
+    session['user_id'] = pro
+    check('pro persona slots untouched', A._persona_count(A._current_user()) == 0)
+pids = [c['id'] for c in pc.get('/api/characters').get_json()['characters']]
+r = pc.post(f'/api/characters/{pids[0]}/studio', json={'persona': True})
+check('pro can promote a character to a persona', r.status_code == 200, r.get_data(as_text=True))
+with A.app.test_request_context():
+    from flask import session
+    session['user_id'] = pro
+    check('promoted character now counts', A._persona_count(A._current_user()) == 1)
+st = mkuser('startercap@example.com', tier='starter', status='active')
+sc = client(st)
+sids = [sc.post('/api/characters', json={'name': f'St {n}', 'age': 24}).get_json()['character']['id']
+        for n in range(2)]
+check('starter promotes its first', sc.post(f'/api/characters/{sids[0]}/studio',
+      json={'persona': True}).status_code == 200)
+r = sc.post(f'/api/characters/{sids[1]}/studio', json={'persona': True})
+check('starter is capped at one real persona', r.status_code == 402, r.status_code)
+
 print('offer window')
 c = client(uid, login_ago=10)
 o = c.get('/api/me').get_json()['offer']
