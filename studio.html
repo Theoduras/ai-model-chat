@@ -478,7 +478,7 @@
           <div class="gen-f gen-clip-photos"><span>Location photo</span>
             <div class="gen-outfits gen-clip-locations"></div></div>
         </div>
-        <label class="gen-f"><span id="gen-swap-motion-label">Motion</span>
+        <label class="gen-f" id="gen-swap-motion-row"><span id="gen-swap-motion-label">Motion</span>
           <input type="text" id="gen-swap-motion" maxlength="300" placeholder="keep her hair down, match the original lighting"></label>
         <div id="gen-swap-kling" class="gen-stackform" style="display:none">
           <label class="gen-f"><span>Facing</span>
@@ -495,7 +495,7 @@
       </div>
 
       <div id="gen-reel-form" class="gen-stackform" style="display:none">
-        <label class="gen-f"><span>What happens in it</span>
+        <label class="gen-f" id="gen-reel-prompt-row"><span>What happens in it</span>
           <textarea id="gen-reel-prompt" rows="4" maxlength="2000"
             placeholder="she walks through a night market, neon signs behind her, looking back once"></textarea></label>
         <div class="gen-f" id="gen-reel-photo-row"><span>Start from a photo (optional)</span>
@@ -514,6 +514,7 @@
             passes its moderation more often.</span></div>
         <div class="gen-f gen-idpick-row" id="gen-reel-idpick-row"><span class="gen-refcap-lbl">Pick her photos (up to 3)</span>
           <div class="anim-strip gen-idpick" id="gen-reel-idpick"></div></div>
+        <input type="file" id="gen-vault-file" accept="image/*" style="display:none" onchange="uploadVaultPhoto(this)">
       </div>
 
       <div id="gen-extend-form" class="gen-stackform" style="display:none">
@@ -1068,20 +1069,66 @@ async function deleteClip(id) {
 }
 
 // Extra photos and a place only where the running model can use them.
+
+// What each engine actually reads, so a form never shows a field that changes
+// nothing. Kling motion control takes movement from the clip and builds its own
+// prompt from what is picked; a replace works on a clip it was handed.
+function engineUses(field, m) {
+  const kling = KLING_MC.includes(m);
+  const clipModel = CLIP_MODELS.includes(m);
+  const haveClip = genJob === 'swap' ? !!genSwap : !!genDrive;
+  switch (field) {
+    case 'prompt': return !kling;
+    case 'photo': return !kling && !clipModel && !genDrive;
+    case 'place': return m !== 'ml-face-swap' && (clipModel || haveClip);
+    case 'photos': return m !== 'ml-face-swap' && !kling && refCap() > 1 && (clipModel || haveClip);
+  }
+  return true;
+}
+
+let genUploadInto = '';
+function pickVaultUpload(into) { genUploadInto = into; el('gen-vault-file').click(); }
+
+function uploadVaultPhoto(input) {
+  const file = input.files && input.files[0];
+  input.value = '';
+  if (!file || !slug()) return;
+  const reader = new FileReader();
+  reader.onload = async () => {
+    try {
+      const res = await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: reader.result, mime: file.type, purpose: 'reference' }),
+      });
+      const d = await res.json();
+      if (!d.id) throw new Error(d.error || 'Upload failed');
+      const list = await (await fetch('/api/personas/' + encodeURIComponent(slug()) + '/media')).json();
+      mediaVault = list.vault || [];
+      if (genUploadInto === 'photo') genReelPick = d.id;
+      else genIdPick = genIdPick.concat(d.id).slice(-refCap());
+      renderGenForm();
+    } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  };
+  reader.readAsDataURL(file);
+}
+
 function syncClipExtras() {
   const swap = genJob === 'swap';
-  const has = swap ? !!genSwap : (genJob === 'reel' && !!genDrive);
   const m = engineModel();
-  const photos = has && refCap() > 1 && !KLING_MC.includes(m);
+  const place = engineUses('place', m);
+  const photos = engineUses('photos', m);
   document.querySelectorAll('.gen-clip-extras').forEach(box => {
     const mine = box.closest('#gen-swap-form') ? swap : !swap;
-    box.style.display = has && mine ? '' : 'none';
+    box.style.display = place && mine ? '' : 'none';
     box.querySelectorAll('.gen-clip-photos').forEach(r => { r.style.display = photos ? '' : 'none'; });
   });
-  const kling = m.startsWith('kling-');
   document.querySelectorAll('.gen-kling-hint').forEach(h => { h.style.display = KLING_MC.includes(m) ? '' : 'none'; });
   const startRow = el('gen-reel-photo-row');
-  if (startRow) startRow.style.display = genDrive ? 'none' : '';
+  if (startRow) startRow.style.display = engineUses('photo', m) ? '' : 'none';
+  const promptRow = el('gen-reel-prompt-row');
+  if (promptRow) promptRow.style.display = engineUses('prompt', m) ? '' : 'none';
+  const motionRow = el('gen-swap-motion-row');
+  if (motionRow) motionRow.style.display = KLING_MC.includes(m) ? 'none' : '';
   const pl = el('gen-drive-player');
   if (pl) {
     pl.style.display = genDrive && genJob !== 'swap' ? '' : 'none';
@@ -1094,7 +1141,7 @@ function clipExtrasPayload() {
   const swap = genJob === 'swap';
   const box = document.querySelector(swap ? '#gen-swap-form .gen-clip-extras' : '#gen-video-drive .gen-clip-extras');
   const shown = box && box.style.display !== 'none';
-  const photos = shown && refCap() > 1 && !KLING_MC.includes(engineModel());
+  const photos = shown && engineUses('photos', engineModel());
   return {
     place: shown ? (box.querySelector('.gen-clip-place').value || '').trim() : '',
     outfit_ref: photos ? genOutfit : '', location_ref: photos ? genLocation : '',
@@ -2178,14 +2225,14 @@ function syncIdentity() {
                 title="${esc(v.label)}" onclick="pickCharView('${v.key}')">
           <img loading="lazy" decoding="async" src="${v.url}" alt="${esc(v.label)}" draggable="false"></button>`).join('');
     }
-    el('gen-' + job + '-idpick-row').style.display = vault ? '' : 'none';
-    if (!vault) return;
+    el('gen-' + job + '-idpick-row').style.display = '';
     const photos = animPhotos();
     el('gen-' + job + '-idpick').innerHTML = photos.length ? photos.map(v => `
       <button type="button" class="anim-pick" aria-pressed="${genIdPick.includes(v.id)}"
               title="${esc(v.purpose || 'kept photo')}" onclick="pickIdPhoto('${v.id}')">
         <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-      : '<span class="hint">No kept photos in the vault yet.</span>';
+      + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('ids')">+ Upload</button>`
+      : `<span class="hint">No kept photos in the vault yet.</span><button type="button" class="gen-outfit-add" onclick="pickVaultUpload('ids')">+ Upload</button>`;
   });
 }
 
@@ -2482,8 +2529,9 @@ function jobBlocker() {
   if (genJob === 'extend') return genExtendClip ? '' : 'Keep a clip first';
   if (genJob === 'multiref') return genSceneRefs.length ? '' : 'Pick a scene photo';
   if (genJob === 'reel') {
+    if (KLING_MC.includes(engineModel())) return genDrive ? '' : 'Upload a clip first';
     const typed = ((el('gen-reel-prompt') || {}).value || '').trim();
-    return (typed || genReelPick) ? '' : 'Write a prompt or pick a photo';
+    return (typed || genReelPick || genDrive) ? '' : 'Write a prompt or pick a photo';
   }
   return '';
 }
@@ -2656,7 +2704,7 @@ async function jobPayload() {
   if (genJob === 'swap') {
     return Object.assign(base, {
       source: genSwap.id, resolution: swapResolution(), identity: identityOf('swap'),
-      identity_media: identityOf('swap') === 'vault' ? genIdPick : [],
+      identity_media: genIdPick,
       character_views: identityOf('swap') === 'character' ? genCvPick : [],
       seconds: swapSeconds(), motion: el('gen-swap-motion').value.trim(),
       orientation: el('gen-swap-orient').value,
@@ -2667,11 +2715,11 @@ async function jobPayload() {
   Object.assign(base, { resolution: resv, seconds: videoSecondsNow() });
   if (genJob === 'reel') {
     return Object.assign(base, {
-      prompt: (el('gen-reel-prompt').value || '').trim(),
+      prompt: engineUses('prompt', engineModel()) ? (el('gen-reel-prompt').value || '').trim() : '',
       reference_media: genReelPick || '',
       source: genDrive ? genDrive.id : '',
       identity: identityOf('reel'),
-      identity_media: identityOf('reel') === 'vault' ? genIdPick : [],
+      identity_media: genIdPick,
       character_views: identityOf('reel') === 'character' ? genCvPick : [],
     }, clipExtrasPayload());
   }
@@ -2877,7 +2925,9 @@ function renderReelPhotos() {
             title="${esc(v.outfit || v.purpose || 'kept photo')}"
             onclick="pickReelPhoto('${v.id}')">
       <img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false"></button>`).join('')
-    : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>';
+    + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`
+    : '<span class="hint">No kept photos — a reel can still run from the words alone.</span>'
+      + `<button type="button" class="gen-outfit-add" onclick="pickVaultUpload('photo')">+ Upload</button>`;
 }
 
 function pickReelPhoto(id) {

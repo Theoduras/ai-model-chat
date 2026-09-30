@@ -30584,12 +30584,11 @@ def _gen_identity(slug, body, spec, cap=3):
         spec['character_views'] = [
             k for k in keys if k in char['views']
             and (CH.view(k, char['body_type']) or {}).get('rating') == 'sfw'][:cap]
-    else:
-        # Picked per job from kept vault photos; none picked falls back to the
-        # model's saved reference slots.
-        ids = [str(i) for i in (body.get('identity_media') or []) if i][:cap]
-        spec['identity_media'] = [i for i in ids
-                                  if (_media_row(slug, i) or {}).get('approved')]
+    # Picked per job from kept vault photos, beside the character's views when
+    # she has them; none picked falls back to the model's saved reference slots.
+    ids = [str(i) for i in (body.get('identity_media') or []) if i]
+    spec['identity_media'] = [i for i in ids
+                              if (_media_row(slug, i) or {}).get('approved')][:cap]
     return identity
 
 
@@ -30870,7 +30869,8 @@ def _gen_spec(slug, body, user):
         # The one video path that may run from a prompt alone, and therefore
         # the one that claims to be nobody. It still lands unapproved in
         # staging, so nothing here can reach a fan unreviewed.
-        if not spec['reference_media'] and not spec['prompt_extra']:
+        if (not spec['reference_media'] and not spec['prompt_extra']
+                and not body.get('source')):
             raise imagegen.GenerationError(
                 'A reel needs a prompt, a photo, or both.')
         if spec['reference_media'] and not _media_row(slug, spec['reference_media']):
@@ -33289,11 +33289,11 @@ def _gen_start(job_id, slug, spec, workspace):
                         if char and spec.get('source_path'):
                             keys, roles = _clip_views(
                                 char, spec.get('character_views'), spec.get('model'))
-                        call['reference_urls'] = [
+                        call['reference_urls'] = ([
                             u for u in (_char_path_url(char['views'][k]['path'],
                                                        char['views'][k]['mime'])
                                         for k in keys) if u
-                        ] if char else _gen_media_urls(slug, picked)
+                        ] if char else []) + _gen_media_urls(slug, picked)
                         if not call['reference_urls']:
                             raise imagegen.GenerationError(
                                 "Her reference photos could not be read.")
@@ -33375,7 +33375,8 @@ def _gen_start(job_id, slug, spec, workspace):
                     if job == 'reel' and (spec.get('character')
                                           or spec.get('identity_media')):
                         refs = call['reference_urls']
-                    elif spec.get('identity_media'):
+                    elif (spec.get('identity_media')
+                          and spec.get('identity') != 'character'):
                         refs = _gen_media_urls(slug, spec['identity_media'])
                         ref_model = 'picked'
                     elif (spec.get('identity') == 'character' and role != 'face'):
@@ -33385,6 +33386,7 @@ def _gen_start(job_id, slug, spec, workspace):
                         refs = [u for u in (_char_path_url(char['views'][k]['path'],
                                                            char['views'][k]['mime'])
                                             for k in keys) if u]
+                        refs += _gen_media_urls(slug, spec.get('identity_media'))
                         ref_model = 'character'
                     elif spec.get('identity') == 'character':
                         refs = _character_urls(spec['character'], None, None,

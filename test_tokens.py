@@ -577,6 +577,26 @@ def test_clip_library_and_places():
         IG._post = real
 
 
+def test_character_plus_vault_photos():
+    print('character views plus vault photos')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    char = {'body_type': 'female', 'views': {'face_front': {}, 'body_front': {}}}
+    real_snap, real_row = A._character_snapshot, A._media_row
+    A._character_snapshot = lambda slug: char
+    A._media_row = lambda slug, i: {'approved': i != 'bad'}
+    try:
+        spec = {}
+        A._gen_identity('lilith', {'identity': 'character',
+                                   'character_views': ['face_front', 'body_front'],
+                                   'identity_media': ['a', 'bad', 'b', 'c']}, spec, 3)
+        check('views and vault photos are both kept', spec['character_views']
+              == ['face_front', 'body_front'] and spec['identity_media'] == ['a', 'b', 'c'][:3])
+        check('an unapproved photo is dropped', 'bad' not in spec['identity_media'])
+    finally:
+        A._character_snapshot, A._media_row = real_snap, real_row
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -584,7 +604,8 @@ if __name__ == '__main__':
                test_ledger, test_equivalents,
                test_stripe_minimums, test_test_pack_is_not_for_sale,
                test_video_negative_prompt, test_video_prompt_is_not_cut,
-               test_swap_identity, test_clip_library_and_places):
+               test_swap_identity, test_clip_library_and_places,
+               test_character_plus_vault_photos):
         fn()
     print()
     if FAILURES:
