@@ -33934,7 +33934,7 @@ def api_generate_undress():
     spec = {'kind': 'image', 'slug': slug, 'job': '', 'undress': True,
             'model': imagegen.EXPLICIT_MODEL, 'resolution': '2k', 'aspect': size,
             'batch': 1, 'shot': 'nude', 'explicit': True,
-            'reference_media': media_id, 'addons': []}
+            'reference_media': media_id, 'parent_media': media_id, 'addons': []}
     return _gen_submit(user, slug, spec, CR.quote(spec))
 
 
@@ -33954,8 +33954,75 @@ def api_undress_photos():
     try:
         rows = [m for m in list_persona_media(s, slug)
                 if (m.kind or 'image') == 'image' and m.approved and m.gcs_path]
-        out = [{'id': m.id, 'url': f'/api/personas/{slug}/media/{m.id}/image'}
+        out = [{'id': m.id, 'url': f'/api/personas/{slug}/media/{m.id}/image',
+                'parent': getattr(m, 'parent_media', '') or '',
+                'result': (m.source or '') == 'generated',
+                'created': m.created_at.isoformat() if m.created_at else ''}
                for m in reversed(rows)]
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'photos': out})
+
+
+@app.route('/api/undress/photos/bulk-delete', methods=['POST'])
+def api_undress_bulk_delete():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    slug = _undress_slug(_current_user())
+    ids = [str(i) for i in ((request.get_json(silent=True) or {}).get('ids') or []) if i][:100]
+    from db import SessionLocal, get_persona_media
+    s = SessionLocal()
+    done = []
+    try:
+        for mid in ids:
+            row = get_persona_media(s, mid)
+            if row and row.slug == slug:
+                _gen_drop_media(s, row)
+                done.append(mid)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'deleted': done})
+
+
+@app.route('/api/undress/from-vault', methods=['POST'])
+def api_undress_from_vault():
+    """Copy vault photos into the Undress gallery. A copy, so deleting it here
+    can never remove the vault original's bytes."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    src = (body.get('persona') or '').strip().lower()
+    ids = [str(i) for i in (body.get('media_ids') or []) if i][:30]
+    mine = owned_slugs()
+    if not re.match(r'^[a-z0-9_-]+$', src) or (mine is not None and src not in mine):
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    slug = _undress_slug(user)
+    from db import SessionLocal, PersonaMedia, get_persona_media
+    s = SessionLocal()
+    out = []
+    try:
+        for mid in ids:
+            row = get_persona_media(s, mid)
+            if not row or row.slug != src or (row.kind or 'image') != 'image':
+                continue
+            try:
+                data = storage.get(row.gcs_path) if row.gcs_path else row.image_data
+                if not data:
+                    continue
+                path = storage.put(slug, data, row.mime or 'image/jpeg', prefix=storage.KEPT_PREFIX)
+            except Exception:
+                logger.exception('undress vault copy failed for %s', mid)
+                continue
+            new = PersonaMedia(slug=slug, kind='image', mime=row.mime or 'image/jpeg',
+                               gcs_path=path, source='upload', approved=True,
+                               approved_for_training=False)
+            s.add(new)
+            s.commit()
+            out.append({'id': new.id, 'url': f'/api/personas/{slug}/media/{new.id}/image',
+                        'parent': '', 'result': False})
     finally:
         s.close()
     return jsonify({'ok': True, 'photos': out})
