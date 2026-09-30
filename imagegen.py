@@ -1802,11 +1802,14 @@ class RunwareProvider(Provider):
             # the scene. A duration, a size or a negative prompt is refused.
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
-            kling = {'characterOrientation': spec.get('orientation') or 'video',
-                     'keepOriginalSound': spec.get('keep_sound', True) is not False}
-            # Kling takes no background parameter; a new place rides in the
-            # prompt, which build_swap_prompt writes from `place`.
-            task['providerSettings'] = {'klingai': kling}
+            # Wan 2.2 Animate shares this shape but runs on Runware's own GPUs,
+            # and a Kling provider block on it is refused as an invalid model.
+            if model_key in KLING_MOTION_MODELS:
+                kling = {'characterOrientation': spec.get('orientation') or 'video',
+                         'keepOriginalSound': spec.get('keep_sound', True) is not False}
+                # Kling takes no background parameter; a new place rides in the
+                # prompt, which build_swap_prompt writes from `place`.
+                task['providerSettings'] = {'klingai': kling}
         elif shape == 'replace':
             # It takes a rung by name and no length at all: the output runs as
             # long as the clip it was given. Sending either of the others is
@@ -1849,7 +1852,7 @@ class RunwareProvider(Provider):
                     (fields.get('in_refs') or 'referenceImages'):
                         list(refs)[:cap]}
                 if model_key == 'wan-2-2-animate':
-                    task['settings'] = {'wanAnimate': {
+                    task['advancedFeatures'] = {'wanAnimate': {
                         'mode': 'replace' if job == 'swap' else 'animate'}}
             else:
                 task[fields['source']] = source
