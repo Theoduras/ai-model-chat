@@ -2369,6 +2369,21 @@ class BioPage(Base):
     updated_at = Column(DateTime, default=_now, onupdate=_now)
 
 
+class ActivityLog(Base):
+    """One row per write a signed-in account makes, for the super admin's
+    activity page. Pruned to 30 days."""
+    __tablename__ = 'activity_log'
+
+    id = Column(String(32), primary_key=True, default=_uid)
+    created_at = Column(DateTime, default=_now, index=True)
+    user_id = Column(String(32), index=True)
+    email = Column(String(255))
+    kind = Column(String(16), index=True)
+    method = Column(String(8))
+    path = Column(String(255))
+    status = Column(Integer)
+
+
 def get_register_link(session, code):
     return (session.query(RegisterLink)
             .filter(RegisterLink.code == (code or '')).first())

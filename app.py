@@ -7504,6 +7504,118 @@ def _count_trial_click(code):
         s.close()
 
 
+_ACTIVITY_KINDS = (
+    ('auth', 'Logins & signups', ('/login', '/signup', '/register', '/logout', '/api/auth')),
+    ('gen', 'Generations & tokens', ('/api/generate', '/api/credits', '/api/tokens', '/tokens')),
+    ('edit', 'Persona & character edits', ('/api/personas', '/api/characters', '/api/bio')),
+)
+_ACTIVITY_LAST_PRUNE = [0.0]
+
+
+def _activity_kind(path):
+    for key, _label, prefixes in _ACTIVITY_KINDS:
+        if path.startswith(prefixes):
+            return key
+    return 'api'
+
+
+@app.after_request
+def _log_activity(response):
+    try:
+        if request.method in ('GET', 'HEAD', 'OPTIONS'):
+            return response
+        user = _current_user()
+        if not user:
+            return response
+        from db import SessionLocal, ActivityLog
+        s = SessionLocal()
+        try:
+            s.add(ActivityLog(user_id=user['id'], email=(user.get('email') or '')[:255],
+                              kind=_activity_kind(request.path), method=request.method,
+                              path=request.path[:255], status=response.status_code))
+            if time.time() - _ACTIVITY_LAST_PRUNE[0] > 3600:
+                _ACTIVITY_LAST_PRUNE[0] = time.time()
+                cutoff = datetime.utcnow() - timedelta(days=30)
+                s.query(ActivityLog).filter(ActivityLog.created_at < cutoff).delete()
+            s.commit()
+        finally:
+            s.close()
+    except Exception:
+        pass
+    return response
+
+
+ADMIN_ACTIVITY_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><title>Activity</title>
+<style>""" + ACCOUNT_CSS + """
+table{width:100%;border-collapse:collapse;font-size:.85rem;margin-top:12px}
+th{text-align:left;color:var(--text-muted);font-weight:500;padding:8px 10px;border-bottom:1px solid var(--border);white-space:nowrap}
+td{padding:8px 10px;border-bottom:1px solid var(--border);color:var(--text-2)}
+code{font-size:.8rem;color:#a78bfa;word-break:break-all}
+.tabs{display:flex;gap:6px;flex-wrap:wrap;margin-bottom:8px}
+.tabs a{padding:6px 12px;border-radius:8px;border:1px solid var(--border);color:var(--text-2);text-decoration:none;font-size:.82rem}
+.tabs a.on{background:var(--surface);color:var(--text);border-color:#a78bfa}
+.filter{display:flex;gap:8px}.filter input{flex:1;margin:0}.filter button{width:auto;padding:0 16px;margin:0}
+</style></head><body data-page="admin-activity"><div class="wrap wide">
+<div class="bar"><span>Activity log</span><a href="/admin/users">Users</a></div>
+<div class="card">
+<div class="tabs">{% for key, label in tabs %}<a class="{{ 'on' if key == tab }}" href="?tab={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ label }}</a>{% endfor %}</div>
+<form class="filter" method="get"><input type="hidden" name="tab" value="{{ tab }}"><input name="q" value="{{ q }}" placeholder="Filter by email"><button>Filter</button></form>
+{% if tab == 'bio' %}
+<table><tr><th>User</th><th>Page</th><th>Views</th><th>Updated</th></tr>
+{% for r in rows %}<tr><td>{{ r.email }}</td><td><a href="/link-{{ r.handle }}" target="_blank"><code>/link-{{ r.handle }}</code></a></td><td>{{ r.views }}</td><td>{{ r.updated }}</td></tr>
+{% else %}<tr><td colspan="4">No bio pages yet.</td></tr>{% endfor %}</table>
+{% else %}
+<table><tr><th>When (UTC)</th><th>User</th><th>Action</th><th>Status</th></tr>
+{% for r in rows %}<tr><td>{{ r.created_at.strftime('%Y-%m-%d %H:%M:%S') }}</td><td>{{ r.email }}</td><td><code>{{ r.method }} {{ r.path }}</code></td><td>{{ r.status }}</td></tr>
+{% else %}<tr><td colspan="4">Nothing in the last 30 days.</td></tr>{% endfor %}</table>
+{% endif %}
+</div></div></body></html>"""
+
+
+@app.route('/admin/activity')
+def admin_activity():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from db import ActivityLog, BioPage, Membership, SavedPersona, User
+    tabs = [('all', 'All')] + [(k, l) for k, l, _p in _ACTIVITY_KINDS] + [
+        ('api', 'Other API writes'), ('bio', 'Link-in-bio pages')]
+    tab = request.args.get('tab', 'all')
+    if tab not in dict(tabs):
+        tab = 'all'
+    q = (request.args.get('q') or '').strip().lower()
+    s = _db_session()
+    try:
+        if tab == 'bio':
+            owners = dict(s.query(SavedPersona.slug, SavedPersona.owner_id).all())
+            users = {u.id: u for u in s.query(User).all()}
+            by_ws = dict(users)
+            for m in s.query(Membership).all():
+                by_ws.setdefault(m.workspace_id, users.get(m.user_id))
+            rows = []
+            for b in s.query(BioPage).order_by(BioPage.updated_at.desc()).limit(500):
+                u = by_ws.get(b.slug[5:] if b.slug.startswith('acct-')
+                              else owners.get(b.slug))
+                email = u.email if u else '(unknown)'
+                if q and q not in email.lower():
+                    continue
+                rows.append({'email': email, 'handle': b.handle, 'views': b.views or 0,
+                             'updated': b.updated_at.strftime('%Y-%m-%d %H:%M') if b.updated_at else ''})
+        else:
+            qry = s.query(ActivityLog)
+            if tab != 'all':
+                qry = qry.filter(ActivityLog.kind == tab)
+            if q:
+                qry = qry.filter(ActivityLog.email.ilike(f'%{q}%'))
+            rows = qry.order_by(ActivityLog.created_at.desc()).limit(500).all()
+        return render_template_string(ADMIN_ACTIVITY_HTML, rows=rows, tabs=tabs, tab=tab, q=q)
+    finally:
+        s.close()
+
+
 @app.route('/admin/register-links', methods=['GET', 'POST'])
 def admin_register_links():
     blocked = _require_super_admin()
