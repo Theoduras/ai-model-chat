@@ -3245,18 +3245,28 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Buy tokens</title>
 <script src="/js/analytics.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
-.tokcard{display:grid;grid-template-columns:1.2fr 1fr;gap:0;margin:14px 0 22px;border:1px solid var(--border);border-radius:18px;overflow:hidden;
+.tk-wrap{max-width:880px;margin:0 auto;text-align:center}
+.tk-wrap .sub{max-width:520px;margin-left:auto;margin-right:auto}
+.tk-wrap .tokpacks{grid-template-columns:repeat(auto-fit,minmax(150px,1fr));margin-top:26px}
+.tokpack{display:flex;flex-direction:column;transition:transform .15s,box-shadow .15s}
+.tokpack:hover{transform:translateY(-2px);box-shadow:0 8px 24px rgba(0,0,0,.12)}
+.tokpack .gets{margin:12px 0 0;padding-top:10px;border-top:1px dashed var(--border);font-size:.78rem;color:var(--text-2);line-height:1.5}
+.tokpack .gets b{color:var(--text)}
+.tokpack button{margin-top:auto}.tokpack .gets+button{margin-top:12px}
+.tokpack.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
+.tokpack.best .save{background:var(--accent)}
+.tokcard{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:18px auto 0;max-width:640px;text-align:left;border:1px solid var(--border);border-radius:18px;overflow:hidden;
 background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),var(--surface) 60%)}
 .tokcard[hidden]{display:none}
-.tokcard>div{padding:22px 26px}
+.tokcard>div{padding:18px 22px}
 .tk-lbl{font-size:.72rem;font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--text-2)}
 .tk-num{display:flex;align-items:baseline;gap:8px;margin-top:6px}
-.tk-num b{font-size:2.6rem;line-height:1;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
+.tk-num b{font-size:2.2rem;line-height:1;font-weight:800;color:var(--text);font-variant-numeric:tabular-nums;letter-spacing:-.02em}
 .tk-num span{color:var(--text-2);font-weight:600}
 .tk-sub{margin-top:8px;font-size:.85rem;color:var(--text-2)}
 .tk-side{border-left:1px solid var(--border);display:flex;flex-direction:column;justify-content:center}
 .tk-side[hidden]{display:none}
-.tk-date{margin-top:6px;font-size:1.25rem;font-weight:700;color:var(--text)}
+.tk-date{margin-top:6px;font-size:1.1rem;font-weight:700;color:var(--text)}
 .tk-bar{margin-top:12px;height:6px;border-radius:99px;background:var(--border);overflow:hidden}
 .tk-bar i{display:block;height:100%;width:0;border-radius:inherit;background:var(--accent);transition:width .9s cubic-bezier(.2,.8,.2,1)}
 .tk-in{margin-top:8px;font-size:.8rem;color:var(--text-2)}
@@ -3273,11 +3283,10 @@ background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surf
 <a class="nav-ghost" href="/account">Account</a><a class="nav-btn" href="/dashboard">Dashboard</a>
 </div>
 </header>
-<div class="wrap wide">
+<div class="wrap wide tk-wrap">
 <div class="bar"><span>Signed in as {{ user.email }}</span><a href="/logout">Sign out</a></div>
 <h1 style="margin-bottom:6px">Buy tokens</h1>
-<p class="sub">One token is about one photo; a five-second clip is twelve.
-Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
+<p class="sub" id="tk-intro">Your plan's monthly tokens reset each month &mdash; tokens you buy here never expire.</p>
 <div class="tokcard" id="tokbal" hidden>
 <div><div class="tk-lbl">Your balance</div><div class="tk-num"><b id="tk-n"></b><span id="tk-u"></span></div><div class="tk-sub" id="tk-m"></div></div>
 <div class="tk-side" id="tk-reset" hidden><div class="tk-lbl">Monthly tokens reset</div><div class="tk-date" id="tk-d"></div><div class="tk-bar"><i id="tk-p"></i></div><div class="tk-in" id="tk-in"></div></div>
@@ -3321,6 +3330,12 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
     }); });
   }
   bal.hidden = false;
+  var cheap = d.cheapest || {};
+  if (cheap.photo && cheap.video) {
+    document.getElementById('tk-intro').textContent = 'On the cheapest models a photo is '
+      + cheap.photo + (cheap.photo === 1 ? ' token' : ' tokens') + ' and a 5-second video is '
+      + cheap.video + ' tokens. Bought tokens never expire.';
+  }
 
   // Acknowledge a purchase we just came back from. /billing/return has already
   // credited it, so the balance above is the real one, not an optimistic guess.
@@ -3343,6 +3358,11 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
   // decimals would round it to zero and read as free.
   var perTok = function(p, sym){ return sym + p.toFixed(p < 0.01 ? 4 : 2); };
   var packs = (d.packs || []).concat(d.test_pack ? [d.test_pack] : []);
+  var best = Math.max.apply(null, packs.map(function(p){ return p.test ? 0 : (p.save_pct || 0); }));
+  var upTo = function(n, per, one, many){
+    var k = Math.floor(n / per);
+    return 'up to <b>' + k.toLocaleString() + '</b> ' + (k === 1 ? one : many);
+  };
   var html = packs.map(function(p){
     var badge = p.test ? '<div class="save">test only</div>'
       : (p.save_pct ? '<div class="save">save ' + p.save_pct + '%</div>' : '');
@@ -3353,11 +3373,16 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
             + '>Pay by ' + pr[1] + '</button>';
         }).join('')
       : '<button disabled>Payments not configured</button>';
-    return '<div class="tokpack' + (p.test ? ' is-test' : '') + '">' + badge
+    var gets = cheap.photo && cheap.video
+      ? '<div class="gets">' + upTo(p.tokens, cheap.photo, 'photo', 'photos') + '<br>or '
+        + upTo(p.tokens, cheap.video, 'video', 'videos') + '</div>' : '';
+    var isBest = best && !p.test && p.save_pct === best;
+    if (isBest) badge = '<div class="save">best value &middot; save ' + p.save_pct + '%</div>';
+    return '<div class="tokpack' + (p.test ? ' is-test' : '') + (isBest ? ' best' : '') + '">' + badge
       + '<div class="n">' + p.tokens.toLocaleString() + ' <span>tokens</span></div>'
       + '<div class="p">' + money(p.price, p.symbol) + '</div>'
       + '<div class="per">' + perTok(p.per_token, p.symbol) + ' per token</div>'
-      + buttons + '</div>';
+      + gets + buttons + '</div>';
   }).join('');
   document.getElementById('tokpacks').innerHTML = html;
 
@@ -6301,6 +6326,12 @@ def api_tokens():
         'can_buy': bool(_token_sales_open()
                         and (_user_is_active(user) or user.get('is_admin'))),
         'prices': CR.price_table(),
+        # The cheapest photo and five-second clip, so a pack can say "up to"
+        # what it buys without the page knowing which models exist.
+        'cheapest': {
+            'photo': min(min(CR.IMAGE_PRICES[m].values()) for m in CR.IMAGE_MODELS),
+            'video': min(r[5] for m in CR.VIDEO_MODELS
+                         for r in CR.VIDEO_PRICES.get(m, {}).values() if 5 in r)},
         # Admin only: this is what the provider bills us, which is the margin
         # written out. A creator is quoted tokens and cash, never this.
         'provider_costs': CR.cost_table() if user.get('is_admin') else None,
