@@ -20,6 +20,8 @@ cannot be missed by a worker that was not running. Blob has no such thing, so
 there `purge_staging()` does it and the cron has to call it — see
 `_gen_ensure_lifecycle` in app.py.
 """
+import base64
+import io
 import json
 import logging
 import os
@@ -119,9 +121,53 @@ def put(slug, data, mime, prefix=STAGING_PREFIX):
     return replace(f'{prefix}/{slug}/{uuid.uuid4().hex}{ext}', data, mime)
 
 
+_COMPRESS = {'image/jpeg': ('JPEG', {'quality': 90, 'optimize': True, 'progressive': True}),
+             'image/jpg': ('JPEG', {'quality': 90, 'optimize': True, 'progressive': True}),
+             'image/png': ('PNG', {'optimize': True}),
+             'image/webp': ('WEBP', {'quality': 90, 'method': 6})}
+
+
+def compress_image(data, mime):
+    """Smaller bytes in the same format with metadata (EXIF, GPS) dropped, or
+    the original when re-encoding would not shrink it."""
+    fmt = _COMPRESS.get((mime or '').lower())
+    if not fmt or not data:
+        return data
+    try:
+        from PIL import Image, ImageOps
+        img = Image.open(io.BytesIO(data))
+        if getattr(img, 'is_animated', False):
+            return data
+        img = ImageOps.exif_transpose(img)
+        if fmt[0] == 'JPEG' and img.mode not in ('RGB', 'L'):
+            img = img.convert('RGB')
+        img.info.pop('exif', None)
+        img.info.pop('icc_profile', None) if fmt[0] == 'PNG' else None
+        out = io.BytesIO()
+        img.save(out, fmt[0], **fmt[1])
+        out = out.getvalue()
+        return out if len(out) < len(data) else data
+    except Exception:
+        logger.warning('image compress skipped', exc_info=True)
+        return data
+
+
+def compress_data_url(url):
+    if not isinstance(url, str) or not url.startswith('data:image/') or ';base64,' not in url:
+        return url
+    head, b64 = url.split(',', 1)
+    try:
+        raw = base64.b64decode(b64)
+    except Exception:
+        return url
+    out = compress_image(raw, head[5:].split(';')[0])
+    return url if out is raw else head + ',' + base64.b64encode(out).decode()
+
+
 def replace(path, data, mime):
     """Write bytes at a path this server already chose, overwriting it."""
     mime = mime or 'application/octet-stream'
+    data = compress_image(data, mime)
     if backend() == 'blob':
         _blob('PUT', '?pathname=' + urllib.parse.quote(path), body=data,
               headers={'x-content-type': mime, 'x-add-random-suffix': '0',

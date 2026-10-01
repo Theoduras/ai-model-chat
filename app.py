@@ -13836,7 +13836,7 @@ def api_persona_media_save(slug):
     try:
         poster = str(data.get('poster') or '')
         row = PersonaMedia(
-            slug=slug, image_data=image if image.startswith('data:') else '',
+            slug=slug, image_data=storage.compress_data_url(image) if image.startswith('data:') else '',
             kind=kind, mime=mime, source_url=source_url,
             poster_data=poster if poster.startswith('data:image/') else '',
             location=str(data.get('location', ''))[:120],
@@ -13953,7 +13953,7 @@ def api_persona_media_update(slug, media_id):
         if why:
             return jsonify({'error': why}), 400
         if 'image' in data and data['image'].startswith('data:'):
-            row.image_data = data['image']
+            row.image_data = storage.compress_data_url(data['image'])
         s.commit()
         return jsonify({'ok': True})
     finally:
@@ -36048,6 +36048,62 @@ def _grant_all_monthly_tokens():
         s.close()
 
 
+def _compress_existing_images():
+    """One pass over every image stored before compression existed. Marked
+    done in settings so a restart does not walk them all again."""
+    if _get_setting('images_compressed_v1'):
+        return
+    from db import (PersonaMedia, PersonaImages, PersonaNsfwImages, CharacterImage,
+                    compress_images_json)
+    saved = [0]
+
+    def _obj(path, mime):
+        if not path or not (mime or '').startswith('image/'):
+            return
+        try:
+            raw = storage.get(path)
+            out = storage.compress_image(raw, mime)
+            if raw and out is not raw:
+                storage.replace(path, out, mime)
+                saved[0] += len(raw) - len(out)
+        except Exception:
+            error_logger.warning('compress skipped %s', path, exc_info=True)
+
+    s = _db_session()
+    try:
+        for model in (PersonaImages, PersonaNsfwImages):
+            for row in s.query(model).all():
+                before = len(row.images_json or '')
+                row.images_json = compress_images_json(row.images_json)
+                saved[0] += before - len(row.images_json)
+            s.commit()
+        ids = [r[0] for r in s.query(PersonaMedia.id).all()]
+        for i, mid in enumerate(ids):
+            row = s.get(PersonaMedia, mid)
+            for f in ('image_data', 'poster_data'):
+                v = getattr(row, f) or ''
+                if v.startswith('data:image/'):
+                    nv = storage.compress_data_url(v)
+                    if nv != v:
+                        saved[0] += len(v) - len(nv)
+                        setattr(row, f, nv)
+            if storage.enabled():
+                _obj(row.gcs_path, row.mime)
+            if i % 20 == 19:
+                s.commit()
+                s.expunge_all()
+        s.commit()
+        if storage.enabled():
+            for row in s.query(CharacterImage).all():
+                _obj(row.gcs_path, row.mime)
+        _set_setting('images_compressed_v1', '1')
+        logger.info('IMAGES COMPRESSED saved=%.1fMB', saved[0] / 1048576)
+    except Exception:
+        error_logger.error('Image backfill stopped', exc_info=True)
+    finally:
+        s.close()
+
+
 def _gen_worker():
     import time as _t
     _gen_ensure_lifecycle()
@@ -36502,6 +36558,7 @@ _gen_worker_started = [False]
 if _worker_enabled('GEN_WORKER') and not _gen_worker_started[0]:
     _gen_worker_started[0] = True
     threading.Thread(target=_gen_worker, daemon=True).start()
+    threading.Thread(target=_compress_existing_images, daemon=True).start()
 
 
 _growth_queue_started = [False]

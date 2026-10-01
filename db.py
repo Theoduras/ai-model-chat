@@ -2465,12 +2465,26 @@ def get_persona_images_row(session, slug):
     return session.get(PersonaImages, slug)
 
 
+def compress_images_json(images_json):
+    import json as _json
+    from storage import compress_data_url
+    try:
+        imgs = _json.loads(images_json or '[]')
+    except ValueError:
+        return images_json
+    if not isinstance(imgs, list):
+        return images_json
+    return _json.dumps([compress_data_url(i) if isinstance(i, str)
+                        else ({**i, 'url': compress_data_url(i.get('url'))} if isinstance(i, dict) and 'url' in i else i)
+                        for i in imgs])
+
+
 def set_persona_images_row(session, slug, images_json):
     row = session.get(PersonaImages, slug)
     if row is None:
         row = PersonaImages(slug=slug)
         session.add(row)
-    row.images_json = images_json
+    row.images_json = compress_images_json(images_json)
     return row
 
 
@@ -2483,7 +2497,7 @@ def set_persona_nsfw_images_row(session, slug, images_json):
     if row is None:
         row = PersonaNsfwImages(slug=slug)
         session.add(row)
-    row.images_json = images_json
+    row.images_json = compress_images_json(images_json)
     return row
 
 
