@@ -3255,6 +3255,11 @@ TOKENS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 .tokpack button{margin-top:auto}.tokpack .gets+button{margin-top:12px}
 .tokpack.best{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .tokpack.best .save{background:var(--accent)}
+.tk-len{display:inline-flex;align-items:center;gap:10px;margin-top:22px;font-size:.8rem;color:var(--text-2)}
+.tk-len[hidden]{display:none}
+.tk-seg{display:inline-flex;padding:3px;border:1px solid var(--border);border-radius:99px;background:var(--surface)}
+.tk-seg button{border:0;background:none;color:var(--text-2);font:inherit;font-weight:600;padding:5px 14px;border-radius:99px;cursor:pointer}
+.tk-seg button.on{background:var(--accent);color:#fff}
 .tokcard{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:18px auto 0;max-width:640px;text-align:left;border:1px solid var(--border);border-radius:18px;overflow:hidden;
 background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surface)),var(--surface) 60%)}
 .tokcard[hidden]{display:none}
@@ -3291,6 +3296,7 @@ background:linear-gradient(135deg,color-mix(in srgb,var(--accent) 16%,var(--surf
 <div><div class="tk-lbl">Your balance</div><div class="tk-num"><b id="tk-n"></b><span id="tk-u"></span></div><div class="tk-sub" id="tk-m"></div></div>
 <div class="tk-side" id="tk-reset" hidden><div class="tk-lbl">Monthly tokens reset</div><div class="tk-date" id="tk-d"></div><div class="tk-bar"><i id="tk-p"></i></div><div class="tk-in" id="tk-in"></div></div>
 </div>
+<div class="tk-len" id="tk-len" hidden>Video length <span class="tk-seg" id="tk-seg"></span></div>
 <div id="tokup" class="ok" hidden></div>
 <div class="tokpacks" id="tokpacks"></div>
 <p class="sub" id="toknote" style="margin-top:16px;font-size:.82rem"></p>
@@ -3331,10 +3337,14 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
   }
   bal.hidden = false;
   var cheap = d.cheapest || {};
-  if (cheap.photo && cheap.video) {
+  var lens = Object.keys(cheap.video || {}).map(Number).sort(function(a, b){ return a - b; });
+  var vlen = lens.indexOf(5) >= 0 ? 5 : lens[0];
+  if (cheap.photo && lens.length) {
+    var vp = lens.map(function(s){ return cheap.video[s]; });
     document.getElementById('tk-intro').textContent = 'On the cheapest models a photo is '
-      + cheap.photo + (cheap.photo === 1 ? ' token' : ' tokens') + ' and a 5-second video is '
-      + cheap.video + ' tokens. Bought tokens never expire.';
+      + cheap.photo + (cheap.photo === 1 ? ' token' : ' tokens') + ' and a video '
+      + Math.min.apply(null, vp) + '\u2013' + Math.max.apply(null, vp)
+      + ' tokens, depending on length. Bought tokens never expire.';
   }
 
   // Acknowledge a purchase we just came back from. /billing/return has already
@@ -3373,9 +3383,9 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
             + '>Pay by ' + pr[1] + '</button>';
         }).join('')
       : '<button disabled>Payments not configured</button>';
-    var gets = cheap.photo && cheap.video
+    var gets = cheap.photo && lens.length
       ? '<div class="gets">' + upTo(p.tokens, cheap.photo, 'photo', 'photos') + '<br>or '
-        + upTo(p.tokens, cheap.video, 'video', 'videos') + '</div>' : '';
+        + '<span class="vids" data-tokens="' + p.tokens + '"></span></div>' : '';
     var isBest = best && !p.test && p.save_pct === best;
     if (isBest) badge = '<div class="save">best value &middot; save ' + p.save_pct + '%</div>';
     return '<div class="tokpack' + (p.test ? ' is-test' : '') + (isBest ? ' best' : '') + '">' + badge
@@ -3385,6 +3395,25 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
       + gets + buttons + '</div>';
   }).join('');
   document.getElementById('tokpacks').innerHTML = html;
+
+  var showVids = function(){
+    document.querySelectorAll('.vids').forEach(function(el){
+      el.innerHTML = upTo(+el.dataset.tokens, cheap.video[vlen], 'video', 'videos') + '<br><small>' + vlen + ' seconds each</small>';
+    });
+    document.querySelectorAll('#tk-seg button').forEach(function(b){
+      b.classList.toggle('on', +b.dataset.len === vlen);
+    });
+  };
+  if (cheap.photo && lens.length) {
+    var seg = document.getElementById('tk-seg');
+    seg.innerHTML = lens.map(function(s){ return '<button type="button" data-len="' + s + '">' + s + 's</button>'; }).join('');
+    seg.addEventListener('click', function(e){
+      var b = e.target.closest('button'); if (!b) return;
+      vlen = +b.dataset.len; showVids();
+    });
+    document.getElementById('tk-len').hidden = false;
+    showVids();
+  }
 
   if (!d.can_buy) {
     note.innerHTML = 'A plan is needed before tokens can be bought. <a href="/billing">See the plans</a>.';
@@ -6326,12 +6355,13 @@ def api_tokens():
         'can_buy': bool(_token_sales_open()
                         and (_user_is_active(user) or user.get('is_admin'))),
         'prices': CR.price_table(),
-        # The cheapest photo and five-second clip, so a pack can say "up to"
-        # what it buys without the page knowing which models exist.
+        # The cheapest photo and clip per preset length, so a pack can say
+        # "up to" what it buys without the page knowing which models exist.
         'cheapest': {
             'photo': min(min(CR.IMAGE_PRICES[m].values()) for m in CR.IMAGE_MODELS),
-            'video': min(r[5] for m in CR.VIDEO_MODELS
-                         for r in CR.VIDEO_PRICES.get(m, {}).values() if 5 in r)},
+            'video': {secs: min(r[secs] for m in CR.VIDEO_MODELS
+                                for r in CR.VIDEO_PRICES.get(m, {}).values() if secs in r)
+                      for secs in CR.VIDEO_DURATIONS}},
         # Admin only: this is what the provider bills us, which is the margin
         # written out. A creator is quoted tokens and cash, never this.
         'provider_costs': CR.cost_table() if user.get('is_admin') else None,
