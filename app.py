@@ -16990,6 +16990,7 @@ class FanvueApiError(url_error.HTTPError):
 _FV_PATH_SCOPES = (
     ('/agency', 'read:agency'),
     ('/media/uploads', 'write:media'),
+    ('/media-links', 'read:creator'),
     ('/media', 'read:media'),
     ('/chats', 'read:chat'),
     ('/fans', 'read:fan'),
@@ -17014,6 +17015,8 @@ def _fv_scope_for_path(path, method='GET'):
         if p.startswith(prefix):
             if prefix == '/posts' and str(method).upper() != 'GET':
                 return 'write:post'
+            if prefix == '/media-links' and str(method).upper() != 'GET':
+                return 'write:creator'
             return scope
     return ''
 
@@ -18284,6 +18287,67 @@ def api_fanvue_wish():
             return jsonify({'ok': False, 'error': 'Prices must be numbers'}), 400
         _set_setting(f'fanvue_wish_{persona}', json.dumps(cfg))
     return jsonify({'ok': True, **_fv_wish_cfg(persona)})
+
+
+@app.route('/wishes')
+def wishes_page():
+    if _require_super_admin():
+        return redirect('/dashboard')
+    return send_from_directory(BASE_DIR, 'wishes.html')
+
+
+@app.route('/api/wishes/status')
+def api_wishes_status():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    persona = (request.args.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    on = bool(_fv_wish_cfg(persona).get('enabled'))
+    fv = bool(_fanvue_tokens(persona).get('access_token'))
+    tg = bool((_tg_load_bots().get(persona) or {})) and bool(_tg_settings(persona).get('enabled'))
+    host = '' if not IS_VERCEL else 'Off on this host (Vercel)'
+
+    def row(name, how, ok, why):
+        return {'name': name, 'how': how, 'ready': on and ok and not host,
+                'why': host or ('Wishes are off' if not on else ('' if ok else why))}
+    sets = _wish_sets(persona)
+    return jsonify({'ok': True, 'platforms': [
+        row('Fanvue DMs', 'Locked message', fv, 'Fanvue not connected'),
+        row('Web chat', 'Fanvue media link', fv, 'Fanvue not connected'),
+        row('Telegram', 'Fanvue media link', fv and tg,
+            'Fanvue not connected' if not fv else 'Telegram bot not connected or off')],
+        'sets': len(sets), 'resold': sum(max(0, len(x.get('fans', [])) - 1) for x in sets)})
+
+
+@app.route('/api/wishes/test-link', methods=['POST'])
+def api_wishes_test_link():
+    """Make one media link from a vault item and delete it straight away, so a
+    missing permission or a switched-off feature shows here, not on a fan."""
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    persona = ((request.get_json(silent=True) or {}).get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    try:
+        uuid = next((x['uuids'][0] for x in reversed(_wish_sets(persona)) if x.get('uuids')), None)
+        if not uuid:
+            items = _fv_list(_fanvue_call(persona, 'GET', '/media?size=1&page=1'))
+            uuid = items and _fv_first(items[0], 'uuid', default='')
+        if not uuid:
+            return jsonify({'ok': False, 'error': 'Her Fanvue vault is empty — upload one photo first.'})
+        link = _fanvue_call(persona, 'POST', '/media-links',
+                            body={'mediaUuids': [uuid], 'price': 300}) or {}
+        if link.get('uuid'):
+            _fanvue_call(persona, 'DELETE', f"/media-links/{link['uuid']}")
+        return jsonify({'ok': True, 'url': link.get('url') or ''})
+    except Exception as e:
+        code = getattr(e, 'code', 0)
+        hint = (' — reconnect Fanvue so the app gets write:creator, and check media links '
+                'are enabled on the account') if code in (401, 403, 404) else ''
+        return jsonify({'ok': False, 'error': _fv_error_text(e) + hint})
 
 
 @app.route('/api/fanvue/ppv', methods=['GET', 'POST'])

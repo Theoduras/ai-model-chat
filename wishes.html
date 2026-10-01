@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Fan wishes</title>
+  <meta name="robots" content="noindex,nofollow">
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <script src="/js/theme.js"></script>
+  <script>
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+  </script>
+  <link rel="stylesheet" href="/css/style.css">
+  <style>
+    .wm { flex: 1; min-height: 0; overflow-y: auto; padding: 24px 24px 90px; display: flex; flex-direction: column; gap: 18px; max-width: 820px; }
+    .card { background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r); padding: 16px; display: flex; flex-direction: column; gap: 12px; }
+    .lbl { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--text-muted); }
+    .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+    .plat { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 12px; padding: 10px 0; border-top: 1px solid var(--border-soft); }
+    .plat:first-of-type { border-top: 0; }
+    .plat small { color: var(--text-muted); }
+    .dot { font-size: .8rem; font-weight: 600; }
+    .dot.ok { color: var(--ok); } .dot.no { color: var(--err); }
+    .msg { font-size: .85rem; } .msg.ok { color: var(--ok); } .msg.no { color: var(--err); }
+    input[type=number] { max-width: 90px; }
+  </style>
+</head>
+<body class="page-dashboard">
+<header>
+  <div style="display:flex; align-items:center; gap:10px;"><h1>Fan wishes</h1><span class="badge">✨</span></div>
+  <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+</header>
+<div class="wm">
+  <div class="card">
+    <div class="lbl">Persona</div>
+    <select id="persona" onchange="load()"></select>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Where wishes work</div>
+    <div id="plats">Loading…</div>
+    <small id="sets" style="color:var(--text-muted)"></small>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Settings</div>
+    <div class="row">
+      <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="checkbox" id="on"> On</label>
+      <label style="margin:0;">Safe price ($) <input type="number" id="sfw" min="3" step="1"></label>
+      <label style="margin:0;">Explicit price ($) <input type="number" id="nsfw" min="3" step="1"></label>
+      <label style="margin:0;" title="When a fan's message contains this, their last Fanvue wish counts as bought.">Test phrase <input type="text" id="phrase" placeholder="blank = off" style="max-width:160px;"></label>
+      <button class="btn-ai" onclick="save()">Save</button>
+      <span class="msg" id="save-msg"></span>
+    </div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Media link test</div>
+    <small style="color:var(--text-muted)">Makes one $3 Fanvue media link from her vault and deletes it straight away.</small>
+    <div class="row">
+      <button class="btn-ai" id="test-btn" onclick="testLink()">Test media link</button>
+      <span class="msg" id="test-msg"></span>
+    </div>
+  </div>
+</div>
+<script>
+let lora = '';
+const $ = id => document.getElementById(id);
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const persona = () => $('persona').value;
+const post = (u, b) => fetch(u, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) }).then(r => r.json());
+
+async function init() {
+  let list = [];
+  try { list = await (await fetch('/api/personas', { headers: { Accept: 'application/json' } })).json(); } catch (e) {}
+  list = Array.isArray(list) ? list : [];
+  $('persona').innerHTML = list.map(p => '<option value="' + esc(p.slug) + '">' + esc(p.name || p.slug) + '</option>').join('');
+  const want = new URLSearchParams(location.search).get('persona');
+  if (want && list.some(p => p.slug === want)) $('persona').value = want;
+  load();
+}
+
+async function load() {
+  if (!persona()) { $('plats').textContent = 'No personas yet.'; return; }
+  const [st, cfg] = await Promise.all([
+    fetch('/api/wishes/status?persona=' + encodeURIComponent(persona())).then(r => r.json()),
+    fetch('/api/fanvue/wish?persona=' + encodeURIComponent(persona())).then(r => r.json())]);
+  $('plats').innerHTML = (st.platforms || []).map(p =>
+    '<div class="plat"><div><b>' + esc(p.name) + '</b><br><small>' + esc(p.how) + '</small></div>' +
+    '<span class="dot ' + (p.ready ? 'ok">● Ready' : 'no">● ' + esc(p.why)) + '</span></div>').join('') || esc(st.error || '');
+  $('sets').textContent = st.ok ? st.sets + ' wish sets made · ' + st.resold + ' resold to other fans' : '';
+  $('on').checked = !!cfg.enabled;
+  $('sfw').value = cfg.price_sfw ? cfg.price_sfw / 100 : '';
+  $('nsfw').value = cfg.price_nsfw ? cfg.price_nsfw / 100 : '';
+  $('phrase').value = cfg.test_phrase || '';
+  lora = cfg.lora || '';
+}
+
+async function save() {
+  const d = await post('/api/fanvue/wish', { persona: persona(), enabled: $('on').checked,
+    price_sfw: Math.round(($('sfw').value || 0) * 100), price_nsfw: Math.round(($('nsfw').value || 0) * 100),
+    test_phrase: $('phrase').value, lora });
+  $('save-msg').className = 'msg ' + (d.ok ? 'ok' : 'no');
+  $('save-msg').textContent = d.ok ? 'Saved' : (d.error || 'Not saved');
+  if (d.ok) load();
+}
+
+async function testLink() {
+  $('test-btn').disabled = true;
+  $('test-msg').className = 'msg'; $('test-msg').textContent = 'Testing…';
+  let d = {};
+  try { d = await post('/api/wishes/test-link', { persona: persona() }); } catch (e) { d = { error: 'Request failed' }; }
+  $('test-btn').disabled = false;
+  $('test-msg').className = 'msg ' + (d.ok ? 'ok' : 'no');
+  $('test-msg').textContent = d.ok ? 'Works — media links can be created and deleted.' : (d.error || 'Failed');
+}
+
+init();
+</script>
+</body>
+</html>
