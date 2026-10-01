@@ -22470,12 +22470,17 @@ def _fv_spec_paths(word):
     """Every endpoint in Fanvue's published OpenAPI spec whose path or summary
     mentions word — the only way to see what the API offers from a host that
     can reach it, since the docs site is not reachable from everywhere."""
-    try:
-        with urllib.request.urlopen(FANVUE_API_BASE.rstrip('/') + '/openapi',
-                                    timeout=20) as r:
-            doc = json.loads(r.read().decode('utf-8'))
-    except Exception as e:
-        return {'error': str(e)[:200]}
+    doc, err = None, ''
+    for tail in ('/openapi', '/openapi.json'):
+        try:
+            with urllib.request.urlopen(FANVUE_API_BASE.rstrip('/') + tail,
+                                        timeout=20) as r:
+                doc = json.loads(r.read().decode('utf-8'))
+            break
+        except Exception as e:
+            err = str(e)[:200]
+    if doc is None:
+        return {'error': err}
     out = []
     for path, ops in (doc.get('paths') or {}).items():
         for method, op in (ops or {}).items():
@@ -22537,6 +22542,11 @@ def api_fanvue_debug():
     spec = (request.args.get('spec') or '').strip().lower()
     if spec:
         return jsonify(_fv_spec_paths(spec))
+    if request.args.get('links') == '1':
+        try:
+            return jsonify(_fanvue_call(persona, 'GET', '/media-links'))
+        except Exception as e:
+            return jsonify({'error': str(e)[:200]}), 502
     out = {}
     try:
         out['me'] = _fanvue_call(persona, 'GET', '/users/me')
