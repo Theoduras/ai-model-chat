@@ -562,7 +562,8 @@ function processQueue() {
         if (d.reply) {
           const recentBot = h.slice(-6).filter(m => m.role === 'bot').map(m => m.content.trim().toLowerCase());
           if (recentBot.includes(d.reply.trim().toLowerCase())) { showTyping(false); sc(); ss(true); processQueue(); return; }
-          cs(d.reply, () => { sc(); processQueue(); }, d.photo, typingSince);
+          cs(d.reply, () => { sc(); processQueue(); if (d.wish_text) addMsg(d.wish_text, false); }, d.photo, typingSince);
+          if (d.wish_id) pollWish(d.wish_id);
         } else {
           showTyping(false); addMsg('something went weird on my end. try again?', false); sc(); ss(false); processQueue();
         }
@@ -570,6 +571,14 @@ function processQueue() {
         showTyping(false); h.push({ role: 'user', content: x, ts: Math.floor(Date.now() / 1000) }); addMsg('something went wrong. please try again.', false); sc(); ss(false); processQueue();
       });
   }, initialDelay);
+}
+
+// A wish is made off the reply: its link lands here once the photos exist.
+function pollWish(id, n = 0) {
+  if (n > 48) return;
+  setTimeout(() => fetch('/api/wish/' + id).then(r => r.json()).then(d => {
+    if (d.text) { addMsg(d.text, false); sc(); } else pollWish(id, n + 1);
+  }).catch(() => pollWish(id, n + 1)), 5000);
 }
 
 function ss(ok) {

@@ -2453,7 +2453,9 @@ _OPEN_PATHS = (
                # verify token, or a signed_request checked against the app
                # secret — so a sign-in redirect would only look like an outage.
                '/api/threads/webhook', '/api/threads/uninstall',
-               '/api/threads/delete', '/api/threads/deletion-status'))
+               '/api/threads/delete', '/api/threads/deletion-status',
+               # The fan chat polls its wish link here; fans have no session.
+               '/api/wish/'))
 
 
 # Longest prefix wins in every map below, so a specific path can carry a
@@ -7875,7 +7877,8 @@ def _bio_domain_gate():
         return bio_page(m.group(1))
     if (path.startswith(('/link-', '/c/')) or path in _BIO_ASSETS
             or (_BIO_API_RE.match(path) and method in ('GET', 'HEAD'))
-            or (path == '/chat' and method in ('POST', 'HEAD'))):
+            or (path == '/chat' and method in ('POST', 'HEAD'))
+            or (path.startswith('/api/wish/') and method == 'GET')):
         return None
     return ('Not found', 404)
 
@@ -9723,13 +9726,41 @@ def chat():
                         persona_slug, safe_user,
                         _chat_exchanges(chat_history), bool(nsfw_photo), cta['url'])
         chat_logger.info(f'BOT [{persona_slug}]: {reply[:120]}{" +photo" if photo else ""}')
-        return jsonify({'reply': reply, 'photo': photo, 'pacing': pacing})
+        out = {'reply': reply, 'photo': photo, 'pacing': pacing}
+        if not (is_greeting or is_continue):
+            out.update(_web_wish(persona_slug, safe_user, user_message))
+        return jsonify(out)
 
     except Exception as e:
         err_msg = str(e)[:300]
         error_logger.error(f'Gemini error [{persona_slug}] user={safe_user}: {err_msg}', exc_info=True)
         reply = local_fallback_reply(user_message)
         return jsonify({'reply': reply + f' (Gemini error: {err_msg})', 'pacing': pacing})
+
+
+def _web_wish(persona, user, text):
+    """A wish from the site's chat: the waiting link straight away, or a job id
+    the page polls while the set is made."""
+    trace = lambda k, m: logger.info('WISH [%s] %s %s', persona, k, m)
+    fan = f'web:{user}'
+    got = _wish_detect(persona, fan, user, text, trace)
+    if not got:
+        return {}
+    if got[0] == 'wait':
+        return {'wish_text': _wish_waiting_text(got[1])}
+    job = secrets.token_urlsafe(12)
+    _set_setting(f'wishjob_{job}', '')
+    threading.Thread(target=_wish_run_link, daemon=True,
+                     args=(persona, fan, user, got[1],
+                           lambda t: _set_setting(f'wishjob_{job}', t), trace)).start()
+    return {'wish_id': job}
+
+
+@app.route('/api/wish/<job>')
+def api_wish_job(job):
+    if not re.fullmatch(r'[A-Za-z0-9_-]{8,40}', job or ''):
+        return jsonify({'error': 'bad id'}), 400
+    return jsonify({'text': _get_setting(f'wishjob_{job}') or ''})
 
 
 # ── Programmatic API (v1) ─────────────────────────────────────────────────────
@@ -21191,81 +21222,143 @@ def _gen_wait(job_id, timeout=150):
     return None
 
 
+def _wish_make_uuids(persona, wish, scope, trace):
+    """Generate the wish set, file it in her Fanvue vault's Wishes folder and
+    return the Fanvue media uuids, or [] when nothing could be made."""
+    owner = wish['owner']
+    body = {'kind': 'image', 'batch': 1, 'model': 'seedream-4-5',
+            'rating': 'explicit' if wish['explicit'] else 'sfw',
+            'shot': 'nude' if wish['explicit'] else 'full',
+            'prompt': wish['scene'], 'clothing': wish['outfit']}
+    char = _character_snapshot(persona)
+
+    def make(body):
+        spec = _gen_spec(persona, body, owner)
+        if char:
+            spec.update(character=char, character_id=char['id'],
+                        character_version=char['version'])
+        job_id, _short = _gen_queue(owner, persona, spec, CR.quote(spec),
+                                    _token_balance(owner))
+        if not job_id:
+            trace('error', 'wish photo skipped — not enough tokens')
+            return None
+        _gen_start(job_id, persona, spec, _workspace_id(owner))
+        media = _gen_wait(job_id)
+        data = media and storage.get(media.gcs_path)
+        if not data:
+            trace('error', 'wish generation failed')
+            return None
+        media_id, mime = media.id, media.mime or 'image/jpeg'
+        s = _db_session()
+        try:
+            from db import get_persona_media
+            _gen_keep_row(s, get_persona_media(s, media_id))
+        finally:
+            s.close()
+        return media_id, data, mime
+
+    # A set, not a single: every later photo leads with the first as its
+    # reference so outfit, room and light match and only the pose moves.
+    first = make(body)
+    if not first:
+        return []
+    photos = [first]
+    for _ in range(random.randint(2, 3) - 1):
+        more = make({**body, 'reference_media': first[0],
+                     'prompt': f"{wish['scene']}. Same woman, same outfit, same "
+                               'room, background and lighting as the first '
+                               'reference photo; only the pose and camera '
+                               'angle change.'})
+        if not more:
+            break
+        photos.append(more)
+
+    uploads = _fv_uploads(persona)
+    uuids = []
+    for media_id, data, mime in photos:
+        uuid = _fv_upload_media(persona, data, 'image',
+                                f'wish-{media_id}.{mime.split("/")[-1]}',
+                                content_type=mime, scope=scope)
+        uploads[media_id] = uuid
+        uuids.append(uuid)
+    _set_setting(_fv_uploads_key(persona), json.dumps(uploads))
+    try:
+        try:
+            _fanvue_call(persona, 'POST', '/vault/folders', body={'name': 'Wishes'})
+        except url_error.HTTPError as e:
+            if e.code not in (400, 409):
+                raise
+        for uuid in uuids:
+            _fv_attach_to_folder(persona, 'Wishes', uuid)
+    except Exception as e:
+        trace('error', f'wish not filed in Wishes: {_fv_error_text(e)}')
+    return uuids
+
+
+_WISH_STOP = {'the', 'and', 'with', 'her', 'she', 'you', 'your', 'for', 'wearing',
+              'photo', 'pic', 'picture', 'some', 'very', 'while', 'into', 'from'}
+
+
+def _wish_words(wish):
+    text = f"{wish.get('scene', '')} {wish.get('outfit', '')}".lower()
+    return {w for w in re.findall(r'[a-z]+', text) if len(w) > 2 and w not in _WISH_STOP}
+
+
+def _wish_sets(persona):
+    try:
+        return json.loads(_get_setting(f'wishsets_{persona}') or '[]')
+    except ValueError:
+        return []
+
+
+def _wish_reuse(persona, wish, fan):
+    """A set already made for someone else that matches this wish closely enough
+    to sell again, or None. Word overlap, so a match costs nothing."""
+    words, best, score = _wish_words(wish), None, 0.0
+    for st in _wish_sets(persona):
+        if bool(st.get('explicit')) != bool(wish['explicit']) or fan in st.get('fans', []):
+            continue
+        both = words | set(st.get('words', []))
+        j = len(words & set(st.get('words', []))) / len(both) if both else 0.0
+        if j > score:
+            best, score = st, j
+    return best if score >= 0.5 else None
+
+
+def _wish_remember(persona, wish, uuids, fan, reused=None):
+    sets = _wish_sets(persona)
+    if reused:
+        for st in sets:
+            if st.get('uuids') == reused.get('uuids'):
+                st.setdefault('fans', []).append(fan)
+    else:
+        sets.append({'words': sorted(_wish_words(wish)), 'explicit': bool(wish['explicit']),
+                     'uuids': uuids, 'fans': [fan]})
+    _set_setting(f'wishsets_{persona}', json.dumps(sets[-200:]))
+
+
+def _wish_uuids(persona, wish, fan, scope, trace):
+    """The set for this wish: a matching one already made, else a new one."""
+    st = _wish_reuse(persona, wish, fan)
+    if st:
+        trace('ppv', f'wish reuses an earlier set ({len(st["uuids"])} photos)')
+        _wish_remember(persona, wish, st['uuids'], fan, reused=st)
+        return st['uuids']
+    uuids = _wish_make_uuids(persona, wish, scope, trace)
+    if uuids:
+        _wish_remember(persona, wish, uuids, fan)
+    return uuids
+
+
 def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
     """Generate the wish and send it as a locked message. Off the reply path:
     a generation takes tens of seconds and the chat must not wait on it."""
     try:
         with app.app_context():
-            owner = wish['owner']
-            body = {'kind': 'image', 'batch': 1, 'model': 'seedream-4-5',
-                    'rating': 'explicit' if wish['explicit'] else 'sfw',
-                    'shot': 'nude' if wish['explicit'] else 'full',
-                    'prompt': wish['scene'], 'clothing': wish['outfit']}
-            char = _character_snapshot(persona)
-
-            def make(body):
-                spec = _gen_spec(persona, body, owner)
-                if char:
-                    spec.update(character=char, character_id=char['id'],
-                                character_version=char['version'])
-                job_id, _short = _gen_queue(owner, persona, spec, CR.quote(spec),
-                                            _token_balance(owner))
-                if not job_id:
-                    _fv_trace(persona, 'error', f'{who}: wish photo skipped — not '
-                                                'enough tokens', fan=fan_key)
-                    return None
-                _gen_start(job_id, persona, spec, _workspace_id(owner))
-                media = _gen_wait(job_id)
-                data = media and storage.get(media.gcs_path)
-                if not data:
-                    _fv_trace(persona, 'error', f'{who}: wish generation failed',
-                              fan=fan_key)
-                    return None
-                media_id, mime = media.id, media.mime or 'image/jpeg'
-                s = _db_session()
-                try:
-                    from db import get_persona_media
-                    _gen_keep_row(s, get_persona_media(s, media_id))
-                finally:
-                    s.close()
-                return media_id, data, mime
-
-            # A set, not a single: every later photo leads with the first as its
-            # reference so outfit, room and light match and only the pose moves.
-            first = make(body)
-            if not first:
+            uuids = _wish_uuids(persona, wish, f'fv:{fan_uuid}', scope,
+                                lambda k, m: _fv_trace(persona, k, f'{who}: {m}', fan=fan_key))
+            if not uuids:
                 return
-            photos = [first]
-            for _ in range(random.randint(2, 3) - 1):
-                more = make({**body, 'reference_media': first[0],
-                             'prompt': f"{wish['scene']}. Same woman, same outfit, same "
-                                       'room, background and lighting as the first '
-                                       'reference photo; only the pose and camera '
-                                       'angle change.'})
-                if not more:
-                    break
-                photos.append(more)
-
-            uploads = _fv_uploads(persona)
-            uuids = []
-            for media_id, data, mime in photos:
-                uuid = _fv_upload_media(persona, data, 'image',
-                                        f'wish-{media_id}.{mime.split("/")[-1]}',
-                                        content_type=mime, scope=scope)
-                uploads[media_id] = uuid
-                uuids.append(uuid)
-            _set_setting(_fv_uploads_key(persona), json.dumps(uploads))
-            try:
-                try:
-                    _fanvue_call(persona, 'POST', '/vault/folders', body={'name': 'Wishes'})
-                except url_error.HTTPError as e:
-                    if e.code not in (400, 409):
-                        raise
-                for uuid in uuids:
-                    _fv_attach_to_folder(persona, 'Wishes', uuid)
-            except Exception as e:
-                _fv_trace(persona, 'error', f'{who}: wish not filed in Wishes: '
-                                            f'{_fv_error_text(e)}', fan=fan_key)
             caption = wish['caption'] or 'made these just for you'
             msg_uuid = plat.send_ppv(persona, scope, fan_uuid, caption, uuids,
                                      wish['price'])
@@ -21279,6 +21372,101 @@ def _fv_run_wish(persona, scope, fan_uuid, fan_key, who, wish, plat):
         _fv_trace(persona, 'error', f'{who}: wish failed: {str(e)[:160]}', fan=fan_key)
     finally:
         _fv_wish_busy.pop(f'{persona}:{fan_uuid}', None)
+
+
+def _wish_link_open(persona, fan):
+    """The URL of this fan's last wish link while it is still unbought. A link
+    that cannot be checked counts as unbought: each wish spends tokens."""
+    try:
+        open_ = json.loads(_get_setting(f'wishlink_{persona}_{fan}') or '{}')
+    except ValueError:
+        open_ = {}
+    if not open_.get('uuid'):
+        return None
+    try:
+        for page in range(1, 6):
+            res = _fanvue_call(persona, 'GET', f'/media-links?page={page}&size=50') or {}
+            for ln in res.get('data') or []:
+                if ln.get('uuid') == open_['uuid']:
+                    if int(ln.get('unlocks') or 0) > 0:
+                        _set_setting(f'wishlink_{persona}_{fan}', '{}')
+                        return None
+                    return open_.get('url')
+            if not (res.get('pagination') or {}).get('hasMore'):
+                break
+    except Exception:
+        return open_.get('url')
+    # Gone from the list: deleted, or its media went away. Nothing to wait on.
+    _set_setting(f'wishlink_{persona}_{fan}', '{}')
+    return None
+
+
+def _wish_detect(persona, fan, who, text, trace):
+    """What a web-chat or Telegram message asks for as a wish:
+    ('wait', url) while their last link is unbought, ('make', wish), or None.
+    The free gates run first, so an ordinary message costs nothing."""
+    if IS_VERCEL:
+        return None
+    cfg = _fv_wish_cfg(persona)
+    if not cfg.get('enabled') or not wishes.looks_like_wish(text):
+        return None
+    if not _fanvue_tokens(persona).get('access_token'):
+        return None
+    owner = _wish_owner(persona)
+    if not owner:
+        return None
+    if time.time() - _fv_wish_busy.get(f'{persona}:{fan}', 0) < 300:
+        return None
+    url = _wish_link_open(persona, fan)
+    if url:
+        trace('guardrail', f'{who}: last wish link not bought — no new one')
+        return ('wait', url)
+    wish = wishes.parse(_persona_text(
+        persona, wishes.CLASSIFY_INSTRUCTION.format(text=text[:500]),
+        max_tokens=250, temperature=0.2))
+    if not wish:
+        return None
+    term = wishes.blocked(text, wish['scene'], wish['outfit'])
+    if term:
+        trace('guardrail', f'{who}: wish refused ("{term}")')
+        return None
+    if wish['explicit'] and not (_persona_config(persona) or {}).get('nsfw_enabled'):
+        trace('guardrail', f'{who}: explicit wish, persona is SFW')
+        return None
+    wish['owner'] = owner
+    wish['price'] = min(50000, max(300, wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)))
+    trace('ppv', f'{who}: wish detected: {wish["scene"]} — making a media link '
+                 f'(${wish["price"] / 100:g})')
+    _fv_wish_busy[f'{persona}:{fan}'] = time.time()
+    return ('make', wish)
+
+
+def _wish_waiting_text(url):
+    return f"your last wish is still waiting for you babe, open it first 😘 → {url}"
+
+
+def _wish_run_link(persona, fan, who, wish, send, trace):
+    """Make (or reuse) the set, put it behind a Fanvue media link and send the
+    link with send(text). Off the reply path, like the Fanvue wish."""
+    try:
+        with app.app_context():
+            uuids = _wish_uuids(persona, wish, fan, None, trace)
+            if not uuids:
+                return
+            link = _fanvue_call(persona, 'POST', '/media-links',
+                                body={'mediaUuids': uuids, 'price': wish['price']}) or {}
+            if not link.get('url'):
+                raise RuntimeError(f'no link url in {str(link)[:120]}')
+            _set_setting(f'wishlink_{persona}_{fan}',
+                         json.dumps({'uuid': link.get('uuid'), 'url': link['url']}))
+            send(f"{wish['caption'] or 'made these just for you'} → {link['url']}")
+            trace('ppv', f'✨ wish link ({len(uuids)} photos) → {who} at '
+                         f'${wish["price"] / 100:g}: {wish["scene"]}')
+    except Exception as e:
+        logger.exception('wish link for %s/%s failed', persona, fan)
+        trace('error', f'{who}: wish failed: {_fv_error_text(e)[:160]}')
+    finally:
+        _fv_wish_busy.pop(f'{persona}:{fan}', None)
 
 
 def _fv_deliver(persona, scope, fan_uuid, fan_key, handle, reply, incoming, cfg,
@@ -29856,6 +30044,20 @@ def _tg_handle_update(persona, update):
     fan['last_out'] = int(time.time())
     fans[str(chat_id)] = fan
     _tg_save_fans(persona, fans)
+    _tg_wish(persona, chat_id, fan_key, who, text)
+
+
+def _tg_wish(persona, chat_id, fan_key, who, text):
+    trace = lambda k, m: _tg_trace(persona, k, m, fan=fan_key)
+    got = _wish_detect(persona, f'tg:{chat_id}', who, text, trace)
+    if not got:
+        return
+    if got[0] == 'wait':
+        _tg_send(persona, chat_id, _wish_waiting_text(got[1]))
+        return
+    threading.Thread(target=_wish_run_link, daemon=True,
+                     args=(persona, f'tg:{chat_id}', who, got[1],
+                           lambda t: _tg_send(persona, chat_id, t), trace)).start()
 
 
 def _tg_followup_round(persona):
