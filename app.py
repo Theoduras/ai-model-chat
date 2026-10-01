@@ -7560,7 +7560,7 @@ code{font-size:.8rem;color:#a78bfa;word-break:break-all}
 .filter{display:flex;gap:8px}.filter input{flex:1;margin:0}.filter button{width:auto;padding:0 16px;margin:0}
 </style></head><body data-page="admin-activity"><div class="wrap wide">
 <div class="bar"><span>Activity log</span><a href="/admin/users">Users</a></div>
-<div class="card">
+<div class="card"><form method="post" action="/admin/compress-images" style="margin-bottom:10px"><button style="width:auto;padding:6px 14px">Compress all images now</button>{% if request.args.get('compress') %} <span>Started — runs in the background.</span>{% endif %}</form>
 <div class="tabs">{% for key, label in tabs %}<a class="{{ 'on' if key == tab }}" href="?tab={{ key }}{% if q %}&q={{ q|urlencode }}{% endif %}">{{ label }}</a>{% endfor %}</div>
 <form class="filter" method="get"><input type="hidden" name="tab" value="{{ tab }}"><input name="q" value="{{ q }}" placeholder="Filter by email"><button>Filter</button></form>
 {% if tab == 'bio' %}
@@ -36048,17 +36048,21 @@ def _grant_all_monthly_tokens():
         s.close()
 
 
-def _compress_existing_images():
+def _compress_existing_images(force=False):
     """One pass over every image stored before compression existed. Marked
     done in settings so a restart does not walk them all again."""
-    if _get_setting('images_compressed_v1'):
+    if not force and _get_setting('images_compressed_v2'):
         return
     from db import (PersonaMedia, PersonaImages, PersonaNsfwImages, CharacterImage,
                     compress_images_json)
     saved = [0]
 
     def _obj(path, mime):
-        if not path or not (mime or '').startswith('image/'):
+        if not path:
+            return
+        if not (mime or '').startswith('image/'):
+            mime = storage.mime_of(path)
+        if not (mime or '').startswith('image/'):
             return
         try:
             raw = storage.get(path)
@@ -36089,6 +36093,7 @@ def _compress_existing_images():
                         setattr(row, f, nv)
             if storage.enabled():
                 _obj(row.gcs_path, row.mime)
+                _obj(row.poster_gcs_path, '')
             if i % 20 == 19:
                 s.commit()
                 s.expunge_all()
@@ -36096,12 +36101,21 @@ def _compress_existing_images():
         if storage.enabled():
             for row in s.query(CharacterImage).all():
                 _obj(row.gcs_path, row.mime)
-        _set_setting('images_compressed_v1', '1')
+        _set_setting('images_compressed_v2', '1')
         logger.info('IMAGES COMPRESSED saved=%.1fMB', saved[0] / 1048576)
     except Exception:
         error_logger.error('Image backfill stopped', exc_info=True)
     finally:
         s.close()
+
+
+@app.route('/admin/compress-images', methods=['POST'])
+def admin_compress_images():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    threading.Thread(target=_compress_existing_images, args=(True,), daemon=True).start()
+    return redirect('/admin/activity?compress=started')
 
 
 def _gen_worker():
