@@ -3080,8 +3080,9 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
                     + (1 if dev_mode else 0), 1]|max %}
 {% set show_free = not user.email or user.status != 'active' or user.tier == free_key %}
 <div class="tiers{{ ' five' if show_free }}" role="radiogroup" aria-label="Plans">
-{% if show_free %}<div class="tier">
-<div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
+{% if show_free %}<div class="tier" data-select="{{ free_key }}"
+ role="radio" aria-checked="false" tabindex="0" aria-label="{{ free.name }} plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span></div>
 <h2>{{ free.name }}</h2><div class="blurb">{{ free.blurb }}</div>
 <div class="price">{{ currency }}0<span>/month</span></div>
 <ul>{% for f in free.features %}<li>{{ f }}</li>{% endfor %}</ul>
