@@ -21,6 +21,7 @@
     .plat small { color: var(--text-muted); }
     .dot { font-size: .8rem; font-weight: 600; }
     .dot.ok { color: var(--ok); } .dot.no { color: var(--err); }
+    .chip { border: 1px solid var(--border); background: var(--surface); color: var(--text-2); border-radius: 999px; padding: 4px 10px; font: inherit; font-size: .75rem; cursor: pointer; }
     .msg { font-size: .85rem; } .msg.ok { color: var(--ok); } .msg.no { color: var(--err); }
     input[type=number] { max-width: 90px; }
   </style>
@@ -55,10 +56,33 @@
   </div>
 
   <div class="card">
-    <div class="lbl">Media link test</div>
-    <small style="color:var(--text-muted)">Makes one $3 Fanvue media link from her vault and deletes it straight away.</small>
+    <div class="lbl">Link provider (web chat &amp; Telegram)</div>
     <div class="row">
-      <button class="btn-ai" id="test-btn" onclick="testLink()">Test media link</button>
+      <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="radio" name="prov" value="fanvue" onchange="provUI()"> Fanvue media link</label>
+      <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="radio" name="prov" value="exclu" onchange="provUI()"> Exclu link (via Zapier or Make)</label>
+    </div>
+    <div id="exclu-box" style="display:none; flex-direction:column; gap:10px;">
+      <label style="margin:0;">Webhook URL (Zapier "Catch Hook" or Make "Custom webhook")
+        <input type="url" id="hook" placeholder="https://hooks.zapier.com/hooks/catch/…" style="width:100%;"></label>
+      <div class="row"><small>Callback URL</small> <code id="cb" style="word-break:break-all;"></code> <button class="chip" onclick="copy('cb')">Copy</button></div>
+      <div class="row"><small>Secret</small> <code id="sec"></code> <button class="chip" onclick="copy('sec')">Copy</button></div>
+      <ol style="margin:0; padding-left:18px; font-size:.85rem; color:var(--text-2); line-height:1.6;">
+        <li>Zap 1 trigger: <b>Webhooks → Catch Hook</b>. Paste its URL above and press Save.</li>
+        <li>Action: <b>Exclu → Create link</b>. Map <code>files</code>, <code>price</code> and <code>title</code> from the hook.</li>
+        <li>Action: <b>Webhooks → POST</b> to the callback URL, as JSON: <code>job</code> (from the hook), <code>secret</code>, <code>url</code> and <code>link_id</code> (from Exclu).</li>
+        <li>Zap 2 trigger: <b>Exclu → New sale</b>, then <b>Webhooks → POST</b> to the same callback URL with <code>event</code> = <code>sale</code>, <code>secret</code>, and the sold link's <code>link_id</code> or <code>url</code>.</li>
+        <li>Press <b>Test</b> below. Zapier then has a sample to map, and "last callback" updates once Zap 1 answers.</li>
+      </ol>
+      <small id="last" style="color:var(--text-muted)"></small>
+    </div>
+    <div class="row"><button class="btn-ai" onclick="save()">Save</button></div>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Link test</div>
+    <small id="test-what" style="color:var(--text-muted)">Makes one $3 Fanvue media link from her vault and deletes it straight away.</small>
+    <div class="row">
+      <button class="btn-ai" id="test-btn" onclick="testLink()">Test</button>
       <span class="msg" id="test-msg"></span>
     </div>
   </div>
@@ -94,12 +118,28 @@ async function load() {
   $('nsfw').value = cfg.price_nsfw ? cfg.price_nsfw / 100 : '';
   $('phrase').value = cfg.test_phrase || '';
   lora = cfg.lora || '';
+  const prov = cfg.provider === 'exclu' ? 'exclu' : 'fanvue';
+  document.querySelectorAll('input[name=prov]').forEach(r => r.checked = r.value === prov);
+  $('hook').value = cfg.hook_url || '';
+  const h = st.hook || {};
+  $('cb').textContent = h.callback_url || ''; $('sec').textContent = h.secret || '';
+  $('last').textContent = h.last && h.last.at ? 'Last callback: ' + new Date(h.last.at * 1000).toLocaleString() + ' (' + (h.last.job === 'test' ? 'test' : h.last.event) + ')' : 'No callback received yet.';
+  provUI();
 }
+
+const provider = () => (document.querySelector('input[name=prov]:checked') || {}).value || 'fanvue';
+function provUI() {
+  const ex = provider() === 'exclu';
+  $('exclu-box').style.display = ex ? 'flex' : 'none';
+  $('test-what').textContent = ex ? 'Sends a test wish to your webhook so the Zap can be built and checked.'
+                                  : 'Makes one $3 Fanvue media link from her vault and deletes it straight away.';
+}
+function copy(id) { try { navigator.clipboard.writeText($(id).textContent); } catch (e) {} }
 
 async function save() {
   const d = await post('/api/fanvue/wish', { persona: persona(), enabled: $('on').checked,
     price_sfw: Math.round(($('sfw').value || 0) * 100), price_nsfw: Math.round(($('nsfw').value || 0) * 100),
-    test_phrase: $('phrase').value, lora });
+    test_phrase: $('phrase').value, lora, provider: provider(), hook_url: $('hook').value.trim() });
   $('save-msg').className = 'msg ' + (d.ok ? 'ok' : 'no');
   $('save-msg').textContent = d.ok ? 'Saved' : (d.error || 'Not saved');
   if (d.ok) load();
@@ -112,7 +152,9 @@ async function testLink() {
   try { d = await post('/api/wishes/test-link', { persona: persona() }); } catch (e) { d = { error: 'Request failed' }; }
   $('test-btn').disabled = false;
   $('test-msg').className = 'msg ' + (d.ok ? 'ok' : 'no');
-  $('test-msg').textContent = d.ok ? 'Works — media links can be created and deleted.' : (d.error || 'Failed');
+  $('test-msg').textContent = !d.ok ? (d.error || 'Failed')
+    : d.exclu ? 'Sent to your webhook (HTTP ' + d.status + '). Reload in a minute to see the callback.'
+    : 'Works — media links can be created and deleted.';
 }
 
 init();
