@@ -443,6 +443,16 @@ POST_PLATFORMS = {
                   'strangers, no "link in bio", no explaining who you are. Talk '
                   'about what is in front of them and what else is waiting'),
     },
+    # A scheduled message to whole Fanvue lists rather than a feed post. Same
+    # account, so it reads Fanvue's content level and plan access.
+    'fanvue_dm': {
+        'label': 'Fanvue mass DM',
+        'cap': 1000,
+        'brief': ('a private message to people who already subscribe. It goes '
+                  'to many of them but must read as if written to one: no "hey '
+                  'everyone", no "you all", no announcement voice. Short, warm, '
+                  'and about them as much as you'),
+    },
     'reddit': {
         'label': 'Reddit',
         'cap': 300,
@@ -453,7 +463,7 @@ POST_PLATFORMS = {
 
 # What the platform can actually publish on its own. The rest are written here
 # and posted by hand, which is why they are generated but never queued.
-PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram')
+PUBLISHABLE = ('x', 'threads', 'fanvue', 'instagram', 'fanvue_dm')
 
 # A variant is a second way to write for a channel that already exists, not a
 # channel of its own, so anything keyed per channel — the content level, the
@@ -468,8 +478,18 @@ def base_platform(platform):
     return VARIANT_BASE.get(plat, plat)
 
 
+# Channels that are another way of using the same account: they keep their own
+# queue rows but share that account's plan access and content level.
+ACCOUNT_OF = {'fanvue_dm': 'fanvue'}
+
+
+def account_platform(platform):
+    plat = base_platform(platform)
+    return ACCOUNT_OF.get(plat, plat)
+
+
 def default_platforms():
-    return [p for p in POST_PLATFORMS if p not in VARIANT_BASE]
+    return [p for p in POST_PLATFORMS if p not in VARIANT_BASE and p not in ACCOUNT_OF]
 
 
 # On a video the words on screen and the words in the caption do different jobs:
@@ -499,6 +519,7 @@ MEDIA_SUPPORT = {
     'x':         {'kinds': ('image', 'video'), 'how': 'upload', 'max': 4},
     'threads':   {'kinds': ('image', 'video'), 'how': 'fetch',  'max': 20},
     'fanvue':    {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
+    'fanvue_dm': {'kinds': ('image', 'video'), 'how': 'upload', 'max': 20},
     # Instagram, Reddit and TikTok are signed-in accounts rather than
     # app-registered ones, so the bytes go up the same way -- what differs is
     # only which undocumented endpoint takes them. A TikTok post is one clip or
@@ -703,7 +724,7 @@ def content_level(overrides, platform, global_enabled, global_level):
     wins, then the SFW floor, then the persona's global chat setting — so a
     caption never assumes a looser level than the creator actually set. A
     variant reads its base channel's level: a carousel is still Instagram."""
-    src = base_platform(platform)
+    src = account_platform(platform)
     row = (overrides or {}).get(src)
     if row:
         return bool(row.get('nsfw_enabled')), row.get('nsfw_level', 'suggestive')

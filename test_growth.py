@@ -344,6 +344,14 @@ cw = G.plan_week(pstart, 7, platforms=['x', 'instagram'], counts={'x': 3, 'insta
 check('counts set the posts per channel',
       sum(s['platform'] == 'x' for s in cw) == 3 and sum(s['platform'] == 'instagram' for s in cw) == 5,
       len(cw))
+check('a fanvue mass DM is publishable', 'fanvue_dm' in G.PUBLISHABLE)
+check('the week planner never plans a mass DM',
+      'fanvue_dm' not in G.WEEKLY_CADENCE and 'fanvue_dm' not in G.US_WINDOWS)
+check('a mass DM takes explicit media like a fanvue post',
+      G.media_rating_ok('fanvue_dm', 'nsfw') and G.media_ok('fanvue_dm', 'video'))
+check('a mass DM reads the fanvue content level',
+      G.content_level({'fanvue': {'nsfw_enabled': True, 'nsfw_level': 'explicit'}},
+                      'fanvue_dm', False, 'suggestive') == (True, 'explicit'))
 check('a zero count is no posts', G.plan_week(pstart, 7, platforms=['x'], counts={'x': 0}) == [])
 check('counts spread over the week', len({s['day'] for s in cw if s['platform'] == 'instagram'}) == 5)
 check('a week starts on the day it is given',
@@ -359,7 +367,7 @@ check('a little of it asks', 0 < kinds['cta'] / len(week) <= 0.15, kinds)
 check('reddit never asks',
       all(s['kind'] == 'value' for s in week if s['platform'] == 'reddit'))
 check('only x and threads are marked publishable',
-      {s['platform'] for s in week if s['publishable']} == set(G.PUBLISHABLE))
+      {s['platform'] for s in week if s['publishable']} == set(G.PUBLISHABLE) - {'fanvue_dm'})
 check('a shorter run is proportionally shorter', len(G.plan_week(pstart, 1)) < len(week))
 check('days are clamped to something sane', len(G.plan_week(pstart, 999)) == len(G.plan_week(pstart, 28)))
 check('no days is still one day', len(G.plan_week(pstart, 0)) == len(G.plan_week(pstart, 1)))
