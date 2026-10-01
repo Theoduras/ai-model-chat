@@ -30,6 +30,13 @@
 .screen>.bio{min-height:100%}
 .save{width:100%;justify-content:center}
 @media (max-width:900px){.lb{grid-template-columns:1fr}.phone{position:static;margin:0 auto;width:100%;max-width:330px}.lnk{grid-template-columns:1fr auto}.lnk input:nth-child(2){grid-column:1}}
+.cta{margin-top:40px;padding:34px;border-width:2px;border-color:#ff5c3866;text-align:center}
+.cta h2{font-size:clamp(24px,3.2vw,32px)}
+.cta p{max-width:620px;margin:10px auto 0;font-size:15.5px}
+.cta .btn{margin-top:18px;padding:14px 30px;font-size:16px}
+.cta .ticks{display:flex;gap:8px 18px;justify-content:center;flex-wrap:wrap;margin-top:14px;font-size:13px;color:var(--text-dim)}
+.upsell{margin-top:12px;font-size:13.5px;text-align:center}
+.upsell a{color:var(--accent);font-weight:600;text-decoration:none}
 {% endblock %}
 {% block sub %}Build your own link-in-bio page in a minute: your photo, your socials, your links, one
   short link for your Instagram, TikTok or X bio. Free, and no Linktree branding.{% endblock %}
@@ -61,15 +68,17 @@
       <div class="themes" id="themes"></div>
       <button class="btn save" type="button" id="save">Save &amp; publish my page</button>
       <div class="msg" id="smsg">Free account needed to publish. Takes 30 seconds.</div>
+      <p class="upsell">Want her to chat back too? <a href="#chat-back">See how &darr;</a></p>
     </section>
   </div>
   <div class="phone"><div class="screen" id="preview"></div></div>
 </div>
 {% endblock %}
 {% block cta %}
-<h2>Want her to chat back too?</h2>
-<p>Velvetfunneler.com adds a "Chat with me" button to your page: an AI persona in your voice that replies
-  to every fan, around the clock, and offers your paid content at the right moment.</p>
+<h2 id="chat-back">Want her to chat back too?</h2>
+<p>Add a "Chat with me" button to your page: an AI persona in your voice that replies
+  to every follower, around the clock, and points them to your page at the right moment.</p>
+<div class="ticks"><span>&#10003; Free account</span><span>&#10003; Takes 30 seconds</span><span>&#10003; Your page stays free</span></div>
 {% endblock %}
 {% block script %}
 <script src="/js/bio-render.js"></script>
@@ -81,7 +90,7 @@ const THEMES = {
   poster: { label: 'Poster', bg_type: 'solid', bg1: '#f2ff5b', bg2: '#f2ff5b', text: '#111111', btn_bg: '#ffffff', btn_text: '#111111', accent: '#ff3d7f', btn_style: 'shadow', radius: 'square', avatar_shape: 'cover', font_title: 'Syne', font_body: 'DM Sans' },
   noir: { label: 'Noir', bg_type: 'solid', bg1: '#0d0d0f', bg2: '#0d0d0f', text: '#f2f2f2', btn_bg: '#f2f2f2', btn_text: '#f2f2f2', accent: '#c9a45c', btn_style: 'outline', radius: 'round', avatar_shape: 'circle', font_title: 'Playfair Display', font_body: 'Inter' }
 };
-const S = { handle: '', name: '', bio: '', avatar: null, socials: [], links: [{ title: 'My exclusive page', url: '' }], theme: 'peach' };
+const S = { handle: '', name: '', bio: '', avatar: null, socials: [], links: [{ title: 'My website', url: '' }], theme: 'peach' };
 try { Object.assign(S, JSON.parse(localStorage.getItem('bio_draft') || '{}')); } catch (e) {}
 
 function userUrl(so) {

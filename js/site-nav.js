@@ -107,6 +107,7 @@
     { menu: 'Features', groups: FEATURES },
     { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
+    { href: '/free-link-in-bio', label: 'Free Link Builder', hot: true },
   ];
   var ACCOUNT_OUT = [
     { href: '/login', label: 'Log in', icon: 'login' },
@@ -188,7 +189,7 @@
       if (i.avatar) return '<a data-sn href="' + i.href + '" class="sn-avatar" title="Account" aria-label="Account">' +
         (avatarUrl ? '<img src="' + avatarUrl + '" alt="">' : ICONS.account) + '</a>';
       return '<a data-sn href="' + i.href + '"' +
-        (i.cta ? ' class="sn-cta"' : '') +
+        (i.cta ? ' class="sn-cta"' : i.hot ? ' class="sn-hot"' : '') +
         (i.keep ? ' data-keep' : '') +
         (i.tokens ? ' data-sn-tokens title="Buy tokens"' : '') +
         (isCurrent(i.href) ? ' aria-current="page"' : '') +

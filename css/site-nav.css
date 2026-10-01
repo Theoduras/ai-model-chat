@@ -57,6 +57,8 @@
 .sn-links a[aria-current="page"]{opacity:1;border-color:rgba(128,128,128,.7)}
 .sn-links a.sn-cta{opacity:1;color:#fff;background:var(--accent,#ff5c38);
   border-color:var(--accent,#ff5c38)}
+.sn-links a.sn-hot{opacity:1;color:#ff8a3d;font-weight:600}
+.sn-links a.sn-hot:hover{color:#ffb070}
 .sn-links a.sn-cta:hover{filter:brightness(1.08);background:var(--accent,#ff5c38)}
 /* The token count wears the app's btn-primary (the "+ New persona" button):
    the same sweeping gradient and radius, with fallbacks for pages whose
