@@ -13,6 +13,7 @@
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
 <script src="/js/skeleton.js"></script>
+<script src="/js/vault-picker.js"></script>
   <script src="/js/devnav.js" defer></script>
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
@@ -130,7 +131,6 @@
         </label>
         <div class="pl-picked" id="pl-m-picked"></div>
         <div id="pl-m-browse" style="margin:8px 0 2px;"></div>
-        <div class="pl-strip" id="pl-m-strip"></div>
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
       </div>
 
@@ -444,8 +444,6 @@ function plFvRemember(items) {
 async function plLoadFvVault() {
   if (plFvVault || !plSlug) return;
   plFvVault = [];
-  const strip = document.getElementById('pl-m-strip');
-  if (strip) strip.innerHTML = skelGrid(6);
   try {
     plFvRemember(await plFvFetch(1));
   } catch (e) { plFvVaultError = 'Could not read the Fanvue vault.'; }
@@ -1388,7 +1386,7 @@ function plRenderMedia() {
   const usable = library.filter(m => allowed.indexOf(m.kind || 'image') !== -1);
   field.style.display = chans.length ? '' : 'none';
   // A pick from the other library cannot survive the switch — a Fanvue uuid is
-  // nothing to X, and a library photo is nothing to the vault strip.
+  // nothing to X, and a library photo is nothing to her Fanvue vault.
   plPickedMedia = plPickedMedia.filter(id => usable.some(m => m.id === id));
   const cap = plMediaCap();
   if (plPickedMedia.length > cap) plPickedMedia = plPickedMedia.slice(0, cap);
@@ -1415,23 +1413,9 @@ function plRenderMedia() {
           + ' will take. Add photos and clips in the persona editor.'
         : 'These channels take different kinds of media, so no one file suits '
           + 'them all. Post them separately to attach something.');
-  // The strip is the first page; the whole vault, with its folders, is a click
-  // away rather than an endless scroll inside the editor.
-  document.getElementById('pl-m-browse').innerHTML = (fvOnly
-    ? '<button type="button" class="btn-section-save" style="margin-left:0;"'
-      + ' onclick="plVaultOpen()">Browse the vault</button>'
-    // A Fanvue vault item has to be uploaded to Fanvue itself, so an upload
-    // here would land in the wrong library.
-    : '<button type="button" class="btn-section-save" style="margin-left:0;"'
-      + ' onclick="document.getElementById(\'pl-m-upload\').click()">Upload media</button>'
-      + '<input type="file" id="pl-m-upload" multiple accept="image/*,video/*"'
-      + ' style="display:none" onchange="plUpload(this)">')
-    + '<span class="hint" id="pl-m-upload-note" style="margin-left:8px;"></span>';
-  document.getElementById('pl-m-strip').innerHTML = usable.length
-    ? usable.map(m => '<button type="button" class="pl-pick'
-        + (plPickedMedia.indexOf(m.id) !== -1 ? ' on' : '') + '" title="' + esc(m.purpose || m.kind)
-        + '" onclick="plPickMedia(\'' + esc(m.id) + '\')">'
-        + plMediaThumb(m) + '</button>').join('')
+  document.getElementById('pl-m-browse').innerHTML = fvOnly ? usable.length : allowed.length
+    ? '<button type="button" class="btn-section-save" style="margin-left:0;" onclick="'
+      + (fvOnly ? 'plVaultOpen()">Browse her Fanvue vault' : 'plPickOpen()">Choose from vault') + '</button>'
     : '<span class="hint">' + emptyNote + '</span>';
 
   // A Fanvue post ticked with another channel is drawn from the persona library
@@ -1465,66 +1449,16 @@ function plMediaCap() {
   return Math.min.apply(null, chans.map(p => PL_MEDIA_MAX[p] || 1));
 }
 
-const PL_UPLOAD_MAX = 12 * 1024 * 1024;
-
-// A video's first frame, as a data URL. Instagram wants one as a Reel's cover
-// and nothing on the server can open a video to find one, so it is taken here
-// while the file is in the browser anyway.
-function plPosterFrame(file) {
-  return new Promise(resolve => {
-    const v = document.createElement('video');
-    v.preload = 'metadata';
-    v.muted = true;
-    const done = url => { URL.revokeObjectURL(v.src); resolve(url); };
-    v.onloadedmetadata = () => { v.currentTime = Math.min(0.1, (v.duration || 0) / 2); };
-    v.onseeked = () => {
-      try {
-        const c = document.createElement('canvas');
-        c.width = v.videoWidth; c.height = v.videoHeight;
-        c.getContext('2d').drawImage(v, 0, 0, c.width, c.height);
-        done(c.toDataURL('image/jpeg', 0.85));
-      } catch (e) { done(''); }
-    };
-    v.onerror = () => done('');
-    v.src = URL.createObjectURL(file);
-  });
-}
-
-async function plUpload(input) {
-  const files = Array.from(input.files || []);
-  input.value = '';
-  if (!files.length) return;
-  const note = document.getElementById('pl-m-upload-note');
-  note.textContent = 'Uploading ' + files.length + ' file(s)…';
-  const readAsDataURL = f => new Promise(res => {
-    const r = new FileReader(); r.onload = e => res(e.target.result); r.readAsDataURL(f);
-  });
-  let added = 0, toobig = 0;
-  const fresh = [];
-  for (const file of files) {
-    if (file.size > PL_UPLOAD_MAX) { toobig++; continue; }
-    try {
-      const image = await readAsDataURL(file);
-      const poster = file.type.startsWith('video/') ? await plPosterFrame(file) : '';
-      const r = await fetch('/api/personas/' + encodeURIComponent(plSlug) + '/media', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image, mime: file.type || '', poster })
-      });
-      const d = await r.json();
-      if (d.id) { fresh.push(d.id); added++; }
-    } catch (e) {}
-  }
-  await plLoadVault();
-  // Attaching them is the point of uploading from here, so they go onto the
-  // post, up to whatever it can carry.
-  fresh.forEach(id => {
-    if (plPickedMedia.indexOf(id) === -1 && plPickedMedia.length < plMediaCap()) {
-      plPickedMedia.push(id);
-    }
-  });
-  plRenderMedia();
-  note.textContent = (added ? '✓ Added ' + added + ' file(s).' : 'Nothing added.')
-    + (toobig ? ' ' + toobig + ' over 12MB — host those and paste the link.' : '');
+// Everything a post carries is picked in the vault, uploads included.
+function plPickOpen() {
+  const chans = plOpenChans();
+  const allowed = chans.map(p => PL_MEDIA[p] || [])
+    .reduce((a, b) => a.filter(k => b.indexOf(k) !== -1));
+  VaultPicker.open({ persona: plSlug, max: plMediaCap(), picked: plPickedMedia,
+    kind: allowed.length === 1 ? allowed[0] : '', title: 'Attach media',
+    filter: m => allowed.indexOf(m.kind || 'image') !== -1,
+    onUpload: () => { plVault = VaultPicker.items(plSlug) || plVault; },
+    onDone: ids => { plVault = VaultPicker.items(plSlug) || plVault; plPickedMedia = ids; plRenderMedia(); } });
 }
 
 function plPickMedia(id) {

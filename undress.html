@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="/css/style.css">
   <link rel="stylesheet" href="/css/site-nav.css">
   <script src="/js/site-nav.js" defer></script>
+  <script src="/js/vault-picker.js"></script>
   <script>
     if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
     else document.documentElement.classList.add('in-workspace');
@@ -23,10 +24,9 @@
     .ud-step { padding:14px 16px; border-radius:var(--r-md); border:1px solid var(--border-soft); background:var(--panel); box-shadow:var(--shadow-sm); font-size:.8rem; line-height:1.5; }
     .ud-step b { display:block; margin-bottom:3px; font-size:.84rem; font-weight:600; color:var(--text); }
     .ud-step span { color:var(--text-muted); }
-    .ud-tab, .ud-btn, .ud-tools select { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:9999px; border:1px solid var(--border); background:var(--surface); color:var(--text-2); cursor:pointer; font-size:.78rem; font-weight:600; font-family:var(--font); text-decoration:none; transition:background .15s, border-color .15s, color .15s; }
+    .ud-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:9999px; border:1px solid var(--border); background:var(--surface); color:var(--text-2); cursor:pointer; font-size:.78rem; font-weight:600; font-family:var(--font); text-decoration:none; transition:background .15s, border-color .15s, color .15s; }
     .ud-btn { border-radius:10px; }
-    .ud-tab.on { background:var(--accent); border-color:transparent; color:#fff; }
-    .ud-btn:hover, .ud-tab:not(.on):hover, .ud-tools select:hover { border-color:var(--accent-line); color:var(--text); }
+    .ud-btn:hover { border-color:var(--accent-line); color:var(--text); }
     .ud-note { margin:0 0 14px; padding:10px 14px; border-radius:var(--r-md); border:1px solid var(--accent-line); background:var(--panel); color:var(--text-2); font-size:.8rem; }
     .ud-drop { display:none; position:fixed; inset:12px; z-index:50; border-radius:var(--r-lg); background:#00000088; border:2px dashed var(--accent); color:#fff; align-items:center; justify-content:center; font-size:1.1rem; font-weight:600; pointer-events:none; backdrop-filter:blur(3px); }
     .ud-dragging .ud-drop { display:flex; }
@@ -38,20 +38,14 @@
     .ud-pending { display:flex; align-items:center; justify-content:center; aspect-ratio:3/4; font-size:.78rem; color:var(--text-muted); padding:10px; text-align:center; background:linear-gradient(110deg,var(--surface) 30%,var(--panel) 50%,var(--surface) 70%); background-size:200% 100%; animation:udsh 1.4s linear infinite; }
     @keyframes udsh { to { background-position:-200% 0; } }
     .ud-empty { color:var(--text-muted); font-size:.85rem; padding:56px 20px; text-align:center; grid-column:1/-1; border:1px dashed var(--border); border-radius:var(--r-lg); }
-    .ud-lb, .ud-vp { position:fixed; inset:0; z-index:3000; background:#000000e8; display:none; align-items:center; justify-content:center; flex-direction:column; gap:16px; padding:20px; }
-    .ud-lb.on, .ud-vp.on { display:flex; }
+    .ud-lb { position:fixed; inset:0; z-index:3000; background:#000000e8; display:none; align-items:center; justify-content:center; flex-direction:column; gap:16px; padding:20px; }
+    .ud-lb.on { display:flex; }
     .ud-lb img { max-width:92vw; max-height:76vh; object-fit:contain; border-radius:8px; }
     .ud-lb .ud-btn { background:#ffffff1a; border-color:#ffffff22; color:#fff; }
     .ud-lb .ud-btn:hover { background:#ffffff33; }
     .ud-lb .nav { position:absolute; top:50%; transform:translateY(-50%); width:44px; height:44px; border-radius:50%; border:0; background:#ffffff22; color:#fff; font-size:1.3rem; cursor:pointer; }
     .ud-lb .nav:hover { background:#ffffff38; }
-    .ud-lb .x, .ud-vp .x { position:absolute; top:14px; right:14px; width:36px; height:36px; border:0; border-radius:50%; background:#ffffff22; color:#fff; font-size:1.2rem; cursor:pointer; }
-    .ud-vp .box { width:min(900px,94vw); max-height:86vh; overflow:auto; padding:20px; border-radius:var(--r-lg); background:var(--panel); border:1px solid var(--border-soft); box-shadow:var(--shadow-md); color:var(--text); }
-    .ud-vp .box h3 { font-size:.95rem; font-weight:600; }
-    .ud-vp .ud-grid { grid-template-columns:repeat(auto-fill,minmax(120px,1fr)); gap:10px; margin:14px 0; }
-    .ud-vp .ud-card img.main { display:block; width:100%; aspect-ratio:1; object-fit:cover; cursor:pointer; }
-    .ud-vp .ud-card.sel { outline:2px solid var(--accent); outline-offset:1px; }
-    .ud-vp .box > .ud-btn:last-child { background:var(--accent); border-color:transparent; color:#fff; }
+    .ud-lb .x { position:absolute; top:14px; right:14px; width:36px; height:36px; border:0; border-radius:50%; background:#ffffff22; color:#fff; font-size:1.2rem; cursor:pointer; }
     @media (max-width:600px) {
       .ud-wrap { padding:18px 16px 110px; }
       .ud-acts { opacity:1; }
@@ -73,6 +67,8 @@
     .vw-selbar.on { display:flex; }
     .vw-selbar strong { font-size:0.82rem; }
     .vw-selbar .sp { margin-left:auto; }
+    .ud-row-th { width:48px; height:48px; border-radius:8px; overflow:hidden; flex-shrink:0; background:var(--surface); }
+    .ud-row-th img { width:100%; height:100%; object-fit:cover; }
     .ud-sm { padding:5px 10px !important; font-size:.72rem !important; height:auto !important; text-decoration:none; }
     .ud-orig { bottom:8px !important; }
     @media (max-width:600px) { .ud-wrap .pg-grid { grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; } }
@@ -87,21 +83,7 @@
   </div>
 </header>
 <div class="ud-scroll" id="ud-scroll"><div class="ud-wrap">
-  <div class="pg-head">
-    <div class="pg-head-l" style="display:flex;align-items:center;gap:10px;">
-      <h2 style="font-size:1.1rem;font-weight:600;">Undress</h2>
-      <span class="ud-chip">1 token per photo</span>
-      <label class="btn btn-primary">+ Upload<input type="file" id="ud-upload-input" accept="image/*" multiple hidden onchange="udUpload(this.files); this.value=''"></label>
-      <button type="button" class="pg-ctl" onclick="vpOpen()">+ From vault</button>
-    </div>
-    <div class="pg-toggle">
-      <button type="button" class="ud-tab active" data-f="all" onclick="udFilter('all')">All</button>
-      <button type="button" class="ud-tab" data-f="up" onclick="udFilter('up')">Uploads</button>
-      <button type="button" class="ud-tab" data-f="res" onclick="udFilter('res')">Results</button>
-    </div>
-    <select id="ud-sort" class="pg-ctl" style="padding:0 30px 0 10px;" onchange="udRender()"><option value="new">Newest first</option><option value="old">Oldest first</option></select>
-    <button type="button" class="pg-ctl" id="ud-selbtn" onclick="udSelMode()">Select</button>
-  </div>
+  <div id="ud-head"></div>
   <div class="ud-steps">
     <div class="ud-step"><b>1. Add a photo</b><span>Upload (or drag and drop) images, or add them from a persona's vault.</span></div>
     <div class="ud-step"><b>2. Click Undress</b><span>Takes about a minute. The result appears next to its original.</span></div>
@@ -124,17 +106,8 @@
   </div>
   <button class="nav" style="right:14px" onclick="udStep(1)" aria-label="Next">›</button>
 </div>
-<div class="ud-vp" id="ud-vp" onclick="if(event.target===this)vpClose()">
-  <button class="x" onclick="vpClose()" aria-label="Close">×</button>
-  <div class="box">
-    <h3 style="margin:0 0 8px">Add from vault</h3>
-    <select id="vp-persona" class="ud-btn" onchange="vpLoad(this.value)"></select>
-    <div class="ud-grid" id="vp-grid"></div>
-    <button type="button" class="ud-btn" onclick="vpAdd()">Add selected</button>
-  </div>
-</div>
 <script>
-let photos = [], filt = 'all', selMode = false, sel = new Set(), lb = [], lbI = -1, lbOrig = false;
+let photos = [], filt = 'all', sortBy = 'new', view = 'cards', menu = '', selMode = false, sel = new Set(), lb = [], lbI = -1, lbOrig = false;
 const el = id => document.getElementById(id);
 const esc = s => String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
 function note(msg) { const n = el('ud-note'); n.textContent = msg || ''; n.hidden = !msg; }
@@ -143,15 +116,42 @@ async function udInit() {
   try { photos = (await (await fetch('/api/undress/photos')).json()).photos || []; } catch (e) { note('Could not load your photos.'); }
   udRender();
 }
-function udFilter(f) {
-  filt = f;
-  document.querySelectorAll('.ud-tab').forEach(t => t.classList.toggle('active', t.dataset.f === f));
-  udRender();
-}
+function udSet(k, v) { if (k === 'filt') filt = v; else if (k === 'sort') sortBy = v; else view = v; menu = ''; udRender(); }
+function udMenu(m) { menu = menu === m ? '' : m; udHead(); }
+document.addEventListener('click', e => { if (menu && !e.target.closest('.pg-menu')) { menu = ''; udHead(); } });
 function udView() {
   let l = photos.filter(p => filt === 'all' || (filt === 'res') === !!p.result);
-  if (el('ud-sort').value === 'old') l = l.slice().reverse();
+  if (sortBy === 'old') l = l.slice().reverse();
   return l;
+}
+// The same toolbar as the Content Vault, so the two pages read as one.
+function udOpt(k, v, label, cur) {
+  return `<button type="button" class="pg-opt${cur === v ? ' on' : ''}" onclick="event.stopPropagation();udSet('${k}','${v}')"><span class="pg-tick">${cur === v ? '✓' : ''}</span>${label}</button>`;
+}
+function udHead() {
+  el('ud-head').innerHTML = `<div class="pg-head">
+    <div class="pg-head-l" style="display:flex;align-items:center;gap:10px;">
+      <h2 style="font-size:1.1rem;font-weight:600;">Undress</h2><span class="ud-chip">1 token per photo</span>
+      <label class="btn btn-primary">+ Upload<input type="file" accept="image/*" multiple hidden onchange="udUpload(this.files); this.value=''"></label>
+      <button type="button" class="pg-ctl" onclick="vpOpen()">+ From vault</button></div>
+    <div class="pg-menu${menu === 'filter' ? ' open' : ''}"><button type="button" class="pg-ctl${filt !== 'all' ? ' active' : ''}" onclick="event.stopPropagation();udMenu('filter')">Filter${filt !== 'all' ? '<span class="pg-ctl-n">1</span>' : ''}</button>
+      <div class="pg-pop">${udOpt('filt', 'all', 'All', filt)}${udOpt('filt', 'up', 'Uploads', filt)}${udOpt('filt', 'res', 'Results', filt)}</div></div>
+    <div class="pg-menu${menu === 'sort' ? ' open' : ''}"><button type="button" class="pg-ctl" onclick="event.stopPropagation();udMenu('sort')">Sort</button>
+      <div class="pg-pop">${udOpt('sort', 'new', 'Newest first', sortBy)}${udOpt('sort', 'old', 'Oldest first', sortBy)}</div></div>
+    <div class="pg-toggle"><button type="button" class="${view === 'cards' ? 'active' : ''}" onclick="udSet('view','cards')">▦ Cards</button>
+      <button type="button" class="${view === 'list' ? 'active' : ''}" onclick="udSet('view','list')">☰ List</button></div>
+    <button type="button" class="pg-ctl" onclick="udSelMode()">${selMode ? 'Cancel select' : 'Select'}</button></div>`;
+}
+function udRow(p) {
+  const on = sel.has(p.id), id = esc(p.id);
+  return `<div class="pg-row${on ? ' is-picked' : ''}" onclick="udClick('${id}')">
+    ${selMode ? `<span class="vw-check" style="position:static;display:flex">${on ? '✓' : ''}</span>` : ''}
+    <div class="ud-row-th"><img src="${esc(p.url)}" loading="lazy" decoding="async" alt=""></div>
+    <div class="pg-row-info"><div class="pg-row-name">${p.result ? 'Undressed' : 'Photo'}</div><div class="pg-row-sub">${esc((p.created || '').slice(0, 10))}</div></div>
+    <span class="vw-b ${p.result ? 'nsfw' : 'off'}">${p.result ? 'RESULT' : 'ORIGINAL'}</span>
+    <a class="pg-ctl ud-sm" href="${esc(p.url)}" download="photo-${id}.png" onclick="event.stopPropagation()" title="Download">↓</a>
+    <button type="button" class="btn btn-primary ud-sm" onclick="event.stopPropagation();udGo('${id}')">Undress</button>
+    <button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();udDel('${id}')">✕</button></div>`;
 }
 function udCard(p) {
   const orig = p.parent && byId(p.parent);
@@ -169,8 +169,9 @@ function udCard(p) {
 }
 function udRender() {
   const l = udView();
-  el('ud-grid').classList.toggle('selecting', selMode);
-  el('ud-grid').innerHTML = l.length ? l.map(udCard).join('') : '<div class="ud-empty">No photos here yet. Upload one, drop files on this page, or add from a vault.</div>';
+  udHead();
+  el('ud-grid').className = (view === 'list' ? 'pg-list' : 'pg-grid') + ' ud-grid' + (selMode ? ' selecting' : '');
+  el('ud-grid').innerHTML = l.length ? l.map(view === 'list' ? udRow : udCard).join('') : '<div class="ud-empty">No photos here yet. Upload one, drop files on this page, or add from a vault.</div>';
   udBulkBar();
 }
 function udClick(id) { if (selMode) return udToggle(id); lb = udView(); lbI = lb.findIndex(p => p.id === id); lbOrig = false; udShow(); }
@@ -178,7 +179,6 @@ function udToggle(id) { sel.has(id) ? sel.delete(id) : sel.add(id); udRender(); 
 function udSelMode(on) {
   selMode = on === undefined ? !selMode : on;
   if (!selMode) sel.clear();
-  el('ud-selbtn').textContent = selMode ? 'Cancel select' : 'Select';
   udRender();
 }
 function udAll() { udView().forEach(p => sel.add(p.id)); udRender(); }
@@ -272,33 +272,15 @@ addEventListener('dragenter', e => { if (e.dataTransfer && [...e.dataTransfer.ty
 addEventListener('dragleave', () => { if (--dragN <= 0) { dragN = 0; document.body.classList.remove('ud-dragging'); } });
 addEventListener('dragover', e => e.preventDefault());
 addEventListener('drop', e => { e.preventDefault(); dragN = 0; document.body.classList.remove('ud-dragging'); udUpload([...e.dataTransfer.files].filter(f => f.type.startsWith('image/'))); });
-let vpSel = new Set();
-async function vpOpen() {
-  el('ud-vp').classList.add('on');
-  if (el('vp-persona').options.length) return;
-  let list = [];
-  try { list = await (await fetch('/api/personas')).json(); } catch (e) {}
-  if (!Array.isArray(list) || !list.length) { el('vp-grid').innerHTML = '<div class="ud-empty">No personas with a vault yet.</div>'; return; }
-  el('vp-persona').innerHTML = list.map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('');
-  vpLoad(list[0].slug);
-}
-function vpClose() { el('ud-vp').classList.remove('on'); }
-async function vpLoad(slug) {
-  vpSel.clear();
-  el('vp-grid').innerHTML = '';
-  try {
-    const d = await (await fetch('/api/personas/' + encodeURIComponent(slug) + '/media')).json();
-    const rows = ((d && d.vault) || []).filter(m => (m.kind || 'image') === 'image');
-    el('vp-grid').innerHTML = rows.length ? rows.map(m => `<div class="pg-card ud-card" data-v="${esc(m.id)}" onclick="vpTog('${esc(m.id)}',this)"><img class="main" src="${esc(m.thumb || m.url)}" loading="lazy" alt=""></div>`).join('') : '<div class="ud-empty">This vault has no photos.</div>';
-  } catch (e) { el('vp-grid').innerHTML = '<div class="ud-empty">Could not load the vault.</div>'; }
-}
-function vpTog(id, node) { vpSel.has(id) ? vpSel.delete(id) : vpSel.add(id); node.classList.toggle('sel', vpSel.has(id)); }
-async function vpAdd() {
-  if (!vpSel.size) return;
-  const d = await (await fetch('/api/undress/from-vault', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ persona: el('vp-persona').value, media_ids: [...vpSel] }) })).json();
-  if (!d.ok) return note(d.error || 'Could not add.');
-  photos = (d.photos || []).concat(photos);
-  vpClose(); udRender(); note((d.photos || []).length + ' photo(s) added.');
+function vpOpen() {
+  VaultPicker.open({ personas: true, kind: 'image', max: 50, title: 'Add from vault',
+    onDone: async (ids, items, persona) => {
+      if (!ids.length) return;
+      const d = await (await fetch('/api/undress/from-vault', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ persona, media_ids: ids }) })).json();
+      if (!d.ok) return note(d.error || 'Could not add.');
+      photos = (d.photos || []).concat(photos);
+      udRender(); note((d.photos || []).length + ' photo(s) added.');
+    } });
 }
 udInit();
 </script>

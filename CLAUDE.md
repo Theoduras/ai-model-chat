@@ -31,6 +31,7 @@ undress.html                    — Undress page: gallery of a persona's generat
 characters.py                   — Character catalogue: views, features, level rules, prompts
 characters.html                 — Character builder: steps (face, face angles, body, intimate), per-photo generate, required vs optional photos, menu sublists
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
+js/vault-picker.js              — The one media picker: Content Vault lightbox (search, filter, sort, cards/list, folders, upload)
 js/support-widget.js            — Support bubble (AI assistant, team takeover), loaded by site-nav.js
 js/support-sw.js                — Service worker for admin push alerts (empty push; fetches what to show)
 test_characters.py              — SFW/NSFW separation and validation tests
