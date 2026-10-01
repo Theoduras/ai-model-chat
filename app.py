@@ -22466,6 +22466,37 @@ def _plat_auto_run_api(plat):
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
 
 
+def _fv_spec_paths(word):
+    """Every endpoint in Fanvue's published OpenAPI spec whose path or summary
+    mentions word — the only way to see what the API offers from a host that
+    can reach it, since the docs site is not reachable from everywhere."""
+    try:
+        with urllib.request.urlopen(FANVUE_API_BASE.rstrip('/') + '/openapi',
+                                    timeout=20) as r:
+            doc = json.loads(r.read().decode('utf-8'))
+    except Exception as e:
+        return {'error': str(e)[:200]}
+    out = []
+    for path, ops in (doc.get('paths') or {}).items():
+        for method, op in (ops or {}).items():
+            if not isinstance(op, dict):
+                continue
+            text = f"{path} {op.get('summary', '')} {op.get('description', '')}".lower()
+            if word not in text:
+                continue
+            body = (((op.get('requestBody') or {}).get('content') or {})
+                    .get('application/json') or {}).get('schema') or {}
+            if '$ref' in body:
+                body = doc.get('components', {}).get('schemas', {}).get(
+                    body['$ref'].rsplit('/', 1)[-1], {})
+            out.append({'method': method.upper(), 'path': path,
+                        'summary': op.get('summary', ''),
+                        'scopes': [s for sec in (op.get('security') or [])
+                                   for v in sec.values() for s in v],
+                        'body': sorted((body.get('properties') or {}).keys())})
+    return {'count': len(out), 'paths': out}
+
+
 def _fv_find_chat(persona, handle):
     """Why one fan is or is not answered: what Fanvue's search returns for the
     handle, whether the round's full chat list holds them, and whether they are
@@ -22503,6 +22534,9 @@ def api_fanvue_debug():
     find = (request.args.get('find') or '').strip().lstrip('@')
     if find:
         return jsonify(_fv_find_chat(persona, find))
+    spec = (request.args.get('spec') or '').strip().lower()
+    if spec:
+        return jsonify(_fv_spec_paths(spec))
     out = {}
     try:
         out['me'] = _fanvue_call(persona, 'GET', '/users/me')
