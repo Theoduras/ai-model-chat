@@ -2231,7 +2231,7 @@ def _planner_platforms(user):
 
 
 def _planner_allows(allowed, platform):
-    return allowed is None or growth.base_platform(platform) in allowed
+    return allowed is None or growth.account_platform(platform) in allowed
 
 
 def _is_demo(user):
@@ -11515,6 +11515,7 @@ def _growth_queue_rows(persona, limit=50, since=None, until=None):
                  'audience': r.audience or '',
                  'ig_kind': r.ig_kind or '',
                  'rd_sub': r.rd_sub or '',
+                 'dm_lists': _growth_dm_lists_of(r),
                  'rd_flair': r.rd_flair or '',
                  'rd_kind': r.rd_kind or '',
                  'price_cents': int(r.price_cents or 0),
@@ -11586,7 +11587,8 @@ def _growth_send_now(persona, queued):
                                             ig_kind=row.ig_kind or '',
                                             rd_sub=row.rd_sub or '',
                                             rd_flair=row.rd_flair or '',
-                                            rd_kind=row.rd_kind or '')
+                                            rd_kind=row.rd_kind or '',
+                                            dm_lists=row.dm_lists or '')
                 finish_post(sdb, row.id, external_id=posted_id)
                 sent.append({'platform': plat, 'id': row.id, 'external_id': posted_id})
                 logger.info('QUEUE posted now [%s/%s] id=%s', persona, plat, posted_id)
@@ -11644,7 +11646,7 @@ def _growth_media_check_list(persona, platform, ids):
 def _growth_post_extras(platform, data, media_id, current=None):
     """The audience and price a Fanvue feed post carries, or empty for every
     other channel. Returns (audience, price_cents, error)."""
-    if growth.normalise_source(platform) != 'fanvue':
+    if growth.account_platform(platform) != 'fanvue':
         return '', 0, ''
     cur = current or {}
     audience = _fv_audience(data.get('audience') or cur.get('audience') or '')
@@ -11661,6 +11663,32 @@ def _growth_post_extras(platform, data, media_id, current=None):
         return '', 0, (f'Fanvue will not take a price under '
                        f'${FV_POST_PRICE_MIN / 100:.2f}.')
     return audience, price, ''
+
+
+def _growth_dm_lists_of(row):
+    try:
+        return json.loads(getattr(row, 'dm_lists', '') or '{}')
+    except ValueError:
+        return {}
+
+
+def _growth_dm_lists(platform, data, current=''):
+    """Which Fanvue lists a mass DM goes to, as the JSON the row stores, or ''
+    for every other channel. Returns (dm_lists, error)."""
+    if growth.normalise_source(platform) != 'fanvue_dm':
+        return '', ''
+    raw = data.get('dm_lists')
+    if raw is None:
+        try:
+            raw = json.loads(current or '{}')
+        except ValueError:
+            raw = {}
+    raw = raw if isinstance(raw, dict) else {}
+    inc = _fv_clean_lists(raw.get('include'))
+    exc = _fv_clean_lists(raw.get('exclude'))
+    if not inc:
+        return '', 'Pick at least one Fanvue list to send the message to.'
+    return json.dumps({'include': inc, 'exclude': exc}), ''
 
 
 def _growth_ig_kind(persona, platform, data, media_ids, current=None):
@@ -11758,7 +11786,7 @@ def _growth_media_check(persona, platform, media_id):
     if not media_id:
         return '', ''
     if _fv_media_id(media_id):
-        if growth.normalise_source(platform) != 'fanvue':
+        if growth.account_platform(platform) != 'fanvue':
             label = growth.POST_PLATFORMS.get(
                 growth.normalise_source(platform), {}).get('label', platform)
             return '', (f'That file lives in the Fanvue vault, so only Fanvue can '
@@ -11919,6 +11947,10 @@ def api_growth_queue():
                 if why:
                     failed.append({'platform': plat, 'error': why})
                     continue
+                dm_lists, why = _growth_dm_lists(plat, data)
+                if why:
+                    failed.append({'platform': plat, 'error': why})
+                    continue
                 slots = []
                 for rep, day_at in enumerate(dates):
                     body = text
@@ -11940,7 +11972,7 @@ def api_growth_queue():
                                      audience=audience, price_cents=price,
                                      media_ids=media_ids, ig_kind=ig_kind,
                                      rd_sub=rd_sub, rd_flair=rd_flair,
-                                     rd_kind=rd_kind)
+                                     rd_kind=rd_kind, dm_lists=dm_lists)
                     queued.append({'platform': plat, 'id': row.id,
                                    'sub': rd_sub, 'first': not rep,
                                    'status': growth.queue_status_for(plat)})
@@ -12005,11 +12037,16 @@ def api_growth_queue():
                 media_id = media_ids[0] if media_ids else ''
             audience = price = None
             if (('audience' in data or 'price_cents' in data)
-                    and growth.normalise_source(row.platform) == 'fanvue'):
+                    and growth.account_platform(row.platform) == 'fanvue'):
                 at_media = media_id if media_id is not None else (row.media_id or '')  # noqa
                 audience, price, why = _growth_post_extras(
                     row.platform, data, at_media,
                     {'audience': row.audience, 'price_cents': row.price_cents})
+                if why:
+                    return jsonify({'ok': False, 'error': why}), 400
+            dm_lists = None
+            if 'dm_lists' in data and growth.normalise_source(row.platform) == 'fanvue_dm':
+                dm_lists, why = _growth_dm_lists(row.platform, data, row.dm_lists)
                 if why:
                     return jsonify({'ok': False, 'error': why}), 400
             ig_kind = None
@@ -12041,13 +12078,15 @@ def api_growth_queue():
                 if text is None and targets[0]['title'] != (row.text or ''):
                     text = targets[0]['title']
             if (text is None and run_at is None and media_ids is None
-                    and audience is None and ig_kind is None and rd_sub is None):
+                    and audience is None and ig_kind is None and rd_sub is None
+                    and dm_lists is None):
                 return jsonify({'ok': False, 'error': 'Nothing to change.'}), 400
             done = update_post(sdb, persona, post_id, text=text, run_at=run_at,
                                media_id=media_id, media_ids=media_ids,
                                audience=audience, price_cents=price,
                                ig_kind=ig_kind, rd_sub=rd_sub,
-                               rd_flair=rd_flair, rd_kind=rd_kind)
+                               rd_flair=rd_flair, rd_kind=rd_kind,
+                               dm_lists=dm_lists)
             sdb.commit()
         finally:
             sdb.close()
@@ -12633,8 +12672,81 @@ GROWTH_QUEUE_RETRY_MINS = 10
 GROWTH_QUEUE_STALE_HRS = 6
 
 
+def _fv_upload_rows(persona, rows):
+    """Library items pushed into her Fanvue vault, as the uuids a post or a
+    message refers to them by."""
+    uuids = []
+    for row in rows:
+        blob, mime = _media_bytes(row)
+        kind = growth.media_kind(mime)
+        ext = (mime.split('/')[-1] or 'bin').split(';')[0]
+        uuids.append(_fv_upload_media(
+            persona, blob, kind, f'{row.get("id") or kind}.{ext}',
+            content_type=mime or 'application/octet-stream'))
+    return uuids
+
+
+# Fans the per-fan fallback will message in one go, and the gap between them.
+FV_MASS_DM_MAX = 2000
+FV_MASS_DM_GAP = 0.3
+
+
+def _fv_mass_dm(persona, text, media_uuids, price_cents, lists):
+    """One message to whole Fanvue lists. Fanvue's own mass message first: one
+    request, and Fanvue does the delivering. Its field names are from the public
+    docs and unconfirmed against the live API, so a refusal of the route itself
+    falls back to one message per fan through the sender every reply uses.
+    Returns the id Fanvue gave it, or 'sent N' from the fallback."""
+    lists = lists if isinstance(lists, dict) else {}
+    inc = _fv_clean_lists(lists.get('include'))
+    exc = _fv_clean_lists(lists.get('exclude'))
+    if not inc:
+        raise RuntimeError('no Fanvue list picked for this message')
+
+    def by_kind(rows):
+        return {'smartListUuids': [l['id'] for l in rows if l['kind'] == 'smart'],
+                'customListUuids': [l['id'] for l in rows if l['kind'] == 'custom']}
+
+    scope = _fanvue_scope(persona)
+    body = {'text': text, 'includedLists': by_kind(inc)}
+    if exc:
+        body['excludedLists'] = by_kind(exc)
+    if media_uuids:
+        body['mediaUuids'] = list(media_uuids)
+    if price_cents:
+        body['price'] = int(price_cents)
+    try:
+        res = _fanvue_call(persona, 'POST', f'{scope}/chats/mass-messages', body=body)
+        res = res.get('data') if isinstance(res, dict) and isinstance(res.get('data'), dict) else res
+        mid = str(_fv_first(res, 'uuid', 'id', default='') or '') if isinstance(res, dict) else ''
+        logger.info('FV mass DM [%s] via Fanvue: %s', persona, mid or 'no id')
+        return mid or 'mass message'
+    except url_error.HTTPError as e:
+        if e.code not in (404, 405, 422):
+            raise
+        logger.warning('FV mass DM [%s]: Fanvue refused the route (%s); '
+                       'sending one by one', persona, e.code)
+    members, skip = _fv_list_filter(persona, {'include_lists': inc, 'exclude_lists': exc})
+    fans = sorted((members or set()) - skip)[:FV_MASS_DM_MAX]
+    sent = 0
+    for fan in fans:
+        try:
+            if media_uuids or price_cents:
+                PLAT_FANVUE.send_ppv(persona, scope, fan, text, media_uuids, int(price_cents or 0))
+            else:
+                _fv_send_text(persona, scope, fan, text)
+            sent += 1
+        except Exception as e:
+            logger.info('FV mass DM [%s] to %s failed: %s', persona, fan, str(e)[:120])
+        time.sleep(FV_MASS_DM_GAP)
+    if fans and not sent:
+        raise RuntimeError('Fanvue refused the message for every fan on those lists')
+    return f'sent {sent}'
+
+
 def _growth_publish(persona, platform, text, media_id='', audience='', price_cents=0,
-                    media_ids=None, ig_kind='', rd_sub='', rd_flair='', rd_kind=''):
+                    media_ids=None, ig_kind='', rd_sub='', rd_flair='', rd_kind='',
+                    dm_lists=''):
     """Put one post out and write it into the content register. Returns the id
     the channel gave it; raises on failure, because only the caller knows
     whether this attempt is worth another one."""
@@ -12647,7 +12759,7 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
     for one in ids:
         uuid = _fv_media_id(one)
         if uuid:
-            if plat != 'fanvue':
+            if growth.account_platform(plat) != 'fanvue':
                 raise RuntimeError('that file is in the Fanvue vault and only '
                                    'Fanvue can post it')
             vault_uuids.append(uuid)
@@ -12667,16 +12779,16 @@ def _growth_publish(persona, platform, text, media_id='', audience='', price_cen
         raise RuntimeError(why)
     media = rows[0] if rows else None
     if plat == 'fanvue':
-        uuids = list(vault_uuids)
-        for row in rows:
-            blob, mime = _media_bytes(row)
-            kind = growth.media_kind(mime)
-            ext = (mime.split('/')[-1] or 'bin').split(';')[0]
-            uuids.append(_fv_upload_media(
-                persona, blob, kind, f'{row.get("id") or kind}.{ext}',
-                content_type=mime or 'application/octet-stream'))
+        uuids = list(vault_uuids) + _fv_upload_rows(persona, rows)
         posted_id = _fv_create_post(persona, text, media_uuids=uuids,
                                     price_cents=price_cents, audience=audience)
+    elif plat == 'fanvue_dm':
+        try:
+            lists = json.loads(dm_lists or '{}')
+        except ValueError:
+            lists = {}
+        uuids = list(vault_uuids) + _fv_upload_rows(persona, rows)
+        posted_id = _fv_mass_dm(persona, text, uuids, price_cents, lists)
     elif plat == 'x':
         body = {'text': text}
         if rows:
@@ -12802,7 +12914,8 @@ def _growth_queue_round():
                                             ig_kind=row.ig_kind or '',
                                             rd_sub=row.rd_sub or '',
                                             rd_flair=row.rd_flair or '',
-                                            rd_kind=row.rd_kind or '')
+                                            rd_kind=row.rd_kind or '',
+                                            dm_lists=row.dm_lists or '')
                 finish_post(sdb, post_id, external_id=posted_id)
                 logger.info('QUEUE posted [%s/%s] id=%s %s',
                             persona, platform, posted_id, text[:60])

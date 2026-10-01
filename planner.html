@@ -159,8 +159,16 @@
         <input type="number" id="pl-m-rd-stagger" min="0" max="240" value="20">
       </div>
 
+      <div class="field" style="margin-top:14px;" id="pl-m-dm-field" hidden>
+        <label>Send the mass DM to</label>
+        <div class="pl-chips" id="pl-m-dm-inc"></div>
+        <label style="margin-top:10px;">But not to</label>
+        <div class="pl-chips" id="pl-m-dm-exc"></div>
+        <span class="hint" id="pl-m-dm-hint" style="margin-top:6px;"></span>
+      </div>
+
       <div class="field" style="margin-top:14px;" id="pl-m-fanvue-field" hidden>
-        <label for="pl-m-audience">Who sees it on Fanvue</label>
+        <label for="pl-m-audience" id="pl-m-audience-label">Who sees it on Fanvue</label>
         <select id="pl-m-audience">
           <option value="followers-and-subscribers">Followers and subscribers</option>
           <option value="subscribers">Subscribers only</option>
@@ -235,8 +243,12 @@
 // The caps mirror growth.POST_PLATFORMS. The server trims to them on every
 // write, so this copy only decides when the counter turns red.
 const PL_CAPS = { x: 280, threads: 500, fanvue: 5000, instagram: 2200, tiktok: 2200, reddit: 300 };
-const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
-const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram'];
+const PL_LABELS = { x: 'X', threads: 'Threads', fanvue: 'Fanvue', fanvue_dm: 'Fanvue mass DM', instagram: 'Instagram', tiktok: 'TikTok', reddit: 'Reddit' };
+const PL_PUBLISHABLE = ['x', 'threads', 'fanvue', 'instagram', 'fanvue_dm'];
+// A channel that is another use of an account: it connects, and is allowed on
+// a plan, through that account (growth.ACCOUNT_OF).
+const PL_ACCOUNT = { fanvue_dm: 'fanvue' };
+function plAccount(p) { return PL_ACCOUNT[p] || p; }
 // The channels the week can be planned for. Mirrors growth.WEEKLY_CADENCE.
 const PL_PLATFORMS = ['x', 'threads', 'fanvue', 'instagram', 'tiktok', 'reddit'];
 // Mirrors growth.MEDIA_SUPPORT. The server checks it again on every write; this
@@ -252,7 +264,7 @@ const PL_MEDIA = {
 // Where a creator connects each publishable channel, for the prompt below.
 // Mirrors growth.MEDIA_SUPPORT's max. The server checks it again on every write.
 const PL_MEDIA_MAX = { x: 4, threads: 20, fanvue: 20, instagram: 10, tiktok: 1, reddit: 20 };
-const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue',
+const PL_CONNECT_AT = { x: '/xbot', threads: '/threads', fanvue: '/fanvue', fanvue_dm: '/fanvue',
                         instagram: '/instagram', reddit: '/reddit',
                         tiktok: '/tiktok' };
 // Reddit's kinds, mirroring app.RD_KINDS.
@@ -391,6 +403,7 @@ function plPickPersona(slug) {
   plSlug = slug;
   plFvVault = null;
   plFvVaultError = '';
+  plDmLists = null;
   plProposed = [];
   plPlanMeta = null;
   plLoadVault();
@@ -415,7 +428,7 @@ function plMediaById(id) {
 // Threads, which need the file itself.
 function plFanvueOnly() {
   const chans = plOpenChans();
-  return chans.length === 1 && chans[0] === 'fanvue';
+  return chans.length > 0 && chans.every(c => plAccount(c) === 'fanvue');
 }
 
 async function plFvFetch(page) {
@@ -624,7 +637,7 @@ function plConnectLine() {
   const used = new Set(plQueue.filter(r => r.status === 'queued').map(r => r.platform)
     .concat(plProposed.filter(s => s.publishable).map(s => s.platform)));
   const missing = PL_PUBLISHABLE.filter(
-    p => used.has(p) && !((plConn[p] || {}).connected));
+    p => used.has(p) && !((plConn[plAccount(p)] || {}).connected));
   if (!missing.length) { el.hidden = true; return; }
   el.hidden = false;
   el.innerHTML = 'No ' + missing.map(p => esc(PL_LABELS[p])).join(' or ')
@@ -660,7 +673,7 @@ function plRender(d) {
   plQueue.forEach((r, i) => cards.push({
     kind: 'queued', at: r.run_at, platform: r.platform, status: r.status,
     text: r.text, error: r.error, attempts: r.attempts, id: r.id, idx: i,
-    media: r.media_id ? plMediaById(r.media_id) : null
+    media: r.media_id ? plMediaById(r.media_id) : null, dm_lists: r.dm_lists
   }));
   plProposed.forEach((s, i) => cards.push({
     kind: 'proposed', at: s.at, platform: s.platform, publishable: s.publishable,
@@ -720,6 +733,10 @@ function plCard(c) {
     : (manual ? 'is-manual' : 'is-' + c.status));
   let flag = '';
   if (manual) flag = 'by hand';
+  else if (c.platform === 'fanvue_dm' && c.status === 'queued') {
+    const n = ((c.dm_lists || {}).include || []).length;
+    flag = 'mass DM · ' + n + ' list' + (n === 1 ? '' : 's');
+  }
   else if (c.kind === 'proposed') flag = PL_KIND[c.job] || c.job;
   else if (c.status === 'failed') flag = 'failed';
   else if (c.status === 'posted') flag = 'posted';
@@ -1079,6 +1096,7 @@ function plNew() {
 
   plRenderChans();
   plRenderFanvue('', 0);
+  plRenderDm({});
   plRenderIg('post');
   plRdTitles = {};
   plRenderRd();
@@ -1090,10 +1108,17 @@ function plNew() {
 
 // The audience and the price are Fanvue's alone, so the field only exists while
 // Fanvue is one of the channels this post is going to.
+function plFvOn(p) {
+  return !!(plOpen && (plOpen.kind === 'new' ? plChans.indexOf(p) !== -1 : plOpen.platform === p));
+}
+
 function plRenderFanvue(audience, priceCents) {
-  const on = plOpen && (plOpen.kind === 'new'
-    ? plChans.indexOf('fanvue') !== -1 : plOpen.platform === 'fanvue');
+  const post = plFvOn('fanvue');
+  const on = post || plFvOn('fanvue_dm');
   document.getElementById('pl-m-fanvue-field').hidden = !on;
+  // The audience is a feed post's; a mass DM's audience is its lists.
+  document.getElementById('pl-m-audience').style.display = post ? '' : 'none';
+  document.getElementById('pl-m-audience-label').style.display = post ? '' : 'none';
   if (!on) return;
   if (audience !== undefined) {
     document.getElementById('pl-m-audience').value = audience || 'followers-and-subscribers';
@@ -1101,6 +1126,59 @@ function plRenderFanvue(audience, priceCents) {
   if (priceCents !== undefined) {
     document.getElementById('pl-m-price').value = priceCents ? (priceCents / 100).toFixed(2) : '';
   }
+}
+
+// ── Fanvue mass DM: which lists it goes to ──────────────────────────────────
+let plDmLists = null;               // her Fanvue lists, fetched once per persona
+let plDm = { include: [], exclude: [] };
+
+async function plDmLoadLists() {
+  if (plDmLists) return plDmLists;
+  try {
+    const d = await (await fetch('/api/fanvue/lists?persona=' + encodeURIComponent(plSlug))).json();
+    plDmLists = d.lists || [];
+    if (!plDmLists.length) plDmLists.error = d.error || 'No lists on this Fanvue account yet.';
+  } catch (e) { plDmLists = []; plDmLists.error = 'Could not load the Fanvue lists.'; }
+  return plDmLists;
+}
+
+function plRenderDm(saved) {
+  const on = plFvOn('fanvue_dm');
+  document.getElementById('pl-m-dm-field').hidden = !on;
+  if (!on) return;
+  if (saved !== undefined) {
+    plDm = { include: (saved && saved.include) || [], exclude: (saved && saved.exclude) || [] };
+  }
+  plDmLoadLists().then(lists => {
+    const chips = (side) => lists.map(l => {
+      const picked = plDm[side].some(x => x.id === l.id && x.kind === l.kind);
+      return '<label class="pl-chan-pick' + (picked ? ' on' : '') + '">'
+        + '<input type="checkbox"' + (picked ? ' checked' : '')
+        + ' onchange="plDmToggle(\'' + side + '\',\'' + esc(l.kind) + '\',\'' + esc(l.id) + '\')">'
+        + esc(l.name || l.id) + (l.count != null ? '<span class="by-hand">' + esc(String(l.count)) + '</span>' : '')
+        + '</label>';
+    }).join('');
+    document.getElementById('pl-m-dm-inc').innerHTML = chips('include');
+    document.getElementById('pl-m-dm-exc').innerHTML = chips('exclude');
+    document.getElementById('pl-m-dm-hint').textContent = lists.error
+      || (plDm.include.length
+          ? 'One message to everyone on those lists. Media and a price make it a PPV.'
+          : 'Pick at least one list.');
+  });
+}
+
+function plDmToggle(side, kind, id) {
+  const l = (plDmLists || []).find(x => x.id === id && x.kind === kind);
+  if (!l) return;
+  const at = plDm[side].findIndex(x => x.id === id && x.kind === kind);
+  if (at === -1) plDm[side].push({ kind: l.kind, id: l.id, name: l.name || l.id });
+  else plDm[side].splice(at, 1);
+  plRenderDm();
+}
+
+function plDmFields() {
+  if (document.getElementById('pl-m-dm-field').hidden) return null;
+  return { dm_lists: plDm };
 }
 
 // What the two Fanvue boxes say right now, or null when they are not showing.
@@ -1265,6 +1343,7 @@ function plToggleChan(p) {
   plOpen.publishable = plChans.every(c => PL_PUBLISHABLE.indexOf(c) !== -1);
   plRenderChans();
   plRenderFanvue();
+  plRenderDm();
   plRenderIg();
   plRenderRd();
   plCount();
@@ -1335,6 +1414,7 @@ function plEdit(kind, idx) {
   plChans = [];
   plRenderChans();
   plRenderFanvue(row.audience || '', row.price_cents || 0);
+  plRenderDm(row.dm_lists || {});
   plRenderIg(row.ig_kind || 'post');
   plRdTitles = {};
   plRenderRd(row);
@@ -1354,7 +1434,7 @@ function plMediaHint(picked) {
     return 'Threads collects the file from us, so it has to be publicly reachable '
          + 'when the slot comes round.';
   }
-  if (plat === 'fanvue') return 'Uploaded into her Fanvue vault when the post goes out.';
+  if (plAccount(plat) === 'fanvue') return 'Uploaded into her Fanvue vault when the post goes out.';
   if (plat === 'reddit') return 'Uploaded to Reddit when the post goes out, once per subreddit.';
   if (plat === 'instagram') return 'Uploaded to Instagram when the post goes out.';
   return 'Uploaded to X when the post goes out.';
@@ -1590,6 +1670,10 @@ async function plSave(btn, now) {
   const fv = plFanvueFields();
   const ig = plIgFields();
   const rd = plRdFields(text);
+  const dm = plDmFields();
+  if (dm && !dm.dm_lists.include.length) {
+    alert('Pick at least one Fanvue list for the mass DM.'); return;
+  }
   if (plRdOn() && !rd) {
     alert('Pick at least one subreddit for the Reddit post.'); return;
   }
@@ -1612,7 +1696,7 @@ async function plSave(btn, now) {
         body: JSON.stringify({ persona: plSlug, platforms: plChans, text: text,
                                run_at: at, run_ats: plMoreWhen(),
                                now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}), ...(dm || {}) })
       });
     } else if (plOpen.kind === 'proposed') {
       if (!plOpen.written) {
@@ -1623,14 +1707,14 @@ async function plSave(btn, now) {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, platform: plOpen.platform, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}), ...(dm || {}) })
       });
     } else {
       res = await fetch('/api/growth/queue', {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ persona: plSlug, id: plOpen.id, text: text,
                                run_at: at, now: !!now, media_ids: plPickedMedia,
-                               ...(fv || {}), ...(ig || {}), ...(rd || {}) })
+                               ...(fv || {}), ...(ig || {}), ...(rd || {}), ...(dm || {}) })
       });
     }
     const d = await res.json();
