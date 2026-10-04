@@ -22926,7 +22926,7 @@ def _plat_round_body(plat, persona):
             log.append(f'skip chat: no fan_uuid (keys={list(chat.keys())})')
             continue
         who = handle or fan_uuid[:8]
-        if exclude_creators and is_creator:
+        if exclude_creators and is_creator and not (inc_lists and fan_uuid in inc_lists):
             actions['skipped_creators'] += 1
             log.append(f'{who}: skipped (is a creator)')
             _skip_note(plat, persona, fan_uuid, who, 'is a creator')
