@@ -1039,12 +1039,25 @@ def shot_allowed(shot, level):
     return shot in shots_for_level(level)
 
 
-def merge_negative(extra=''):
+# What goes wrong in a clip rather than a still: her drifting into someone
+# else, and a camera that moves when the shot should hold.
+VIDEO_NEGATIVE = (
+    'different person, identity change, face change, morphing face, '
+    'face distortion, warped face, melted face, changing hairstyle, '
+    'changing clothes, changing background, extra arms, extra legs, '
+    'deformed hands, malformed limbs, unnatural movement, jerky motion, '
+    'jitter, flickering, camera movement, zoom, zoom in, zoom out, pan, tilt, '
+    'dolly, orbit, camera shake, scene change, subtitles'
+)
+
+
+def merge_negative(extra='', video=False):
     """The creator's additions are added to the baseline, never swapped for it:
     the baseline is what keeps a generation off anything underage, and a text
     box is not somewhere that should be editable."""
+    base = NEGATIVE_PROMPT + (', ' + VIDEO_NEGATIVE if video else '')
     extra = (extra or '').strip().strip(',')
-    return (NEGATIVE_PROMPT + ', ' + extra) if extra else NEGATIVE_PROMPT
+    return (base + ', ' + extra) if extra else base
 
 
 def _norm(text):

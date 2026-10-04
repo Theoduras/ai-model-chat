@@ -35970,7 +35970,8 @@ def _gen_start(job_id, slug, spec, workspace):
         try:
             provider = imagegen.provider_for(spec)
             call = dict(spec)
-            call['negative'] = imagegen.merge_negative(spec.get('negative_extra'))
+            call['negative'] = imagegen.merge_negative(
+                spec.get('negative_extra'), video=spec.get('kind') != 'image')
             ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
             if ref_b64:
                 call['reference_b64'] = ref_b64
