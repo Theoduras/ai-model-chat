@@ -132,11 +132,77 @@ _COMPRESS = {'image/jpeg': ('JPEG', {'quality': 90, 'optimize': True, 'progressi
 MAX_IMAGE_SIDE = 2048
 
 
+_PIL_MIME = {'JPEG': 'image/jpeg', 'MPO': 'image/jpeg', 'PNG': 'image/png',
+             'WEBP': 'image/webp'}
+
+
+def _open_image(data):
+    from PIL import Image
+    try:
+        import pillow_heif
+        pillow_heif.register_heif_opener()
+    except Exception:
+        pass
+    return Image.open(io.BytesIO(data))
+
+
+def sniff_mime(data):
+    """The image type the bytes really are, whatever they were stored as."""
+    try:
+        return _PIL_MIME.get(_open_image(data).format, '')
+    except Exception:
+        return ''
+
+
+def shrink(data, mime=''):
+    """The admin compress pass: (bytes, mime, note). Unlike compress_image this
+    may change the format — an opaque PNG, HEIC or WebP photo becomes JPEG —
+    so it is only for callers that store the returned mime with the bytes."""
+    from PIL import Image, ImageOps
+    if not data:
+        return data, mime, 'empty'
+    try:
+        img = _open_image(data)
+        img.load()
+    except Exception:
+        return data, mime, ('unsupported format ' + mime if (mime or '').startswith('image/')
+                            else 'not an image')
+    if getattr(img, 'is_animated', False):
+        return data, mime, 'animated, left as is'
+    src = img.format or '?'
+    img = ImageOps.exif_transpose(img)
+    notes, side = [], max(img.size)
+    if side > MAX_IMAGE_SIDE:
+        img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE), Image.LANCZOS)
+        notes.append(f'resized {side}px → {MAX_IMAGE_SIDE}')
+    alpha = img.mode in ('RGBA', 'LA', 'PA') or (img.mode == 'P' and 'transparency' in img.info)
+    if alpha:
+        try:
+            alpha = img.convert('RGBA').getchannel('A').getextrema()[0] < 255
+        except Exception:
+            pass
+    out = io.BytesIO()
+    if alpha:
+        img.save(out, 'PNG', optimize=True)
+        new_mime = 'image/png'
+    else:
+        img.convert('RGB').save(out, 'JPEG', quality=85, optimize=True, progressive=True)
+        new_mime = 'image/jpeg'
+        if src not in ('JPEG', 'MPO'):
+            notes.append(f'converted {src} → JPEG')
+    out = out.getvalue()
+    if len(out) >= len(data):
+        return data, mime, 'already small'
+    return out, new_mime, ', '.join(notes) or 're-saved smaller'
+
+
 def compress_image(data, mime):
     """Smaller bytes in the same format, at most MAX_IMAGE_SIDE on the long side,
     with metadata (EXIF, GPS) dropped, or the original when that would not
     shrink it."""
     fmt = _COMPRESS.get((mime or '').lower())
+    if not fmt and data:
+        fmt = _COMPRESS.get(sniff_mime(data))
     if not fmt or not data:
         return data
     try:
@@ -172,10 +238,11 @@ def compress_data_url(url):
     return url if out is raw else head + ',' + base64.b64encode(out).decode()
 
 
-def replace(path, data, mime):
+def replace(path, data, mime, compress=True):
     """Write bytes at a path this server already chose, overwriting it."""
     mime = mime or 'application/octet-stream'
-    data = compress_image(data, mime)
+    if compress:
+        data = compress_image(data, mime)
     if backend() == 'blob':
         _blob('PUT', '?pathname=' + urllib.parse.quote(path), body=data,
               headers={'x-content-type': mime, 'x-add-random-suffix': '0',

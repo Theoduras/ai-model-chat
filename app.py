@@ -7988,6 +7988,7 @@ async function watch(started){
     $('bar').style.width=(s.running?pct:100)+'%';
     $('ptext').textContent=s.running?'Compressing '+s.done+' / '+s.total+' · saved '+kb(s.saved_bytes)+' · '+s.errors+' error(s)'
       :'Done: saved '+kb(s.saved_bytes)+' from '+s.total+' file(s)'+(s.errors?' · '+s.errors+' error(s)':'');
+    $('ptext').insertAdjacentHTML('beforeend',(s.results||[]).slice(-50).map(r=>'<br>'+esc(r.slug)+' · '+(r.saved>0?'saved '+kb(r.saved)+' · ':'')+esc(r.note)).join(''));
     if(!s.running){polling=false;load(0);return}
     await new Promise(r=>setTimeout(r,1000));
   }
@@ -36477,12 +36478,69 @@ def _grant_all_monthly_tokens():
         s.close()
 
 
+def _shrink_media_row(row, saved):
+    """Shrink one vault row's photo and poster, wherever they are stored, and
+    say what happened to each. The photo may change format, so its mime is
+    rewritten with it; a clip itself is left alone."""
+    import base64
+    notes = []
+
+    def _data_url(v):
+        if not v.startswith('data:') or ';base64,' not in v:
+            return v, '', ''
+        head, b64 = v.split(',', 1)
+        try:
+            raw = base64.b64decode(b64)
+        except Exception:
+            return v, '', 'unreadable data'
+        out, mime, note = storage.shrink(raw, head[5:].split(';')[0])
+        if out is raw:
+            return v, '', note
+        nv = f'data:{mime};base64,' + base64.b64encode(out).decode()
+        saved[0] += len(v) - len(nv)
+        return nv, mime, note
+
+    def _stored(path, mime):
+        try:
+            raw = storage.get(path)
+        except Exception:
+            return '', 'file missing'
+        out, new_mime, note = storage.shrink(raw, mime)
+        if out is raw:
+            return '', note
+        storage.replace(path, out, new_mime, compress=False)
+        saved[0] += len(raw) - len(out)
+        return new_mime, note
+
+    is_image = (row.kind or 'image') == 'image'
+    if is_image and row.image_data:
+        row.image_data, mime, note = _data_url(row.image_data)
+        if mime:
+            row.mime = mime
+        notes.append(note)
+    if row.poster_data:
+        row.poster_data, _, note = _data_url(row.poster_data)
+        notes.append(note and 'poster: ' + note)
+    if storage.enabled():
+        if is_image and row.gcs_path:
+            mime, note = _stored(row.gcs_path, row.mime or storage.mime_of(row.gcs_path))
+            if mime:
+                row.mime = mime
+            notes.append(note)
+        if row.poster_gcs_path:
+            _, note = _stored(row.poster_gcs_path, storage.mime_of(row.poster_gcs_path))
+            notes.append(note and 'poster: ' + note)
+    if not is_image and not notes:
+        notes.append('video, left as is')
+    return notes
+
+
 # What the running (or last) compress pass is doing, for the admin media page.
 # Kept in app settings, not memory: the request that starts a pass and the
 # polls that follow it can each land on a different instance.
 _COMPRESS_STATE = {'running': False, 'done': 0, 'total': 0, 'saved_bytes': 0,
                    'errors': 0, 'current': '', 'started_at': 0, 'finished_at': 0,
-                   'updated_at': 0}
+                   'updated_at': 0, 'results': []}
 _COMPRESS_STALE_SECONDS = 900
 
 
@@ -36516,6 +36574,8 @@ def _compress_existing_images(force=False, ids=None):
                          saved_bytes=0, errors=0, current='',
                          started_at=int(time.time()), finished_at=0)
     saved = [0]
+    results = []
+    st['results'] = []
 
     def _obj(path, mime):
         if not path:
@@ -36552,16 +36612,11 @@ def _compress_existing_images(force=False, ids=None):
             row = s.get(PersonaMedia, mid)
             if not row:
                 continue
-            for f in ('image_data', 'poster_data'):
-                v = getattr(row, f) or ''
-                if v.startswith('data:image/'):
-                    nv = storage.compress_data_url(v)
-                    if nv != v:
-                        saved[0] += len(v) - len(nv)
-                        setattr(row, f, nv)
-            if storage.enabled():
-                _obj(row.gcs_path, row.mime)
-                _obj(row.poster_gcs_path, '')
+            before = saved[0]
+            notes = [n for n in (_shrink_media_row(row, saved) or []) if n]
+            results.append({'id': mid, 'slug': row.slug, 'saved': saved[0] - before,
+                             'note': '; '.join(notes) or 'nothing to compress'})
+            st['results'] = results[-50:]
             if i % 20 == 19:
                 s.commit()
                 s.expunge_all()
