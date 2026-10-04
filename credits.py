@@ -68,6 +68,9 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # Wan 2.7's own ceiling. A longer upload cannot be swapped, so it is refused at
 # the upload rather than truncated after it is paid for.
 VIDEO_MAX_SECONDS = 15
+# A chained clip (parts joined end to start) on the models that can chain.
+CHAIN_MAX_SECONDS = 32
+CHAIN_MODELS = ('wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora')
 
 # ── What the provider actually bills us, in USD ───────────────────────────────
 # This is the source of every number in this file: the token tables below are
@@ -439,7 +442,8 @@ def video_price(resolution, seconds, addons=(), model=None):
         secs = int(seconds)
     except (ValueError, TypeError):
         secs = 0
-    if not rate or not VIDEO_SECONDS_MIN <= secs <= VIDEO_MAX_SECONDS:
+    top = CHAIN_MAX_SECONDS if model in CHAIN_MODELS else VIDEO_MAX_SECONDS
+    if not rate or not VIDEO_SECONDS_MIN <= secs <= top:
         raise PricingError(
             f'no price for video {model!r} {resolution!r} at {seconds!r}s')
     return max(1, int(math.ceil(rate * secs))) + sum(_addon(a) for a in addons)

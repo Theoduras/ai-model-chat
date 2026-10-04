@@ -33154,7 +33154,7 @@ def _gen_spec(slug, body, user):
     # Any whole number in range, not only the three presets: the price is
     # per second, so a length the picker does not list still has one.
     if resolution not in CR.VIDEO_RESOLUTIONS or not (
-            CR.VIDEO_SECONDS_MIN <= seconds <= CR.VIDEO_MAX_SECONDS):
+            CR.VIDEO_SECONDS_MIN <= seconds <= CR.CHAIN_MAX_SECONDS):
         raise imagegen.GenerationError('Unknown video resolution or duration.')
     aspect = (body.get('aspect') or imagegen.DEFAULT_ASPECT).strip()
     if aspect not in imagegen.ASPECTS:
@@ -33336,6 +33336,19 @@ def _gen_spec(slug, body, user):
     spec.update({'resolution': resolution, 'seconds': seconds,
                  'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
                  'motion': (body.get('motion') or '')[:300]})
+    plan = imagegen.chain_plan(model, seconds) if job == 'animate' else None
+    if plan:
+        # Parts after the first carry on from the last frame of the one before,
+        # each with its own action; an empty one keeps the previous action.
+        wanted = [str(m or '').strip()[:300] for m in (body.get('chain_motions') or [])]
+        motions, last = [], spec['motion']
+        for i in range(1, len(plan)):
+            last = (wanted[i - 1] if i - 1 < len(wanted) and wanted[i - 1] else last)
+            motions.append(last)
+        spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions}
+    elif seconds > CR.VIDEO_MAX_SECONDS:
+        raise imagegen.GenerationError(
+            f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
     if model == 'wan-2-2-lora':
         # Resolved now and stored on the job, so editing the library later
         # never changes what a past job ran with.
@@ -36103,6 +36116,8 @@ def _gen_start(job_id, slug, spec, workspace):
         try:
             provider = imagegen.provider_for(spec)
             call = dict(spec)
+            if spec.get('chain'):
+                call['seconds'] = spec['chain']['plan'][0]
             call['negative'] = imagegen.merge_negative(
                 spec.get('negative_extra'), video=spec.get('kind') != 'image')
             ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
@@ -36421,7 +36436,13 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
     urls = _gen_audio_urls(job_id, spec, urls)
     for url in urls:
         try:
-            data, mime = imagegen.fetch_result(url)
+            if url.startswith('storage:'):
+                try:
+                    data, mime = storage.get(url[len('storage:'):]), 'video/mp4'
+                except Exception as e:
+                    raise imagegen.GenerationError(f'joined clip unreadable: {e}')
+            else:
+                data, mime = imagegen.fetch_result(url)
         except imagegen.GenerationError as e:
             logger.warning('generation result download failed job=%s: %s', job_id, e)
             continue
@@ -36512,14 +36533,19 @@ def _gen_advance(row):
      workspace, created_at) = row
     now = datetime.now(timezone.utc).replace(tzinfo=None)
     age = (now - created_at).total_seconds() if created_at else 0
-    if age > GEN_JOB_TIMEOUT:
-        logger.warning('generation job %s timed out after %.0fs', job_id, age)
-        _gen_fail(job_id, workspace, 'the provider never finished')
-        return
     try:
         spec = json.loads(spec_json or '{}')
     except ValueError:
         spec = {}
+    parts = len((spec.get('chain') or {}).get('plan') or ()) or 1
+    if age > GEN_JOB_TIMEOUT * parts:
+        logger.warning('generation job %s timed out after %.0fs', job_id, age)
+        _gen_fail(job_id, workspace, 'the provider never finished')
+        return
+    if (provider_job or '').startswith('chaining:'):
+        # Another poller is between two parts; it owns the job until it saves
+        # the next part's id.
+        return
     if not provider_job:
         # Submitted but never acknowledged: whatever was submitting died before
         # it could record a provider id, so there is nothing left to poll for.
@@ -36544,10 +36570,83 @@ def _gen_advance(row):
         # Some of the batch never arrived: deliver what did, and the settle
         # returns the rest.
         result.status = 'done'
-    if result.status == 'done' and result.urls:
+    if result.status == 'done' and result.urls and spec.get('chain'):
+        _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job,
+                        result.urls[0])
+    elif result.status == 'done' and result.urls:
         _gen_finish(job_id, slug, spec, workspace, result.urls)
     elif result.status == 'failed':
         _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, url):
+    """One part of a chained clip is done: keep it, then start the next part
+    from its last frame, or join them all and deliver the clip."""
+    import base64
+    from db import GenerationJob, update_generation
+    s = _db_session()
+    try:
+        # Claimed by swapping the provider id, so two pollers that both saw the
+        # part finish cannot both start the next one.
+        won = (s.query(GenerationJob)
+               .filter(GenerationJob.id == job_id,
+                       GenerationJob.provider_job_id == provider_job)
+               .update({'provider_job_id': 'chaining:' + provider_job},
+                       synchronize_session=False))
+        s.commit()
+    finally:
+        s.close()
+    if not won:
+        return
+    chain = spec['chain']
+    try:
+        data, mime = imagegen.fetch_result(url)
+        chain['parts'].append(storage.put(slug, data, mime or 'video/mp4'))
+        done = len(chain['parts'])
+        if done < len(chain['plan']):
+            frame = imagegen.last_frame(data)
+            if not frame:
+                raise imagegen.GenerationError('could not read the end of part %d' % done)
+            motion = chain['motions'][done - 1]
+            call = dict(spec)
+            call.update({'seconds': chain['plan'][done], 'motion': motion,
+                         'prompt_extra': '', 'reference_url': '',
+                         'reference_b64': base64.b64encode(frame).decode(),
+                         'reference_mime': 'image/jpeg',
+                         'negative': imagegen.merge_negative(spec.get('negative_extra'),
+                                                             video=True)})
+            template = ('Continue the motion seamlessly from the first frame. '
+                        + imagegen.build_video_prompt(motion))
+            call['prompt'] = (imagegen.write_motion_prompt(motion, template, spec.get('explicit'))
+                              or template)
+            logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
+                        len(chain['plan']), call['prompt'])
+            new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
+            if not new_job:
+                raise imagegen.GenerationError('part %d was not accepted' % (done + 1))
+            s = _db_session()
+            try:
+                update_generation(s, job_id, provider_job_id=new_job,
+                                  spec_json=json.dumps(spec))
+            finally:
+                s.close()
+            return
+        joined = imagegen.join_clips([storage.get(p) for p in chain['parts']])
+        if not joined:
+            raise imagegen.GenerationError('could not join the parts')
+        path = storage.put(slug, joined, 'video/mp4')
+    except Exception as e:
+        logger.exception('chain job=%s failed', job_id)
+        _gen_fail(job_id, workspace, str(e)[:200] or 'a part failed')
+        return
+    s = _db_session()
+    try:
+        # The id stays claimed: the job goes to done from here, and a poller
+        # that saw the last part finish must not deliver it a second time.
+        update_generation(s, job_id, spec_json=json.dumps(spec))
+    finally:
+        s.close()
+    _gen_finish(job_id, slug, spec, workspace, ['storage:' + path])
 
 
 def _gen_advance_open(workspace_id=None, job_id=None):

@@ -641,6 +641,13 @@ def test_wan22_on_runpod():
               IG2.lora_url('https://civitai.com/api/download/models/1') ==
               'https://civitai.com/api/download/models/1?token=tok'
               and IG2.lora_url('https://h/a') == 'https://h/a')
+        if IG2.HAS_FFMPEG:
+            check('a long clip splits into whole parts the model serves',
+                  IG2.chain_plan('wan-2-2', 30) == [15, 15]
+                  and IG2.chain_plan('wan-2-2', 20) == [10, 10]
+                  and IG2.chain_plan('wan-2-2-lora', 24) == [8, 8, 8]
+                  and IG2.chain_plan('wan-2-2', 10) is None
+                  and IG2.chain_plan('seedance-2-0-fast', 30) is None)
         check('the payload carries the fields RunPod requires',
               'num_inference_steps' in prov.payload(spec)['input'])
         check('the clip runs the length it was priced at',
@@ -677,6 +684,13 @@ def test_wan22_on_runpod():
     finally:
         _rq.post = real_post
         os.environ.pop('RUNPOD_API_KEY', None)
+    check('a 30s chained clip is priced, a 30s single clip is not',
+          CR.video_price('720p', 30, model='wan-2-2') * CR.TOKEN_COST_USD >= 1.80 - 1e-9)
+    try:
+        CR.video_price('720p', 30, model='seedance-2-0-fast')
+        check('a 30s single clip is not priced', False)
+    except CR.PricingError:
+        check('a 30s single clip is not priced', True)
     for secs, cost in ((5, 0.50), (10, 1.00), (15, 1.50)):
         check(f'a {secs}s Wan 2.6 clip is priced at no less than RunPod charges for it',
               CR.video_price('720p', secs, model='wan-2-6-rp') * CR.TOKEN_COST_USD >= cost - 1e-9)

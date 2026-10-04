@@ -516,10 +516,30 @@ MODEL_VIDEO_DURATIONS = {
 }
 
 
+# Longer than one clip: parts chained end frame to start frame and joined.
+# Only lengths that split into whole parts the model serves, so what is
+# generated is exactly what is priced. Needs ffmpeg for the frame and the join.
+CHAIN_DURATIONS = {'wan-2-2': (20, 30), 'wan-2-6-rp': (20, 30),
+                   'wan-2-2-lora': (16, 24, 32)}
+
+
+def chain_plan(model_key, seconds):
+    """The part lengths a chained clip runs as, or None for a single clip."""
+    if not HAS_FFMPEG or seconds not in CHAIN_DURATIONS.get(model_key, ()):
+        return None
+    for part in sorted(MODEL_VIDEO_DURATIONS.get(model_key) or (), reverse=True):
+        if seconds % part == 0:
+            return [part] * (seconds // part)
+    return None
+
+
 def model_durations(model_key):
     """The discrete lengths a model serves, or None when it takes any whole
     number in its range."""
-    return list(MODEL_VIDEO_DURATIONS.get(model_key) or ()) or None
+    single = list(MODEL_VIDEO_DURATIONS.get(model_key) or ())
+    if single and HAS_FFMPEG:
+        single += list(CHAIN_DURATIONS.get(model_key, ()))
+    return single or None
 
 
 # ModelsLab's face swap is not a Runware model, so it carries no entry in
@@ -1502,6 +1522,57 @@ RW_LIPSYNC_TASK = os.getenv('RW_LIPSYNC_TASK', 'videoInference')
 RW_MODEL_LIPSYNC = os.getenv('RW_MODEL_LIPSYNC', 'sync:lipsync-2@1')
 
 HAS_FFMPEG = bool(shutil.which('ffmpeg'))
+
+
+def last_frame(video):
+    """The clip's final frame as a JPEG, the next part's first frame; b'' when
+    it cannot be read."""
+    if not HAS_FFMPEG:
+        return b''
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'last.jpg')
+        with open(src, 'wb') as f:
+            f.write(video)
+        try:
+            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-sseof', '-0.5', '-i', src,
+                            '-update', '1', '-q:v', '2', out],
+                           check=True, timeout=60, capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('last frame failed: %s', str(e)[:200])
+            return b''
+
+
+def join_clips(videos):
+    """Parts back to back as one clip. Each later part starts on the frame
+    the one before ended on, so that frame is dropped once to avoid a stutter.
+    b'' when the join fails."""
+    if not HAS_FFMPEG or not videos:
+        return b''
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        cmd = ['ffmpeg', '-y', '-loglevel', 'error']
+        for i, v in enumerate(videos):
+            p = os.path.join(d, f'{i}.mp4')
+            with open(p, 'wb') as f:
+                f.write(v)
+            cmd += ['-i', p]
+        chains = [f'[{i}:v]' + ('trim=start_frame=1,setpts=PTS-STARTPTS,' if i else '')
+                  + f'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[v{i}]'
+                  for i in range(len(videos))]
+        graph = ';'.join(chains) + ';' + ''.join(f'[v{i}]' for i in range(len(videos))) \
+            + f'concat=n={len(videos)}:v=1:a=0[out]'
+        out = os.path.join(d, 'out.mp4')
+        try:
+            subprocess.run(cmd + ['-filter_complex', graph, '-map', '[out]', '-c:v', 'libx264',
+                                  '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
+                                  '-movflags', '+faststart', out],
+                           check=True, timeout=300, capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('join failed: %s', str(e)[:300])
+            return b''
 
 
 def _ffmpeg(video, args, audio=None):

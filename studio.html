@@ -481,6 +481,7 @@
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
+        <div id="gen-chain-motions"></div>
         <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
           <div class="motion-ideas"></div></div>
         <div class="gen-f" id="gen-lora-row" style="display:none"><span>LoRAs</span>
@@ -672,7 +673,7 @@
         <label class="gen-f"><span>Clip size</span>
           <select id="gen-vres" onchange="genQuote()"></select></label>
         <label class="gen-f"><span>Seconds</span>
-          <select id="gen-vsecs" onchange="genQuote()"></select></label>
+          <select id="gen-vsecs" onchange="genQuote(); renderChainMotions()"></select></label>
       </div>
       <div id="gen-shape-out" class="gen-stackform" style="display:none">
         <div class="gen-f"><span>Frame shape</span>
@@ -3034,6 +3035,7 @@ async function jobPayload() {
     video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
     negative: el('gen-vnegative').value.trim(),
     loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })),
+    chain_motions: chainPlan() ? genChainMotions.slice(0, chainPlan().length - 1) : [],
   };
   if (genJob === 'swap') {
     return Object.assign(base, {
@@ -3257,6 +3259,35 @@ function renderAnimPhotos() {
     label: cur ? 'Change photo' : 'Choose from vault', empty: 'A clip starts from one of her photos.' });
   loadMotionIdeas();
   renderLoras();
+  renderChainMotions();
+}
+
+// A length past one clip runs as parts, each starting on the last frame of
+// the one before; every part after the first can be given its own action.
+const genChainMotions = [];
+function chainPlan() {
+  if (genJob !== 'animate' || !genPrices) return null;
+  const list = (genPrices.video_model_durations || {})[videoModel()] || [];
+  const singles = list.filter(d => d <= 15).sort((a, b) => b - a);
+  const secs = videoSecondsNow();
+  if (!singles.length || secs <= singles[0]) return null;
+  const part = singles.find(d => secs % d === 0);
+  return part ? Array(secs / part).fill(part) : null;
+}
+
+function renderChainMotions() {
+  const box = el('gen-chain-motions');
+  if (!box) return;
+  const plan = chainPlan();
+  if (!plan) { box.innerHTML = ''; return; }
+  let at = plan[0];
+  box.innerHTML = `<span class="hint">Runs as ${plan.length} parts of ${plan[0]}s. The Motion above is part 1 (0–${plan[0]}s); leave a part empty to carry on with the one before.</span>`
+    + plan.slice(1).map((p, i) => {
+      const from = at; at += p;
+      return `<label class="gen-f"><span>Part ${i + 2} — ${from}–${at}s</span>
+        <input type="text" maxlength="300" value="${esc(genChainMotions[i] || '')}"
+          placeholder="same as the part before" oninput="genChainMotions[${i}] = this.value"></label>`;
+    }).join('');
 }
 
 function pickAnimPhoto(id) {
