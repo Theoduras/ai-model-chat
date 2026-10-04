@@ -13,7 +13,7 @@ import traceback
 import urllib.parse
 
 import requests
-from sqlalchemy import create_engine, func, select
+from sqlalchemy import create_engine, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import db
@@ -86,7 +86,9 @@ def copy_media(token):
         return
     state['step'] = 'media'
     have = _blob_existing(token)
-    objs = [b for b in storage._bucket().list_blobs() if not b.name.endswith('/')]
+    objs = [b for b in storage._bucket().list_blobs()
+            if not b.name.endswith('/')
+            and not b.name.startswith(storage.STAGING_PREFIX + '/')]
     info = state['media'] = {'total': len(objs), 'copied': 0, 'skipped': 0,
                              'failed': 0, 'bytes': 0}
     for b in objs:
@@ -109,6 +111,36 @@ def copy_media(token):
         except Exception as e:
             info['failed'] += 1
             _log(f'media {b.name}: {e}')
+
+
+NEON_FREE = 512 * 1024 ** 2
+BLOB_FREE = 1024 ** 3
+
+
+def sizes():
+    """How much there is to copy, against the free tiers, so the choice of
+    plan is made before the copy rather than when it stops halfway."""
+    out = {'database': {}, 'media': {}}
+    tables = {}
+    with db.engine.connect() as s:
+        for table in db.Base.metadata.sorted_tables:
+            tables[table.name] = s.execute(select(func.count()).select_from(table)).scalar()
+        dbytes = (s.execute(text('SELECT pg_database_size(current_database())')).scalar()
+                  if db.engine.dialect.name == 'postgresql' else 0)
+    out['database'] = {'bytes': dbytes, 'fits_free': dbytes <= NEON_FREE, 'rows': tables}
+    if storage.backend() == 'gcs':
+        kept = staging = n = 0
+        for b in storage._bucket().list_blobs():
+            if b.name.startswith(storage.STAGING_PREFIX + '/'):
+                staging += b.size or 0
+            else:
+                kept += b.size or 0
+                n += 1
+        out['media'] = {'files': n, 'bytes': kept, 'staging_bytes_skipped': staging,
+                        'fits_free': kept <= BLOB_FREE}
+    else:
+        out['media'] = {'note': 'No bucket configured here'}
+    return out
 
 
 def _run(database_url, blob_token):

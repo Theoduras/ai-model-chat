@@ -7690,6 +7690,8 @@ def admin_migrate():
         return jsonify({'started': ok, 'state': migrate.state})
     if request.args.get('status'):
         return jsonify(migrate.state)
+    if request.args.get('sizes'):
+        return jsonify(migrate.sizes())
     return _MIGRATE_PAGE
 
 
@@ -7699,13 +7701,18 @@ _MIGRATE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
 input{width:100%;padding:8px;margin:4px 0 12px}button{padding:10px 18px}
 pre{background:#f4f4f4;padding:12px;white-space:pre-wrap;font-size:12px}</style></head><body>
 <h1>Copy everything to Vercel</h1>
-<p>Copies every table into the Postgres below and every bucket file into the Blob store. Safe to run again: what is already there is skipped.</p>
+<p>Copies every table into the Postgres below and every bucket file into the Blob store. Safe to run again: what is already there is skipped. Unreviewed generations (staging, deleted after 3 days anyway) are not copied.</p>
+<button onclick="sz()">Check sizes</button><p id="sizes"></p>
 <label>Target DATABASE_URL (Neon)</label><input id="db" placeholder="postgresql://...">
 <label>BLOB_READ_WRITE_TOKEN</label><input id="blob" placeholder="vercel_blob_rw_...">
 <button onclick="go()">Start</button><pre id="out">Idle</pre>
 <script>
 function go(){fetch('/admin/migrate',{method:'POST',headers:{'Content-Type':'application/json'},
 body:JSON.stringify({database_url:db.value,blob_token:blob.value})}).then(r=>r.json()).then(poll)}
+function mb(b){return (b/1048576).toFixed(0)+' MB'}
+function sz(){sizes.textContent='Checking...';fetch('/admin/migrate?sizes=1').then(r=>r.json()).then(s=>{
+const d=s.database,m=s.media;sizes.textContent='Database '+mb(d.bytes)+(d.fits_free?' - fits free Neon (512 MB)':' - needs a paid Neon plan')+
+'. Media '+(m.note||(m.files+' files, '+mb(m.bytes)+(m.fits_free?' - fits free Blob (1 GB)':' - needs a paid Blob plan')))+'.'})}
 function poll(){fetch('/admin/migrate?status=1').then(r=>r.json()).then(s=>{
 out.textContent=JSON.stringify(s,null,2);if(s.running)setTimeout(poll,2000)})}
 poll();
