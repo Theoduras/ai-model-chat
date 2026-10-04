@@ -623,11 +623,14 @@ def test_wan22_on_runpod():
               IG2.provider_name_for({'kind': 'video', 'job': 'animate', 'model': 'wan-2-6-rp'}) == 'runpod')
         w26 = prov.payload(dict(spec, model='wan-2-6-rp', explicit=True, seconds=10))['input']
         check('an explicit Wan 2.6 clip runs with the checker off at a size it serves',
-              w26['enable_safety_checker'] is False and w26['size'] == '720*1280'
+              w26['enable_safety_checker'] is False and w26['size'] == '720p'
               and w26['duration'] == 10)
         check('a job id finds its way back to its own endpoint',
               prov._endpoint('wan-2-6-rp|abc') == (IG2.RUNPOD_ENDPOINTS['wan-2-6-rp'], 'abc')
               and prov._endpoint('old') == (IG2.RUNPOD_ENDPOINTS['wan-2-2'], 'old'))
+        check('a negative term the prompt asks for is dropped, the underage ones never',
+              IG2.negative_for({'negative': 'zoom in, pan, teen, blurry',
+                                'prompt': 'slow zoom in while panning; teen'}) == 'teen, blurry')
         check('the payload carries the fields RunPod requires',
               'num_inference_steps' in prov.payload(spec)['input'])
         check('the clip runs the length it was priced at',

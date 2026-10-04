@@ -1051,6 +1051,23 @@ VIDEO_NEGATIVE = (
 )
 
 
+# Never dropped, whatever the prompt says.
+_KEEP_NEGATIVE = frozenset({'child', 'teen', 'underage'})
+
+
+def negative_for(spec):
+    """The negative prompt minus anything the prompt itself asks for: a clip
+    told to zoom in must not also be told not to."""
+    terms = [t.strip() for t in (spec.get('negative') or NEGATIVE_PROMPT).split(',')]
+    prompt = (spec.get('prompt') or '').lower()
+
+    def asked(term):
+        return re.search(r'\b' + re.escape(term.lower()) + r'(?:s|es|ed|ing|ning|ned)?\b',
+                         prompt) is not None
+
+    return ', '.join(t for t in terms if t and (t.lower() in _KEEP_NEGATIVE or not asked(t)))
+
+
 def merge_negative(extra='', video=False):
     """The creator's additions are added to the baseline, never swapped for it:
     the baseline is what keeps a generation off anything underage, and a text
@@ -1911,7 +1928,7 @@ class RunwareProvider(Provider):
                 task['fps'] = int(spec['fps'])
         else:
             if model_key not in NO_NEGATIVE_MODELS:
-                task[_RW['negative']] = spec.get('negative') or NEGATIVE_PROMPT
+                task[_RW['negative']] = negative_for(spec)
             task['width'] = width
             task['height'] = height
             task['duration'] = video_seconds(model_key, spec.get('seconds') or 5)
@@ -2134,7 +2151,7 @@ class ModelsLabProvider(Provider):
             'model_id': MODELSLAB_MODELS.get(spec.get('model'),
                                              MODELSLAB_MODELS['sdxl']),
             'prompt': spec.get('prompt') or '',
-            'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
+            'negative_prompt': negative_for(spec),
             'width': width, 'height': height,
             'samples': int(spec.get('batch') or 1),
             'num_inference_steps': int(spec.get('steps') or 30),
@@ -2162,7 +2179,7 @@ class ModelsLabProvider(Provider):
             'model_id': MODELSLAB_VIDEO_MODEL,
             'init_image': spec['reference_url'],
             'prompt': spec.get('prompt') or build_video_prompt(),
-            'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
+            'negative_prompt': negative_for(spec),
             'width': width, 'height': height,
             'num_frames': int(spec.get('seconds') or 5) * 16,
             'safety_checker': 'no',
@@ -2242,13 +2259,12 @@ class RunPodProvider(Provider):
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
         if model == 'wan-2-6-rp':
-            width, height = video_size(model, resolution=spec.get('resolution') or '720p',
-                                       aspect=spec.get('aspect'))
             return {'input': {
                 'prompt': spec.get('prompt') or build_video_prompt(),
                 'image': image,
-                'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
-                'size': f'{width}*{height}',
+                'negative_prompt': negative_for(spec),
+                # Despite the docs, this endpoint takes the rung, not pixels.
+                'size': '1080p' if (spec.get('resolution') or '720p') == '1080p' else '720p',
                 'duration': video_seconds(model, spec.get('seconds')),
                 'shot_type': 'single',
                 'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
@@ -2259,7 +2275,7 @@ class RunPodProvider(Provider):
         body = {
             'prompt': spec.get('prompt') or build_video_prompt(),
             'image': image,
-            'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
+            'negative_prompt': negative_for(spec),
             'size': f'{width}*{height}',
             # The live endpoint requires these, though its docs call them optional.
             'num_inference_steps': 30,
