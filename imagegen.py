@@ -2345,8 +2345,11 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300):
         resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
                              headers={'Authorization': f'Bearer {key}',
                                       'Content-Type': 'application/json'},
+                             # Qwen3 thinks first by default, and the thinking
+                             # alone can fill max_tokens and leave no answer.
                              json={'model': model, 'messages': messages,
-                                   'max_tokens': max_tokens, 'temperature': 0.7},
+                                   'max_tokens': max_tokens, 'temperature': 0.7,
+                                   'chat_template_kwargs': {'enable_thinking': False}},
                              timeout=60)
         body = resp.json()
         text = body['choices'][0]['message']['content'] or ''
@@ -2357,6 +2360,10 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300):
         return ''
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
+    if not text:
+        logger.warning('runpod chat %s: empty answer; finish=%s', model,
+                       (body.get('choices') or [{}])[0].get('finish_reason'))
+        return ''
     # A refusal is not a prompt; sent to the video model it would be one.
     if re.match(r"(?i)(i('m| am) sorry|i can(no|')t|i won't|sorry,|as an ai)", text):
         logger.warning('runpod chat %s refused: %.200s', model, text)
@@ -2381,8 +2388,8 @@ def suggest_motions(description, explicit=False):
             'changing who she is, her clothes or the place. Each is one action, at most 12 '
             'words, camera fixed. ' + _level_words(explicit) +
             ' Answer with a JSON array of strings only.'},
-        {'role': 'user', 'content': f'The photo: {description.strip()[:1500]}'},
-    ])
+        {'role': 'user', 'content': f'The photo: {description.strip()[:1500]} /no_think'},
+    ], max_tokens=600)
     match = re.search(r'\[.*\]', text, flags=re.DOTALL)
     try:
         ideas = json.loads(match.group(0)) if match else []
@@ -2408,8 +2415,8 @@ def write_motion_prompt(idea, base='', explicit=False):
             'out: the main action first, which hand or body part does it, its pace, that it '
             'repeats through the clip, then her expression. Do not add new details about how she '
             'looks. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
-        {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base}'},
-    ], max_tokens=300)
+        {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base} /no_think'},
+    ], max_tokens=600)
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
