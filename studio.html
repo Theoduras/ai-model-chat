@@ -483,6 +483,16 @@
                  placeholder="she turns towards the camera and smiles"></label>
         <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
           <div class="motion-ideas"></div></div>
+        <div class="gen-f" id="gen-lora-row" style="display:none"><span>LoRAs</span>
+          <div id="gen-lora-list"></div>
+          <details id="gen-lora-admin" style="display:none;margin-top:6px"><summary class="hint">Add a LoRA (Wan 2.2 I2V-A14B)</summary>
+            <input type="text" id="gen-lora-name" placeholder="Name" style="margin:4px 0">
+            <input type="text" id="gen-lora-high" placeholder="High-noise .safetensors link (https://…)" style="margin:4px 0">
+            <input type="text" id="gen-lora-low" placeholder="Low-noise .safetensors link (https://…)" style="margin:4px 0">
+            <input type="number" id="gen-lora-scale" value="1" min="0" max="2" step="0.05" style="width:90px;margin:4px 0">
+            <button type="button" class="btn-ai btn-ai-secondary" onclick="addLora()">Add</button>
+            <span class="hint" id="gen-lora-note"></span>
+          </details></div>
       </div>
       <div id="gen-swap-form" class="gen-stackform" style="display:none">
         <label class="gen-f"><span class="gen-id-lbl">Who she is in the clip</span>
@@ -3023,6 +3033,7 @@ async function jobPayload() {
     audio: audioPayload(),
     video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
     negative: el('gen-vnegative').value.trim(),
+    loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })),
   };
   if (genJob === 'swap') {
     return Object.assign(base, {
@@ -3245,6 +3256,7 @@ function renderAnimPhotos() {
   box.innerHTML = VaultPicker.field({ items: cur ? [cur] : [], open: "openPhotoPick('anim')",
     label: cur ? 'Change photo' : 'Choose from vault', empty: 'A clip starts from one of her photos.' });
   loadMotionIdeas();
+  renderLoras();
 }
 
 function pickAnimPhoto(id) {
@@ -3292,6 +3304,62 @@ async function loadMotionIdeas() {
 function useMotionIdea(i) {
   const ideas = motionIdeaCache[animPhoto() + '|' + genRating] || [];
   if (ideas[i]) { el('gen-video-motion').value = ideas[i]; writeFromMotion(); }
+}
+
+// Wan 2.2 + LoRA: the library is the server's; what is ticked, and how
+// strongly, is this page's.
+let genLoras = null;
+const genLoraPick = {};
+async function loadLoras() {
+  try {
+    const d = await (await fetch('/api/generate/loras')).json();
+    genLoras = (d && d.loras) || [];
+  } catch (e) { genLoras = []; }
+  renderLoras();
+}
+
+function renderLoras() {
+  const row = el('gen-lora-row');
+  if (!row) return;
+  const on = genJob === 'animate' && videoModel() === 'wan-2-2-lora';
+  row.style.display = on ? '' : 'none';
+  if (!on) return;
+  if (genLoras === null) { loadLoras(); return; }
+  el('gen-lora-admin').style.display = genVideoOpen ? '' : 'none';
+  el('gen-lora-list').innerHTML = genLoras.length ? genLoras.map(l => {
+    const picked = l.id in genLoraPick;
+    return `<label style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <input type="checkbox" ${picked ? 'checked' : ''} onchange="toggleLora('${esc(l.id)}', this.checked)">
+      <span style="flex:1">${esc(l.name)}</span>
+      <input type="number" min="0" max="2" step="0.05" style="width:80px"
+        value="${picked ? genLoraPick[l.id] : l.scale}" onchange="genLoraPick['${esc(l.id)}'] = +this.value">
+      ${genVideoOpen ? `<button type="button" class="btn-ai btn-ai-secondary" onclick="removeLora('${esc(l.id)}')">×</button>` : ''}
+    </label>`;
+  }).join('') : '<span class="hint">No LoRAs yet.</span>';
+}
+
+function toggleLora(id, on) {
+  const l = (genLoras || []).find(x => x.id === id);
+  if (on) genLoraPick[id] = l ? l.scale : 1; else delete genLoraPick[id];
+  renderLoras();
+}
+
+async function saveLoras(body) {
+  const d = await (await fetch('/api/admin/video-loras', {
+    method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(body),
+  })).json();
+  if (!d.ok) { el('gen-lora-note').textContent = '✗ ' + (d.error || 'not saved'); return; }
+  genLoras = d.loras; el('gen-lora-note').textContent = 'Saved.'; renderLoras();
+}
+
+function addLora() {
+  saveLoras({ name: el('gen-lora-name').value, high: el('gen-lora-high').value,
+              low: el('gen-lora-low').value, scale: +el('gen-lora-scale').value });
+}
+
+function removeLora(id) {
+  delete genLoraPick[id];
+  saveLoras({ remove: id });
 }
 
 function writeFromMotion() {

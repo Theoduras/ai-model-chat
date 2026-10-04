@@ -33336,7 +33336,76 @@ def _gen_spec(slug, body, user):
     spec.update({'resolution': resolution, 'seconds': seconds,
                  'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
                  'motion': (body.get('motion') or '')[:300]})
+    if model == 'wan-2-2-lora':
+        # Resolved now and stored on the job, so editing the library later
+        # never changes what a past job ran with.
+        library = {l['id']: l for l in _video_loras()}
+        picked = []
+        for item in (body.get('loras') or [])[:4]:
+            lora = library.get(str((item or {}).get('id') or ''))
+            if lora:
+                try:
+                    scale = max(0.0, min(2.0, float(item.get('scale', lora['scale']))))
+                except (TypeError, ValueError):
+                    scale = lora['scale']
+                picked.append({'name': lora['name'], 'high': lora['high'],
+                               'low': lora['low'], 'scale': scale})
+        spec['loras'] = picked
     return spec
+
+
+# The Wan 2.2 LoRA library, kept in app settings. Seeded with the general NSFW
+# pair from Civitai (model 1307155, v0.08a high and low).
+_DEFAULT_VIDEO_LORAS = [{
+    'id': 'nsfw-22-v008a', 'name': 'General NSFW v0.08a', 'scale': 1.0,
+    'high': 'https://civitai.com/api/download/models/2073605',
+    'low': 'https://civitai.com/api/download/models/2083303'}]
+
+
+def _video_loras():
+    try:
+        loras = json.loads(_get_setting('video_loras') or 'null')
+    except ValueError:
+        loras = None
+    return loras if isinstance(loras, list) else list(_DEFAULT_VIDEO_LORAS)
+
+
+@app.route('/api/generate/loras', methods=['GET'])
+def api_generate_loras():
+    """The LoRAs a Wan 2.2 + LoRA clip can use. Links are left out: a link can
+    carry a download token."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    return jsonify({'ok': True, 'loras': [
+        {'id': l['id'], 'name': l['name'], 'scale': l['scale']} for l in _video_loras()]})
+
+
+@app.route('/api/admin/video-loras', methods=['POST'])
+def api_admin_video_loras():
+    """Add (name, high and/or low link, strength) or remove (`remove`: id)."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    loras = [l for l in _video_loras() if l['id'] != str(body.get('remove') or '')]
+    if not body.get('remove'):
+        name = str(body.get('name') or '').strip()[:80]
+        high = str(body.get('high') or '').strip()[:800]
+        low = str(body.get('low') or '').strip()[:800]
+        if not name or not (high or low):
+            return jsonify({'ok': False, 'error': 'A name and at least one link are needed.'}), 400
+        if any(u and not u.startswith('https://') for u in (high, low)):
+            return jsonify({'ok': False, 'error': 'Links must start with https://'}), 400
+        try:
+            scale = max(0.0, min(2.0, float(body.get('scale', 1.0))))
+        except (TypeError, ValueError):
+            scale = 1.0
+        loras.append({'id': secrets.token_hex(6), 'name': name, 'high': high,
+                      'low': low, 'scale': scale})
+    _set_setting('video_loras', json.dumps(loras))
+    return jsonify({'ok': True, 'loras': [
+        {'id': l['id'], 'name': l['name'], 'scale': l['scale']} for l in loras]})
 
 # Under kept/, outside the three-day staging sweep: an uploaded clip is listed
 # in the studio for reuse and goes only when its creator deletes it.

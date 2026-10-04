@@ -631,6 +631,16 @@ def test_wan22_on_runpod():
         check('a negative term the prompt asks for is dropped, the underage ones never',
               IG2.negative_for({'negative': 'zoom in, pan, teen, blurry',
                                 'prompt': 'slow zoom in while panning; teen'}) == 'teen, blurry')
+        lo = prov.payload(dict(spec, model='wan-2-2-lora', seconds=8, loras=[
+            {'name': 'n', 'high': 'https://h/a.safetensors', 'low': '', 'scale': 0.8}]))['input']
+        check('a LoRA clip sends each LoRA to its own noise stage at its strength',
+              lo['high_noise_loras'] == [{'path': 'https://h/a.safetensors', 'scale': 0.8}]
+              and lo['low_noise_loras'] == [] and lo['duration'] == 8)
+        IG2.CIVITAI_TOKEN = 'tok'
+        check('a Civitai link carries the token, any other link does not',
+              IG2.lora_url('https://civitai.com/api/download/models/1') ==
+              'https://civitai.com/api/download/models/1?token=tok'
+              and IG2.lora_url('https://h/a') == 'https://h/a')
         check('the payload carries the fields RunPod requires',
               'num_inference_steps' in prov.payload(spec)['input'])
         check('the clip runs the length it was priced at',

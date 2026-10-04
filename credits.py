@@ -58,7 +58,7 @@ DEFAULT_VIDEO_DURATION = 5
 
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                'p-video-animate', 'wan-2-2', 'wan-2-6-rp')
+                'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -116,6 +116,8 @@ VIDEO_COST_USD_PER_SECOND = {
     'wan-2-2': {'480p': 0.06, '720p': 0.06, '1080p': 0.06},
     # RunPod's Wan 2.6 I2V page: $0.10/s at 720p, $0.15/s at 1080p; no 480p.
     'wan-2-6-rp': {'480p': 0.10, '720p': 0.10, '1080p': 0.15},
+    # RunPod's Wan 2.2 LoRA page: $0.35 for 5s, $0.56 for 8s -- $0.07 a second.
+    'wan-2-2-lora': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -254,6 +256,7 @@ MODEL_LABELS = {
     'wan-2-2-animate': 'Wan 2.2 Animate',
     'wan-2-2': 'Wan 2.2',
     'wan-2-6-rp': 'Wan 2.6 (Runpod)',
+    'wan-2-2-lora': 'Wan 2.2 + LoRA',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -292,6 +295,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-2-animate': ('sfw', 'nsfw'),
     'wan-2-2': ('sfw', 'nsfw'),
     'wan-2-6-rp': ('sfw', 'nsfw'),
+    'wan-2-2-lora': ('sfw', 'nsfw'),
     'p-video-animate': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a

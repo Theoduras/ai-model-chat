@@ -143,7 +143,12 @@ RUNPOD_API_KEY = (os.getenv('RUNPOD_API_KEY') or '').strip()
 RUNPOD_ENDPOINTS = {
     'wan-2-2': os.getenv('RUNPOD_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-2-i2v-720'),
     'wan-2-6-rp': os.getenv('RUNPOD_WAN26_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-6-i2v'),
+    'wan-2-2-lora': os.getenv('RUNPOD_WAN22_LORA_ENDPOINT',
+                              'https://api.runpod.ai/v2/wan-2-2-t2v-720-lora'),
 }
+# Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
+# LoRA itself, so the token rides on the link it is handed.
+CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
 # reads what the still shows and suggests what it could do, then writes the
@@ -505,6 +510,7 @@ MODEL_VIDEO_SIZES = {
 MODEL_VIDEO_DURATIONS = {
     'wan-2-2': (5, 8, 10, 15),
     'wan-2-6-rp': (5, 10, 15),
+    'wan-2-2-lora': (5, 8),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -524,6 +530,7 @@ _NO_DURATION_MODELS = frozenset({'ml-face-swap'})
 MODEL_VIDEO_SECONDS = {
     'wan-2-2': (5, 15),
     'wan-2-6-rp': (5, 15),
+    'wan-2-2-lora': (5, 8),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2295,11 +2302,18 @@ class RunPodProvider(Provider):
             'num_inference_steps': 30,
             'guidance': 5,
             'flow_shift': 5,
-            'duration': video_seconds('wan-2-2', spec.get('seconds')),
+            'duration': video_seconds(model if model == 'wan-2-2-lora' else 'wan-2-2',
+                                      spec.get('seconds')),
             'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
             'enable_prompt_optimization': False,
             'enable_safety_checker': not spec.get('explicit'),
         }
+        if model == 'wan-2-2-lora':
+            loras = spec.get('loras') or []
+            body['high_noise_loras'] = [{'path': lora_url(l['high']), 'scale': float(l['scale'])}
+                                        for l in loras if l.get('high')]
+            body['low_noise_loras'] = [{'path': lora_url(l['low']), 'scale': float(l['scale'])}
+                                       for l in loras if l.get('low')]
         return {'input': body}
 
     def submit_image(self, spec):
@@ -2332,6 +2346,12 @@ class RunPodProvider(Provider):
             raise GenerationError(f'RunPod status {resp.status_code}',
                                   fatal=resp.status_code in (401, 403))
         return self._read(resp.json())
+
+
+def lora_url(url):
+    if CIVITAI_TOKEN and 'civitai.com' in url and 'token=' not in url:
+        return url + ('&' if '?' in url else '?') + 'token=' + CIVITAI_TOKEN
+    return url
 
 
 def _runpod_chat(endpoint, model, messages, max_tokens=300):
