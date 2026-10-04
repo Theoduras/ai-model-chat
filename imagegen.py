@@ -494,7 +494,7 @@ MODEL_VIDEO_SIZES = {
 # presets and nothing between them: offering 7s to one of them is offering a
 # length the provider refuses.
 MODEL_VIDEO_DURATIONS = {
-    'wan-2-2': (5,),
+    'wan-2-2': (5, 8, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -512,7 +512,7 @@ def model_durations(model_key):
 _NO_DURATION_MODELS = frozenset({'ml-face-swap'})
 
 MODEL_VIDEO_SECONDS = {
-    'wan-2-2': (5, 5),
+    'wan-2-2': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2226,7 +2226,7 @@ class RunPodProvider(Provider):
             'image': image,
             'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
             'size': f'{width}*{height}',
-            'duration': 5,
+            'duration': video_seconds('wan-2-2', spec.get('seconds')),
             'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
             'enable_prompt_optimization': False,
             'enable_safety_checker': not spec.get('explicit'),

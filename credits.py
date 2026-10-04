@@ -111,9 +111,9 @@ VIDEO_COST_USD_PER_SECOND = {
     'p-video-animate': {'480p': 0.03, '720p': 0.03, '1080p': 0.06},
     'kling-3-0-mc': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
     'kling-3-0-omni': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
-    # RunPod's public endpoint, $0.30-$0.90 a video: the top of that range over
-    # its one 5s 720p clip, until a bill says what it really is.
-    'wan-2-2': {'480p': 0.18, '720p': 0.18, '1080p': 0.18},
+    # RunPod's public endpoint, from its model page: $0.30 for 5s, $0.48 for 8s,
+    # $0.60 for 10s, $0.90 for 15s -- a flat $0.06 a second at 720p, its one rung.
+    'wan-2-2': {'480p': 0.06, '720p': 0.06, '1080p': 0.06},
 }
 
 PROVIDER_COST_MEASURED = {

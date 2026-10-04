@@ -619,6 +619,8 @@ def test_wan22_on_runpod():
               prov.payload(dict(spec, explicit=True))['input']['enable_safety_checker'] is False)
         check('a safe clip runs with it on',
               prov.payload(spec)['input']['enable_safety_checker'] is True)
+        check('the clip runs the length it was priced at',
+              prov.payload(dict(spec, seconds=10))['input']['duration'] == 10)
         check('a finished job hands back the video URL',
               prov._read({'status': 'COMPLETED', 'output': {'video_url': 'https://v/a.mp4'}}).urls
               == ['https://v/a.mp4'])
@@ -627,8 +629,9 @@ def test_wan22_on_runpod():
     finally:
         os.environ.pop('RUNPOD_API_KEY', None)
         importlib.reload(IG)
-    check('a Wan 2.2 clip is priced at no less than RunPod charges for it',
-          CR.video_price('720p', 5, model='wan-2-2') * CR.TOKEN_COST_USD >= 0.90 - 1e-9)
+    for secs, cost in ((5, 0.30), (8, 0.48), (10, 0.60), (15, 0.90)):
+        check(f'a {secs}s Wan 2.2 clip is priced at no less than RunPod charges for it',
+              CR.video_price('720p', secs, model='wan-2-2') * CR.TOKEN_COST_USD >= cost - 1e-9)
 
 
 if __name__ == '__main__':
