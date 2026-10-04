@@ -7677,6 +7677,41 @@ def admin_activity():
         s.close()
 
 
+@app.route('/admin/migrate', methods=['GET', 'POST'])
+def admin_migrate():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    import migrate
+    if request.method == 'POST':
+        body = request.get_json(silent=True) or {}
+        ok = migrate.start((body.get('database_url') or '').strip(),
+                           (body.get('blob_token') or '').strip())
+        return jsonify({'started': ok, 'state': migrate.state})
+    if request.args.get('status'):
+        return jsonify(migrate.state)
+    return _MIGRATE_PAGE
+
+
+_MIGRATE_PAGE = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><title>Migrate to Vercel</title>
+<style>body{font-family:system-ui;max-width:720px;margin:32px auto;padding:0 16px}
+input{width:100%;padding:8px;margin:4px 0 12px}button{padding:10px 18px}
+pre{background:#f4f4f4;padding:12px;white-space:pre-wrap;font-size:12px}</style></head><body>
+<h1>Copy everything to Vercel</h1>
+<p>Copies every table into the Postgres below and every bucket file into the Blob store. Safe to run again: what is already there is skipped.</p>
+<label>Target DATABASE_URL (Neon)</label><input id="db" placeholder="postgresql://...">
+<label>BLOB_READ_WRITE_TOKEN</label><input id="blob" placeholder="vercel_blob_rw_...">
+<button onclick="go()">Start</button><pre id="out">Idle</pre>
+<script>
+function go(){fetch('/admin/migrate',{method:'POST',headers:{'Content-Type':'application/json'},
+body:JSON.stringify({database_url:db.value,blob_token:blob.value})}).then(r=>r.json()).then(poll)}
+function poll(){fetch('/admin/migrate?status=1').then(r=>r.json()).then(s=>{
+out.textContent=JSON.stringify(s,null,2);if(s.running)setTimeout(poll,2000)})}
+poll();
+</script></body></html>"""
+
+
 @app.route('/admin/register-links', methods=['GET', 'POST'])
 def admin_register_links():
     blocked = _require_super_admin()

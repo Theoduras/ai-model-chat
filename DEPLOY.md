@@ -1,140 +1,69 @@
-# Deployment Guide — Google Cloud Run
+# Deployment — Vercel (site) + Railway (always-on bots)
 
-This app runs as a Docker container on **Google Cloud Run**: a managed host that
-builds the image, serves it over HTTPS, and auto-scales from zero to thousands of
-concurrent chats with no servers to manage.
+| What | Where |
+|---|---|
+| Website, API, cron | **Vercel** (Hobby), entry `api/index.py`, config `vercel.json` |
+| Database | **Neon Postgres** (Vercel → Storage → Neon), `DATABASE_URL` |
+| Media | **Vercel Blob** (private store), `BLOB_READ_WRITE_TOKEN` |
+| Fanvue / OnlyFans / X / Telegram / Discord loops | **Railway** service from `Dockerfile` (`railway.json`) |
+| OnlyFans/Discord/Instagram sign-in browser | **Railway** service from `Dockerfile.browser` (`railway.browser.json`) |
 
----
-
-## One-time setup
-
-1. **Create a Google Cloud project** (or reuse the existing Gemini one) at
-   https://console.cloud.google.com — note the **Project ID**.
-2. **Install the gcloud CLI**: https://cloud.google.com/sdk/docs/install
-3. Authenticate and select the project:
-   ```bash
-   gcloud auth login
-   gcloud config set project YOUR_PROJECT_ID
-   gcloud services enable run.googleapis.com cloudbuild.googleapis.com
-   ```
+The loops switch themselves off on Vercel (`IS_VERCEL` / `_worker_enabled`) and
+on everywhere else, so the Railway service runs them and Vercel never does. Both
+hosts share the one database and Blob store.
 
 ---
 
-## Deploy
+## 1. Vercel
 
-From the repository root:
+1. vercel.com → **Add New → Project** → import `Theoduras/ai-model-chat`.
+   Framework preset: **Other**. Settings → Git → **Production Branch: `develop`**.
+2. **Storage → Create → Neon (Postgres)** → connect to the project. This sets
+   `DATABASE_URL` (the app normalises `postgres://` itself).
+3. **Storage → Create → Blob** → access **Private** → connect. This sets
+   `BLOB_READ_WRITE_TOKEN`.
+4. **Settings → Environment Variables**: copy every variable the Cloud Run
+   service had (`GEMINI_API_KEY`, `ADMIN_PASSWORD`, `SECRET_KEY`, Stripe,
+   Oxapay, Runware, ModelsLab, Fanvue, Google OAuth, SMTP, `CRON_SECRET`, …)
+   **except** `GCS_BUCKET` and the `DB_*` / `CLOUD_SQL_*` ones. Add
+   `PUBLIC_BASE_URL=https://velvetfunneler.com`.
+5. **Settings → Domains** → add `velvetfunneler.com` and the bio domain
+   (`velvt.online`) and set the DNS records Vercel shows at your registrar.
+6. Redeploy once so the new variables load.
 
-```bash
-gcloud run deploy ai-model-chat \
-  --source . \
-  --region europe-west4 \
-  --allow-unauthenticated \
-  --update-env-vars "GEMINI_API_KEY=YOUR_KEY,ADMIN_PASSWORD=YOUR_PASSWORD"
-```
+Hobby limits: 60 s per request, the `/api/generate/tick` cron runs once a day,
+4.5 MB request bodies, Blob 1 GB / Neon 0.5 GB on the free tiers.
 
-> **Always `--update-env-vars`, never `--set-env-vars`.** `--set-` replaces the
-> service's whole environment with what you typed, so a command naming one
-> variable silently drops `DATABASE_URL`, the Stripe keys and everything else —
-> the service comes back up on a fresh SQLite file with billing broken.
-> `--update-` adds and overwrites only the variables you name. The same applies
-> to `--set-secrets` vs `--update-secrets`.
+## 2. Copy the data off Google Cloud (once)
 
-Cloud Run builds the `Dockerfile`, deploys it, and prints a live HTTPS URL like:
+1. Turn GCP billing back on. The `develop` trigger deploys this code to Cloud Run.
+2. Sign in as super admin on the **old** site and open `/admin/migrate`.
+3. Paste Neon's `DATABASE_URL` and the `BLOB_READ_WRITE_TOKEN` (both under
+   Vercel → Storage → the store → `.env.local`) and press **Start**.
+4. Wait for `"done": true`. If it stops or shows failures, press Start again —
+   it skips what is already copied.
+5. Check the new site, then turn GCP billing off.
 
-```
-https://ai-model-chat-xxxxxxxxx.europe-west4.run.app
-```
+## 3. Railway (bots + sign-in browser)
 
-That URL works immediately — no domain required.
+1. railway.com → **New Project → Deploy from GitHub repo** → this repo, branch
+   `develop`. Settings → **Config-as-code path: `railway.json`**.
+2. Variables: the same set as Vercel (same `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`,
+   `PUBLIC_BASE_URL`), plus `STORAGE_BACKEND=blob`.
+3. Add a second service from the same repo with config path
+   `railway.browser.json` and variables `GUNICORN_TARGET=of_browser:service()`,
+   `ONLYFANS_BROWSER_TOKEN=<random>` and the same `DATABASE_URL`. Generate a
+   public domain for it.
+4. On Vercel **and** the bot service set `ONLYFANS_BROWSER_URL=<that domain>` and
+   the same `ONLYFANS_BROWSER_TOKEN`.
 
-> **Secrets:** for production, prefer Secret Manager over env vars:
-> ```bash
-> echo -n "YOUR_KEY" | gcloud secrets create gemini-api-key --data-file=-
-> gcloud run deploy ai-model-chat --source . --region europe-west4 \
->   --update-secrets "GEMINI_API_KEY=gemini-api-key:latest"
-> ```
+## 4. Point callbacks at the domain
 
----
+Already right if they use `https://velvetfunneler.com`; otherwise update:
+Stripe webhook, Oxapay callback, Google OAuth redirect URI
+(`/auth/google/callback`), Fanvue app redirect/webhook (reconnect Fanvue once),
+Reddit/TikTok redirect URIs.
 
-## Auto-deploy on push
+## Deploying
 
-Pushing to `develop` builds and deploys automatically — you never run a deploy
-command by hand. It is already set up; this section is what it actually is, not
-how to recreate it.
-
-The trigger was created by **Cloud Run → Set up continuous deployment**, not by
-hand, so it is one of Google's managed `rmgpgab-*` triggers. It no longer carries
-the inline build config it was born with: it reads
-[`cloudbuild.app.yaml`](cloudbuild.app.yaml) from this repository, like the
-browser's trigger reads its own config.
-
-- **The inline config built with `--no-cache`.** Every push re-downloaded Chrome
-  and reinstalled every dependency, even a push that changed one HTML file. That
-  is the single biggest reason builds took as long as they did, and it could not
-  be seen or fixed from a checkout.
-- **`cloudbuild.app.yaml` is that config with caching added.** It pulls the
-  previous image, skips build and push entirely when this commit's image is
-  already in the registry, and builds with `--cache-from` so the Chrome layer is
-  reused. Its deploy step is unchanged: `gcloud run services update --image=...`
-  plus the `managed-by=gcp-cloud-build-deploy-cloud-run` labels the managed
-  trigger set.
-- **Cloud Run flags still are not set from the repo.** Memory, CPU throttling,
-  min/max instances, session affinity, env vars — a `services update --image`
-  leaves all of it alone, which is why the commands below are one-time. Do not
-  turn that step into a full `run deploy` to set a flag from here; a deploy that
-  omits a flag resets it.
-
-Inspect the trigger with:
-
-```bash
-gcloud builds triggers list --format="table(name, github.owner, github.name, filename)"
-gcloud builds triggers describe <name> --format=yaml
-```
-
-`FILENAME` should read `cloudbuild.app.yaml`. An empty column means the trigger
-fell back to an inline config and nothing in this repository governs the app's
-deploy any more.
-
-### Pointing the trigger at a config file
-
-`gcloud builds triggers update github` rejects these managed triggers
-(`INVALID_ARGUMENT`). Export, edit, import instead:
-
-```bash
-gcloud builds triggers describe <name> --format=yaml > trigger.yaml
-# drop the whole `build:` block and the read-only createTime / id / resourceName,
-# add:  filename: cloudbuild.app.yaml
-gcloud builds triggers import --source=trigger.yaml
-```
-
-Keep the exported copy: it is the only record of an inline config once replaced.
-
-### Changing a Cloud Run setting
-
-Directly on the service, once:
-
-```bash
-gcloud run services update ai-model-chat-dev --region europe-west4 \
-  --memory=2Gi --no-cpu-throttling
-```
-
-### Setting secrets
-
-Also directly on the service, and also once:
-```bash
-gcloud run services update ai-model-chat-dev --region europe-west4 \
-  --update-env-vars "GEMINI_API_KEY=...,ADMIN_PASSWORD=..."
-```
-Generate `API_KEYS` in the same command so the key never lands in your shell
-history:
-```bash
-gcloud run services update ai-model-chat-dev --region europe-west4 \
-  --update-env-vars "API_KEYS=$(python3 -c 'import secrets;print(secrets.token_urlsafe(32))')"
-```
-Read it back when you need to hand it to a caller:
-```bash
-gcloud run services describe ai-model-chat-dev --region europe-west4 \
-  --format="value(spec.template.spec.containers[0].env)"
-```
-
-Every push after that builds a new image and rolls it out; nothing else changes.
+Push to `develop`. Vercel and Railway both build from it.

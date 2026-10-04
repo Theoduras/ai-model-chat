@@ -16,9 +16,9 @@ This is an **OnlyFans-style AI chatbot platform** where content creators (models
 2. Define the persona's voice, tone, backstory, and escalation strategy.
 3. Deploy that persona to convert fans → engaged chatters → content buyers.
 
-The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. It runs as a
-Docker container on **Google Cloud Run** (see Deployment Rules below). A Vercel config is
-kept as a secondary target and still works, but is not where the app is deployed.
+The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. The site runs on
+**Vercel** (Neon Postgres, Vercel Blob); the always-on loops and the sign-in browser run on
+**Railway** from the `Dockerfile`s (see Deployment Rules below). Google Cloud is retired.
 
 ---
 
@@ -75,10 +75,12 @@ personas/
 grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
 templates/platform.html         — Per-platform marketing pages (text in platform_pages.py)
 .env                            — API keys (never commit)
-Dockerfile                      — Cloud Run image (the real deployment)
-api/index.py                    — Vercel entrypoint (secondary host)
+Dockerfile                      — Always-on image (Railway: bot loops)
+railway.json / railway.browser.json — Railway services (bots / sign-in browser)
+api/index.py                    — Vercel entrypoint (the site)
 api/requirements.txt            — Vercel deps (trimmed; wins over the root file)
-vercel.json                     — Vercel routing + cron config (secondary host)
+vercel.json                     — Vercel routing + cron config
+migrate.py                      — One-off copy Cloud SQL + GCS → Neon + Blob (/admin/migrate)
 requirements.txt                — Python deps: flask, google-genai, python-dotenv, google-auth
 ```
 
@@ -216,12 +218,12 @@ Stay completely in character. Never mention being an AI.
   the database.
 - Static assets served directly from root via Flask `static_folder=BASE_DIR`.
 - Test locally with `python app.py` before pushing.
-- Cloud Run builds from the `Dockerfile`; `vercel.json` and `api/index.py` only
-  matter if deploying to Vercel. Keep both working when adding routes — everything
-  already routes through Flask, so a new `@app.route` needs no config change on
-  either host. See `DEPLOY.md`.
+- Vercel serves the site through `api/index.py`; Railway builds the `Dockerfile`.
+  Keep both working when adding routes — everything already routes through
+  Flask, so a new `@app.route` needs no config change on either host. A file the
+  site reads at runtime must match `includeFiles` in `vercel.json`. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
-  they run on Cloud Run and stay off on Vercel (`IS_VERCEL` in `app.py`).
+  they run on Railway and stay off on Vercel (`IS_VERCEL` in `app.py`).
 - **Free is the content-creation plan: characters, the studio and token
   top-ups and one link-in-bio page on the account, nothing chatbot.** Its `chatbot` capability is False (True on every
   other plan, admins and grandfathered accounts included) and `personas` is 0.
@@ -445,27 +447,14 @@ Stay completely in character. Never mention being an AI.
 
 ## Deployment Rules
 
-The app auto-deploys via a Cloud Build trigger on push to `develop`, to the
-single Cloud Run service `ai-model-chat-dev` (see `ENVIRONMENTS.md`).
+Push to `develop`. Vercel (production branch `develop`) deploys the site and
+Railway redeploys the bot and browser services from the same push. Env vars
+live on each host's dashboard, not in this repository. See `DEPLOY.md`.
 
-- **Push to `develop`.** That is the deploy: the trigger picks it up.
-- Never run a `gcloud run deploy` or `gcloud builds` command by hand to ship app
-  code — pushing to `develop` is the only path for that.
-- **The app's trigger reads `cloudbuild.app.yaml`** (it carried an inline config
-  until that was exported and replaced; the inline one built with `--no-cache`).
-  It builds the `Dockerfile` and passes only `--image` and the deploy labels to
-  `gcloud run services update`. So a Cloud Run setting for `ai-model-chat-dev` —
-  memory, instances, session affinity, env vars — **still cannot be changed from
-  this repository**: never widen that step into a full `run deploy`. Set it on
-  the service; it persists across deploys.
-- `ai-model-chat-dev-browser` runs the same image with a different entrypoint
-  and deploys itself from `develop` through its own trigger, which *does* read a
-  build config from here: `cloudbuild.browser.yaml`. Every service flag it needs
-  is restated in that file, because its deploy step is a full `gcloud run
-  deploy`. It was hand-deployed so that a deploy could not interrupt a sign-in;
-  in practice it ran week-old code and blocked the signing repair, which runs
-  inside it. An interrupted sign-in can be started again — see
-  `ENVIRONMENTS.md`.
+- Never turn the loops on on Vercel: two hosts running them means two bots
+  answering the same fan. They run only on the Railway bot service.
+- The Cloud Run / Cloud Build files (`cloudbuild.*.yaml`, `infra/`,
+  `ENVIRONMENTS.md`) describe the retired Google Cloud setup.
 
 ---
 
