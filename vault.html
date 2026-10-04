@@ -79,7 +79,9 @@
     .vw-nav:hover { background:#ffffff38; }
     .vw-nav.prev { left:14px; } .vw-nav.next { right:14px; }
     .vw-side { width:320px; flex-shrink:0; background:var(--panel); color:var(--text);
-      overflow-y:auto; padding:18px; display:flex; flex-direction:column; gap:16px; }
+      overflow-y:auto; overflow-x:hidden; padding:18px; display:flex; flex-direction:column; gap:16px; }
+    .vw-side .vw-acts { flex-direction:row; flex-wrap:wrap; gap:8px; margin-top:auto; }
+    .vw-side .vw-acts .btn { flex:1 1 0; min-width:0; padding-left:8px; padding-right:8px; white-space:nowrap; }
     .vw-side h3 { font-size:0.95rem; font-weight:600; margin:0; }
     .vw-side .vw-sec { display:flex; flex-direction:column; gap:7px; }
     .vw-side .vw-lab { font-size:0.68rem; text-transform:uppercase; letter-spacing:.07em;
@@ -789,8 +791,8 @@ function vwViewDraw() {
           : '<span class="vw-lab">No folders yet.</span>')
       + '<button type="button" class="vw-fchip" onclick="vwNewFolder()">+ new</button>'
     + '</div></div>'
-    + '<div class="vw-sec" style="flex-direction:row;gap:8px;margin-top:auto;">'
-      + '<button type="button" class="btn btn-secondary" style="flex:1" onclick="vwDownload([\'' + m.id + '\'])">⭳ Download</button>'
+    + '<div class="vw-sec vw-acts">'
+      + '<button type="button" class="btn btn-secondary" onclick="vwDownload([\'' + m.id + '\'])">⭳ Download</button>'
       + (m.kind === 'video' ? '' : '<button type="button" class="btn btn-secondary" title="Fully nude version of this photo — 1 token" onclick="vwUndress(\'' + m.id + '\')">Undress</button>')
       + '<button type="button" class="btn btn-ghost" style="color:var(--err)" onclick="vwDelete([\'' + m.id + '\'])">Delete</button>'
     + '</div>';

@@ -7677,6 +7677,181 @@ def admin_activity():
         s.close()
 
 
+_ADMIN_PAGES = [
+    ('Users', '/admin/users', 'Accounts, plans, roles'),
+    ('Media', '/admin/media', 'Every uploaded photo and clip: compress, delete'),
+    ('Activity log', '/admin/activity', 'Sign-ins, signups, bio and tool activity'),
+    ('Visitors', '/admin/visitors', 'Who visited the site'),
+    ('Support inbox', '/admin/support', 'Support chats with any account'),
+    ('Demos', '/admin/demos', 'Demo sessions'),
+    ('Trials', '/admin/trials', 'Free-trial links and redemptions'),
+    ('Register links', '/admin/register-links', 'Tracked signup links'),
+    ('Permissions', '/admin/permissions', 'What admin seats may do'),
+    ('X chats', '/admin/xchats', 'X DM conversations'),
+    ('X log', '/admin/xlog', 'X bot activity'),
+    ('Persona builder', '/admin', 'Edit persona voice and prompt'),
+    ('Migrate to Vercel', '/admin/migrate', 'Copy the database and media'),
+]
+
+
+@app.route('/admin/hub')
+def admin_hub():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    cards = ''.join(
+        f'<a class="card hub" href="{url}"><b>{name}</b><span>{desc}</span></a>'
+        for name, url, desc in _ADMIN_PAGES)
+    return ("""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<title>Admin</title><style>""" + ACCOUNT_CSS + """
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:12px}
+.hub{display:flex;flex-direction:column;gap:4px;text-decoration:none;color:var(--text);margin:0}
+.hub span{color:var(--text-muted);font-size:.82rem}.hub:hover{border-color:#a78bfa}
+</style></head><body data-page="admin-hub"><div class="wrap wide">
+<div class="bar"><span>Admin</span></div><div class="grid">""" + cards + """</div></div></body></html>""")
+
+
+@app.route('/admin/media')
+def admin_media():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    return ADMIN_MEDIA_HTML
+
+
+@app.route('/api/admin/media')
+def api_admin_media():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from sqlalchemy import func
+    from db import PersonaMedia, _epoch
+    page = max(int(request.args.get('page') or 0), 0)
+    q = (request.args.get('q') or '').strip().lower()
+    s = _db_session()
+    try:
+        query = s.query(PersonaMedia.id, PersonaMedia.slug, PersonaMedia.kind,
+                        PersonaMedia.mime, PersonaMedia.created_at,
+                        PersonaMedia.gcs_path, PersonaMedia.approved,
+                        func.length(PersonaMedia.image_data),
+                        func.length(PersonaMedia.poster_data))
+        if q:
+            query = query.filter(PersonaMedia.slug.ilike(f'%{q}%'))
+        total = query.count()
+        rows = (query.order_by(PersonaMedia.created_at.desc())
+                .offset(page * 200).limit(200).all())
+        return jsonify({'total': total, 'page': page, 'items': [{
+            'id': r[0], 'slug': r[1], 'kind': r[2] or 'image', 'mime': r[3] or '',
+            'created': _epoch(r[4]), 'stored': bool(r[5]), 'approved': bool(r[6]),
+            'db_bytes': int(r[7] or 0) + int(r[8] or 0),
+            'thumb': f'/api/personas/{r[1]}/media/{r[0]}/image'} for r in rows]})
+    finally:
+        s.close()
+
+
+@app.route('/api/admin/media/compress', methods=['POST'])
+def api_admin_media_compress():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []]
+    if not ids:
+        return jsonify({'error': 'Nothing selected'}), 400
+    threading.Thread(target=_compress_existing_images, kwargs={'ids': ids},
+                     daemon=True).start()
+    return jsonify({'ok': True, 'count': len(ids)})
+
+
+@app.route('/api/admin/media/delete', methods=['POST'])
+def api_admin_media_delete():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from db import (PersonaMedia, delete_media_links, drop_model_references,
+                    delete_persona_media)
+    ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []]
+    s = _db_session()
+    gone, paths = 0, []
+    try:
+        for mid in ids:
+            row = s.get(PersonaMedia, mid)
+            if not row:
+                continue
+            paths += [p for p in (row.gcs_path, row.poster_gcs_path) if p]
+            delete_media_links(s, mid)
+            drop_model_references(s, mid)
+            delete_persona_media(s, mid)
+            gone += 1
+        s.commit()
+    finally:
+        s.close()
+    # After the commit: a file deleted under a row that then failed to go
+    # would leave the vault pointing at nothing.
+    if storage.enabled():
+        for path in paths:
+            storage.delete(path)
+    me = _current_user() or {}
+    logger.info('ADMIN MEDIA DELETE by=%s count=%d', me.get('email'), gone)
+    return jsonify({'ok': True, 'deleted': gone})
+
+
+ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<title>Media</title><style>""" + ACCOUNT_CSS + """
+.tools{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}
+.tools input[type=search]{flex:1;min-width:160px;margin:0}.tools button{width:auto;margin:0;padding:6px 14px}
+.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px}
+.it{position:relative;border:2px solid var(--border);border-radius:10px;overflow:hidden;cursor:pointer;background:var(--surface)}
+.it.on{border-color:#a78bfa}.it img,.it video{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
+.it input{position:absolute;top:6px;left:6px;width:18px;height:18px;margin:0}
+.it .m{font-size:.72rem;padding:4px 6px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.danger{color:var(--err,#f43f5e)}#more{display:block;margin:14px auto;width:auto}
+</style></head><body data-page="admin-media"><div class="wrap wide">
+<div class="bar"><span>Media</span><a href="/admin/hub">Admin</a></div>
+<div class="card"><div class="tools">
+<input type="search" id="q" placeholder="Filter by persona">
+<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="all" style="width:auto;margin:0"> Select all</label>
+<span id="count">0 selected</span>
+<button onclick="act('compress')">Compress</button>
+<button class="danger" onclick="act('delete')">Delete</button>
+</div><p id="note" style="margin:0 0 10px;color:var(--text-muted)"></p>
+<div class="grid" id="grid"></div><button id="more" hidden onclick="load(page+1)">Load more</button></div></div>
+<script>
+let page=0,items=[],sel=new Set();
+const $=id=>document.getElementById(id);
+function kb(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB'}
+function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
+async function load(p){
+  page=p;const r=await fetch('/api/admin/media?page='+p+'&q='+encodeURIComponent($('q').value));const d=await r.json();
+  if(p===0){items=[];$('grid').innerHTML=''}
+  items=items.concat(d.items);
+  $('grid').insertAdjacentHTML('beforeend',d.items.map(m=>'<div class="it'+(sel.has(m.id)?' on':'')+'" data-id="'+m.id+'" onclick="tog(this)">'
+    +(m.kind==='video'?'<video src="'+m.thumb+'" preload="none" muted></video>':'<img loading="lazy" src="'+m.thumb+'">')
+    +'<input type="checkbox"'+(sel.has(m.id)?' checked':'')+' tabindex="-1">'
+    +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.db_bytes?' · '+kb(m.db_bytes)+' in DB':m.stored?' · file':'')+'</div></div>').join(''));
+  $('more').hidden=items.length>=d.total;$('note').textContent=d.total+' files';upd();
+}
+function tog(el){const id=el.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);el.classList.toggle('on');el.querySelector('input').checked=sel.has(id);upd()}
+function upd(){$('count').textContent=sel.size+' selected';$('all').checked=items.length>0&&items.every(m=>sel.has(m.id))}
+$('all').onchange=e=>{items.forEach(m=>e.target.checked?sel.add(m.id):sel.delete(m.id));
+  document.querySelectorAll('.it').forEach(el=>{el.classList.toggle('on',sel.has(el.dataset.id));el.querySelector('input').checked=sel.has(el.dataset.id)});upd()};
+let t;$('q').oninput=()=>{clearTimeout(t);t=setTimeout(()=>{sel.clear();load(0)},300)};
+async function act(kind){
+  if(!sel.size)return alert('Select something first.');
+  if(kind==='delete'&&!confirm('Delete '+sel.size+' file(s) for good? This cannot be undone.'))return;
+  const r=await fetch('/api/admin/media/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...sel]})});
+  const d=await r.json();
+  if(!r.ok)return alert(d.error||'Failed');
+  $('note').textContent=kind==='delete'?d.deleted+' deleted.':'Compressing '+d.count+' file(s) in the background.';
+  if(kind==='delete'){sel.clear();load(0)}
+}
+load(0);
+</script></body></html>"""
+
+
 @app.route('/admin/migrate', methods=['GET', 'POST'])
 def admin_migrate():
     blocked = _require_super_admin()
@@ -36157,10 +36332,12 @@ def _grant_all_monthly_tokens():
         s.close()
 
 
-def _compress_existing_images(force=False):
+def _compress_existing_images(force=False, ids=None):
     """One pass over every image stored before compression existed. Marked
-    done in settings so a restart does not walk them all again."""
-    if not force and _get_setting('images_compressed_v2'):
+    done in settings so a restart does not walk them all again. `ids` limits
+    it to those vault rows (the admin media page's selection)."""
+    selection = ids is not None
+    if not selection and not force and _get_setting('images_compressed_v2'):
         return
     from db import (PersonaMedia, PersonaImages, PersonaNsfwImages, CharacterImage,
                     compress_images_json)
@@ -36184,15 +36361,18 @@ def _compress_existing_images(force=False):
 
     s = _db_session()
     try:
-        for model in (PersonaImages, PersonaNsfwImages):
+        for model in () if selection else (PersonaImages, PersonaNsfwImages):
             for row in s.query(model).all():
                 before = len(row.images_json or '')
                 row.images_json = compress_images_json(row.images_json)
                 saved[0] += before - len(row.images_json)
             s.commit()
-        ids = [r[0] for r in s.query(PersonaMedia.id).all()]
+        if not selection:
+            ids = [r[0] for r in s.query(PersonaMedia.id).all()]
         for i, mid in enumerate(ids):
             row = s.get(PersonaMedia, mid)
+            if not row:
+                continue
             for f in ('image_data', 'poster_data'):
                 v = getattr(row, f) or ''
                 if v.startswith('data:image/'):
@@ -36207,6 +36387,9 @@ def _compress_existing_images(force=False):
                 s.commit()
                 s.expunge_all()
         s.commit()
+        if selection:
+            logger.info('IMAGES COMPRESSED (selection) saved=%.1fMB', saved[0] / 1048576)
+            return saved[0]
         if storage.enabled():
             for row in s.query(CharacterImage).all():
                 _obj(row.gcs_path, row.mime)
