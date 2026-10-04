@@ -7847,15 +7847,22 @@ def api_admin_media_audio(audio_id):
     return _serve_stored(path, 'audio/mpeg' if fmt == 'mp3' else 'audio/wav', size)
 
 
-@app.route('/api/admin/media/compress', methods=['POST'])
+@app.route('/api/admin/media/compress', methods=['GET', 'POST'])
 def api_admin_media_compress():
     blocked = _require_super_admin()
     if blocked:
         return blocked
+    if request.method == 'GET':
+        return jsonify(_COMPRESS_STATE)
+    if _COMPRESS_STATE['running']:
+        return jsonify({'error': 'A compression is already running'}), 409
     ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []
            if not str(i).startswith('a:')]
     if not ids:
         return jsonify({'error': 'Nothing to compress in the selection'}), 400
+    # Marked running before the thread starts, so the page's first poll cannot
+    # read the previous run's finished state as this one's.
+    _COMPRESS_STATE.update(running=True, done=0, total=len(ids), saved_bytes=0, errors=0)
     threading.Thread(target=_compress_existing_images, kwargs={'ids': ids},
                      daemon=True).start()
     return jsonify({'ok': True, 'count': len(ids)})
@@ -7927,6 +7934,7 @@ ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"
 <button onclick="act('compress')">Compress</button>
 <button class="danger" onclick="act('delete')">Delete</button>
 </div><p id="note" style="margin:0 0 10px;color:var(--text-muted)"></p>
+<div id="prog" hidden style="margin:0 0 12px"><div style="height:8px;border-radius:4px;background:var(--border);overflow:hidden"><div id="bar" style="height:100%;width:0;background:#a78bfa;transition:width .3s"></div></div><p id="ptext" style="margin:6px 0 0;font-size:.85rem"></p></div>
 <div class="grid" id="grid"></div><button id="more" hidden onclick="load(page+1)">Load more</button></div></div>
 <script>
 let page=0,items=[],sel=new Set();
@@ -7965,9 +7973,25 @@ async function act(kind){
   const r=await fetch('/api/admin/media/'+kind,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({ids:[...sel]})});
   const d=await r.json();
   if(!r.ok)return alert(d.error||'Failed');
-  $('note').textContent=kind==='delete'?d.deleted+' deleted.':'Compressing '+d.count+' file(s) in the background.';
-  if(kind==='delete'){sel.clear();load(0)}
+  if(kind==='delete'){$('note').textContent=d.deleted+' deleted.';sel.clear();load(0)}else{watch(true)}
 }
+let polling=false;
+async function watch(started){
+  if(polling)return;polling=true;let seen=started;
+  while(true){
+    const s=await (await fetch('/api/admin/media/compress')).json();
+    if(s.running)seen=true;
+    if(!seen){polling=false;return}
+    $('prog').hidden=false;
+    const pct=s.total?Math.round(100*s.done/s.total):0;
+    $('bar').style.width=(s.running?pct:100)+'%';
+    $('ptext').textContent=s.running?'Compressing '+s.done+' / '+s.total+' · saved '+kb(s.saved_bytes)+' · '+s.errors+' error(s)'
+      :'Done: saved '+kb(s.saved_bytes)+' from '+s.total+' file(s)'+(s.errors?' · '+s.errors+' error(s)':'');
+    if(!s.running){polling=false;load(0);return}
+    await new Promise(r=>setTimeout(r,1000));
+  }
+}
+watch(false);
 load(0);
 </script></body></html>"""
 
@@ -36452,6 +36476,11 @@ def _grant_all_monthly_tokens():
         s.close()
 
 
+# What the running (or last) compress pass is doing, for the admin media page.
+_COMPRESS_STATE = {'running': False, 'done': 0, 'total': 0, 'saved_bytes': 0,
+                   'errors': 0, 'current': '', 'started_at': 0, 'finished_at': 0}
+
+
 def _compress_existing_images(force=False, ids=None):
     """One pass over every image stored before compression existed. Marked
     done in settings so a restart does not walk them all again. `ids` limits
@@ -36461,6 +36490,9 @@ def _compress_existing_images(force=False, ids=None):
         return
     from db import (PersonaMedia, PersonaImages, PersonaNsfwImages, CharacterImage,
                     compress_images_json)
+    st = _COMPRESS_STATE
+    st.update(running=True, done=0, total=len(ids) if selection else 0, saved_bytes=0,
+              errors=0, current='', started_at=int(time.time()), finished_at=0)
     saved = [0]
 
     def _obj(path, mime):
@@ -36477,6 +36509,7 @@ def _compress_existing_images(force=False, ids=None):
                 storage.replace(path, out, mime)
                 saved[0] += len(raw) - len(out)
         except Exception:
+            st['errors'] += 1
             error_logger.warning('compress skipped %s', path, exc_info=True)
 
     s = _db_session()
@@ -36489,7 +36522,9 @@ def _compress_existing_images(force=False, ids=None):
             s.commit()
         if not selection:
             ids = [r[0] for r in s.query(PersonaMedia.id).all()]
+            st['total'] = len(ids)
         for i, mid in enumerate(ids):
+            st.update(done=i, current=mid, saved_bytes=saved[0])
             row = s.get(PersonaMedia, mid)
             if not row:
                 continue
@@ -36507,6 +36542,7 @@ def _compress_existing_images(force=False, ids=None):
                 s.commit()
                 s.expunge_all()
         s.commit()
+        st.update(done=len(ids), saved_bytes=saved[0])
         if selection:
             logger.info('IMAGES COMPRESSED (selection) saved=%.1fMB', saved[0] / 1048576)
             return saved[0]
@@ -36516,8 +36552,11 @@ def _compress_existing_images(force=False, ids=None):
         _set_setting('images_compressed_v2', '1')
         logger.info('IMAGES COMPRESSED saved=%.1fMB', saved[0] / 1048576)
     except Exception:
+        st['errors'] += 1
         error_logger.error('Image backfill stopped', exc_info=True)
     finally:
+        st.update(running=False, current='', saved_bytes=saved[0],
+                  finished_at=int(time.time()))
         s.close()
 
 
