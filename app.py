@@ -1289,6 +1289,19 @@ _NOINDEX_PATHS = ('/chat',)
 
 
 @app.after_request
+def _admin_sortable(resp):
+    """Every admin page's tables sort by a header click; one script added here
+    rather than to each of a dozen templates."""
+    if ((request.path or '').startswith('/admin/') and resp.status_code == 200
+            and resp.mimetype == 'text/html' and not resp.direct_passthrough):
+        body = resp.get_data(as_text=True)
+        if '</body>' in body and 'admin-sort.js' not in body:
+            resp.set_data(body.replace('</body>',
+                                       '<script src="/js/admin-sort.js"></script></body>', 1))
+    return resp
+
+
+@app.after_request
 def _noindex_fan_pages(resp):
     if _seo_noindex_all() or (request.path or '/').lower().startswith(_NOINDEX_PATHS):
         resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
@@ -7764,6 +7777,16 @@ def api_admin_media():
                                  (request.args.get('q') or '').strip().lower())
     finally:
         s.close()
+    order = request.args.get('sort') or 'new'
+    if order in ('big', 'small'):
+        sizes = storage.all_sizes() if storage.enabled() else {}
+        for r in rows:
+            r['bytes'] = r['db_bytes'] + sum(sizes.get(p, 0) for p in r['paths'])
+        rows.sort(key=lambda r: r['bytes'], reverse=order == 'big')
+    elif order == 'old':
+        rows.reverse()
+    elif order == 'name':
+        rows.sort(key=lambda r: r['slug'])
     items = rows[page * 200:(page + 1) * 200]
     for r in items:
         r['stored'] = bool(r.pop('paths'))
@@ -7882,6 +7905,7 @@ ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"
 <div class="card"><div class="tools">
 <input type="search" id="q" placeholder="Filter by persona">
 <select id="type" style="width:auto;margin:0"><option value="all">All types</option><option value="image">Images</option><option value="video">Videos</option><option value="audio">Audio</option></select>
+<select id="sort" style="width:auto;margin:0"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="big">Largest first</option><option value="small">Smallest first</option><option value="name">Persona A–Z</option></select>
 <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="all" style="width:auto;margin:0"> Select all</label>
 <span id="count">0 selected</span>
 <button onclick="size(false)">Size of selected</button>
@@ -7896,13 +7920,13 @@ const $=id=>document.getElementById(id);
 function kb(n){return n>1073741824?(n/1073741824).toFixed(2)+' GB':n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB'}
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function load(p){
-  page=p;const r=await fetch('/api/admin/media?page='+p+'&type='+$('type').value+'&q='+encodeURIComponent($('q').value));const d=await r.json();
+  page=p;const r=await fetch('/api/admin/media?page='+p+'&sort='+$('sort').value+'&type='+$('type').value+'&q='+encodeURIComponent($('q').value));const d=await r.json();
   if(p===0){items=[];$('grid').innerHTML=''}
   items=items.concat(d.items);
   $('grid').insertAdjacentHTML('beforeend',d.items.map(m=>'<div class="it'+(sel.has(m.id)?' on':'')+'" data-id="'+m.id+'" onclick="tog(this)">'
     +(m.kind==='video'?'<video src="'+m.thumb+'" preload="none" muted></video>':m.kind==='audio'?'<div style="aspect-ratio:3/4;display:flex;align-items:center;padding:6px"><audio controls preload="none" src="'+m.thumb+'" style="width:100%" onclick="event.stopPropagation()"></audio></div>':'<img loading="lazy" src="'+m.thumb+'">')
     +'<input type="checkbox"'+(sel.has(m.id)?' checked':'')+' tabindex="-1">'
-    +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.db_bytes?' · '+kb(m.db_bytes)+' in DB':m.stored?' · file':'')+'</div></div>').join(''));
+    +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.bytes!=null?' · '+kb(m.bytes):m.db_bytes?' · '+kb(m.db_bytes)+' in DB':m.stored?' · file':'')+'</div></div>').join(''));
   $('more').hidden=items.length>=d.total;$('note').textContent=d.total+' files';upd();
 }
 function tog(el){const id=el.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);el.classList.toggle('on');el.querySelector('input').checked=sel.has(id);upd()}
@@ -7910,6 +7934,7 @@ function upd(){$('count').textContent=sel.size+' selected';$('all').checked=item
 $('all').onchange=e=>{items.forEach(m=>e.target.checked?sel.add(m.id):sel.delete(m.id));
   document.querySelectorAll('.it').forEach(el=>{el.classList.toggle('on',sel.has(el.dataset.id));el.querySelector('input').checked=sel.has(el.dataset.id)});upd()};
 $('type').onchange=()=>{sel.clear();load(0)};
+$('sort').onchange=()=>load(0);
 async function size(all){
   if(!all&&!sel.size)return alert('Select something first.');
   $('note').textContent='Calculating...';
