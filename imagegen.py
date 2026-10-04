@@ -2226,6 +2226,10 @@ class RunPodProvider(Provider):
             'image': image,
             'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
             'size': f'{width}*{height}',
+            # The live endpoint requires these, though its docs call them optional.
+            'num_inference_steps': 30,
+            'guidance': 5,
+            'flow_shift': 5,
             'duration': video_seconds('wan-2-2', spec.get('seconds')),
             'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
             'enable_prompt_optimization': False,

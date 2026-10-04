@@ -619,6 +619,8 @@ def test_wan22_on_runpod():
               prov.payload(dict(spec, explicit=True))['input']['enable_safety_checker'] is False)
         check('a safe clip runs with it on',
               prov.payload(spec)['input']['enable_safety_checker'] is True)
+        check('the payload carries the fields RunPod requires',
+              'num_inference_steps' in prov.payload(spec)['input'])
         check('the clip runs the length it was priced at',
               prov.payload(dict(spec, seconds=10))['input']['duration'] == 10)
         check('a finished job hands back the video URL',
