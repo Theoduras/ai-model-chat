@@ -1382,9 +1382,17 @@ def build_animate_prompt(motion=''):
 
 
 def build_video_prompt(motion=''):
-    base = ('She moves naturally and subtly — a slow breath, a small shift of '
-            'weight, hair settling. The camera holds nearly still.')
-    return (motion.strip() + ' ' + base) if motion.strip() else base
+    """A still becoming a clip. With an action, the action is the clip: a
+    generic idle line after it only pulls the model back towards standing still."""
+    keep = ('The same woman from the photo, with the same face, hair, tattoos, '
+            'piercings, jewelry, clothes and body.')
+    hold = 'The camera stays fixed: no zoom, no pan. Same lighting, same background.'
+    motion = motion.strip().rstrip('.')
+    if not motion:
+        return (f'{keep} She moves naturally and subtly — a slow breath, a small '
+                f'shift of weight, hair settling. {hold}')
+    return (f'{keep} {motion[0].upper()}{motion[1:]}, a steady motion repeated '
+            f'through the whole clip, her expression matching it. {hold}')
 
 
 def build_reel_prompt(prompt='', has_photo=False, character=False):
