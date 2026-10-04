@@ -3246,6 +3246,7 @@ function pickAnimPhoto(id) {
 // The pipeline's first step: a model looks at the still and offers what it
 // could do. Cached per photo and rating, so re-rendering the form costs nothing.
 const motionIdeaCache = {};
+const motionIdeaNote = {};
 async function loadMotionIdeas() {
   const box = el('gen-motion-ideas');
   if (!box) return;
@@ -3255,8 +3256,8 @@ async function loadMotionIdeas() {
   const list = box.querySelector('.motion-ideas');
   const show = ideas => {
     if (animPhoto() + '|' + genRating !== key) return;
-    box.style.display = ideas.length ? '' : 'none';
-    list.innerHTML = ideas.map((t, i) =>
+    box.style.display = '';
+    list.innerHTML = (ideas.length ? '' : `<span class="hint">${esc(motionIdeaNote[key] || '')}</span> `) + ideas.map((t, i) =>
       `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
         onclick="useMotionIdea(${i})">${esc(t)}</button>`).join('')
       + `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
@@ -3272,7 +3273,8 @@ async function loadMotionIdeas() {
       body: JSON.stringify({persona: slug(), media: id, rating: genRating}),
     })).json();
     motionIdeaCache[key] = (d && d.ideas) || [];
-  } catch (e) { motionIdeaCache[key] = []; }
+    motionIdeaNote[key] = (d && (d.note || d.error)) || '';
+  } catch (e) { motionIdeaCache[key] = []; motionIdeaNote[key] = 'Could not reach the server.'; }
   show(motionIdeaCache[key]);
 }
 

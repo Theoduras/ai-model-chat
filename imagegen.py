@@ -2371,8 +2371,11 @@ def suggest_motions(image, explicit=False):
     try:
         ideas = json.loads(match.group(0)) if match else []
     except ValueError:
-        return []
-    return [str(i).strip()[:120] for i in ideas if isinstance(i, str) and i.strip()][:6]
+        ideas = []
+    ideas = [str(i).strip()[:120] for i in ideas if isinstance(i, str) and i.strip()][:6]
+    if not ideas:
+        logger.warning('motion ideas: nothing usable in %r', text[:300])
+    return ideas
 
 
 def write_motion_prompt(idea, base='', explicit=False):

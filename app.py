@@ -35611,7 +35611,7 @@ def api_generate_motion_ideas():
     if not slug:
         return jsonify({'ok': False, 'error': 'Not your persona'}), 403
     if not imagegen.RUNPOD_API_KEY:
-        return jsonify({'ok': True, 'ideas': []})
+        return jsonify({'ok': True, 'ideas': [], 'note': 'RUNPOD_API_KEY is not set on the server.'})
     try:
         b64, mime, row = _gen_reference(slug, str(body.get('media') or ''))
     except imagegen.GenerationError as e:
@@ -35623,7 +35623,9 @@ def api_generate_motion_ideas():
     else:
         image = f'data:{mime or "image/jpeg"};base64,{b64}'
     explicit = str(body.get('rating') or 'sfw') != 'sfw'
-    return jsonify({'ok': True, 'ideas': imagegen.suggest_motions(image, explicit)})
+    ideas = imagegen.suggest_motions(image, explicit)
+    return jsonify({'ok': True, 'ideas': ideas, 'note': '' if ideas else
+                    'The model gave no ideas for this photo. Type your own.'})
 
 
 @app.route('/api/generate/video-prompt', methods=['POST'])
