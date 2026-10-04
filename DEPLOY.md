@@ -27,6 +27,8 @@ hosts share the one database and Blob store.
    Oxapay, Runware, ModelsLab, Fanvue, Google OAuth, SMTP, `CRON_SECRET`, …)
    **except** `GCS_BUCKET` and the `DB_*` / `CLOUD_SQL_*` ones. Add
    `PUBLIC_BASE_URL=https://velvetfunneler.com`.
+   Add `RUNPOD_API_KEY` (runpod.io → Settings → API Keys) to offer Wan 2.2
+   for explicit Animate; without it, Animate keeps Wan 2.7.
 5. **Settings → Domains** → add `velvetfunneler.com` and the bio domain
    (`velvt.online`) and set the DNS records Vercel shows at your registrar.
 6. Redeploy once so the new variables load.

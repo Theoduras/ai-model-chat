@@ -303,7 +303,10 @@ Stay completely in character. Never mention being an AI.
   Kling 3.0 Omni edit by default (`p-video-replace` is no longer offered). An explicit
   Animate with a motion clip runs on P-Video-Animate (`imagegen.EXPLICIT_MOTION_MODEL`): Wan 2.2
   Animate is not in Runware's catalogue, and P-Video-Animate's safety check has crashed the provider
-  worker before, which fails and refunds the job. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and
+  worker before, which fails and refunds the job. An explicit Animate from a still runs on
+  **Wan 2.2 via RunPod's public endpoint** (`imagegen.RunPodProvider`, safety checker off,
+  pay per video) when `RUNPOD_API_KEY` is set, else on Wan 2.7. RunPod fetches the still
+  through a 15-minute signed `/wish-file/` link (needs `PUBLIC_BASE_URL`), else a data URI. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and
   Kling 3.0 Omni were added from Runware's public docs, prices included, **not** its live
   catalogue: confirm them with `imagegen.search_models` once a key is reachable.
   A safe-work **Swap** defaults to Kling motion control (2.6 Pro, 3.0 Pro

@@ -36056,6 +36056,10 @@ def _gen_start(job_id, slug, spec, workspace):
                             call['reference_urls'] = refs
                 if spec.get('video_prompt'):
                     call['prompt'] = _gen_own_video_prompt(spec)
+                if (spec.get('model') in imagegen.RUNPOD_MODELS and _row
+                        and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')):
+                    call['reference_url'] = (f"{_callback_origin()}/wish-file/"
+                                             f"{_wish_file_token(_row['id'], ttl=900)}")
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)

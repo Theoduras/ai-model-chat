@@ -133,7 +133,14 @@ NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
 # p-video-replace stays priced for past jobs but is no longer offered.
 CLIP_ONLY_MODELS = ('p-video-replace', 'kling-3-0-omni')
 DEFAULT_REPLACE_MODEL = 'kling-3-0-omni'
-DEFAULT_VIDEO_MODEL = 'wan-2-5'
+DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
+
+# Wan 2.2 is open weights, so it runs on RunPod's public endpoint with its
+# safety checker off -- the explicit still-to-clip model. Billed per video.
+RUNPOD_API_KEY = (os.getenv('RUNPOD_API_KEY') or '').strip()
+RUNPOD_ENDPOINT = os.getenv('RUNPOD_ENDPOINT',
+                            'https://api.runpod.ai/v2/wan-2-2-i2v-720')
+RUNPOD_MODELS = ('wan-2-2',)
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
 # carries. It is not a separate "video edit" model, which is why searching for
@@ -163,20 +170,20 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # model list. A true, explicit-capable replace instead goes to ModelsLab, whose
 # face-swap endpoint is uncensored and swaps rather than regenerates.
 VIDEO_JOBS = {
-    'reel': {'models': ('wan-2-5', 'seedance-2-5', 'wan-2-7', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                        'kling-3-0-mc', 'kling-2-6-mc', 'kling-3-0-omni'), 'needs': (),
+    'reel': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0',
+                        'kling-3-0-mc', 'kling-3-0-omni'), 'needs': (),
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
-    'swap': {'models': ('kling-2-6-mc', 'kling-3-0-mc',
-                        'ml-face-swap', 'wan-2-7',
-                        'kling-3-0-omni'),
+    'swap': {'models': ('kling-3-0-mc', 'ml-face-swap', 'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap',
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
-    'animate': {'models': ('wan-2-7', 'wan-2-5', 'seedance-2-0', 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                           'p-video-animate'),
+    # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
+    'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
+                          + (RUNPOD_MODELS if RUNPOD_API_KEY else ('wan-2-7',))
+                          + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
                 'label': 'Animate',
@@ -487,6 +494,7 @@ MODEL_VIDEO_SIZES = {
 # presets and nothing between them: offering 7s to one of them is offering a
 # length the provider refuses.
 MODEL_VIDEO_DURATIONS = {
+    'wan-2-2': (5,),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -504,6 +512,7 @@ def model_durations(model_key):
 _NO_DURATION_MODELS = frozenset({'ml-face-swap'})
 
 MODEL_VIDEO_SECONDS = {
+    'wan-2-2': (5, 5),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2167,9 +2176,90 @@ class ModelsLabProvider(Provider):
         return self._read(body)
 
 
+# ── RunPod ────────────────────────────────────────────────────────────────────
+
+def _first_url(out):
+    """The video URL in a RunPod output, whatever shape the worker returns."""
+    if isinstance(out, str):
+        return out if out.startswith('http') else ''
+    items = out.values() if isinstance(out, dict) else out if isinstance(out, list) else ()
+    for v in items:
+        url = _first_url(v)
+        if url:
+            return url
+    return ''
+
+
+class RunPodProvider(Provider):
+    name = 'runpod'
+
+    def __init__(self, key=None):
+        self.key = (key or RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
+        if not self.key:
+            raise GenerationError('RUNPOD_API_KEY is not set')
+
+    def _headers(self):
+        return {'Authorization': f'Bearer {self.key}',
+                'Content-Type': 'application/json'}
+
+    @staticmethod
+    def _read(body):
+        status = (body.get('status') or '').upper()
+        if status == 'COMPLETED':
+            url = _first_url(body.get('output'))
+            if url:
+                return Result('done', [url])
+            return Result('failed', error='RunPod finished without a video')
+        if status in ('FAILED', 'CANCELLED', 'TIMED_OUT'):
+            return Result('failed', error=_error_text(body) or f'RunPod {status.lower()}')
+        return Result('running')
+
+    def payload(self, spec):
+        image = spec.get('reference_url') or (
+            _data_uri(spec['reference_b64'], spec.get('reference_mime'))
+            if spec.get('reference_b64') else '')
+        if not image:
+            raise GenerationError('a video needs an approved still as its first frame')
+        width, height = video_px(spec.get('aspect'), '720p')
+        body = {
+            'prompt': spec.get('prompt') or build_video_prompt(),
+            'image': image,
+            'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
+            'size': f'{width}*{height}',
+            'duration': 5,
+            'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
+            'enable_prompt_optimization': False,
+            'enable_safety_checker': not spec.get('explicit'),
+        }
+        return {'input': body}
+
+    def submit_image(self, spec):
+        raise GenerationError('RunPod only runs Wan 2.2 video here', fatal=True)
+
+    def submit_video(self, spec):
+        body = _post(f'{RUNPOD_ENDPOINT}/run', self.payload(spec), self._headers(),
+                     timeout=VIDEO_TIMEOUT)
+        return str(body.get('id') or ''), self._read(body)
+
+    def poll(self, job_id, expect=1):
+        import requests
+        try:
+            resp = requests.get(f'{RUNPOD_ENDPOINT}/status/{job_id}',
+                                headers=self._headers(), timeout=TIMEOUT)
+        except Exception as e:
+            raise ProviderUnreachable(f'RunPod unreachable: {e}', fatal=False)
+        if resp.status_code == 404:
+            return Result('failed', error='RunPod no longer knows this job')
+        if resp.status_code >= 400:
+            raise GenerationError(f'RunPod status {resp.status_code}',
+                                  fatal=resp.status_code in (401, 403))
+        return self._read(resp.json())
+
+
 # ── Selection ─────────────────────────────────────────────────────────────────
 
-PROVIDERS = {'runware': RunwareProvider, 'modelslab': ModelsLabProvider}
+PROVIDERS = {'runware': RunwareProvider, 'modelslab': ModelsLabProvider,
+             'runpod': RunPodProvider}
 
 
 def provider_name():
@@ -2191,6 +2281,8 @@ def provider_name_for(spec):
     if ((spec.get('job') == 'swap' or spec.get('kind') == 'swap')
             and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
         return 'modelslab'
+    if spec.get('model') in RUNPOD_MODELS:
+        return 'runpod'
     return provider_name()
 
 

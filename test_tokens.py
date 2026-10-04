@@ -130,7 +130,7 @@ def test_prices_track_cost():
     # The whole-job rounding is the reason a clip is 12 and not 15. A
     # per-second integer rate would round 2.269 up to 3 and overcharge by 25%.
     check('a 5s 720p clip rounds once for the whole job, not per second',
-          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 12)
+          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 17)
     check('the per-second rate is fractional, so the client can ceil the same',
           isinstance(CR.VIDEO_RATE_PER_SECOND['wan-2-5']['720p'], float))
     for model in CR.VIDEO_RATE_PER_SECOND:
@@ -365,11 +365,11 @@ def test_equivalents():
     eq = CR.equivalents(350)
     check(f'350 tokens reads as {eq["photos"]} photos or {eq["clips"]} clips',
           eq['photos'] == 350 // CR.image_price(CR.DEFAULT_IMAGE_MODEL, CR.DEFAULT_RESOLUTION)
-          and eq['clips'] == 29)
+          and eq['clips'] == 20)
     check('an empty balance reads as nothing',
           CR.equivalents(0) == {'photos': 0, 'clips': 0})
     check('a plan card counts photos on the cheapest still',
-          CR.plan_equivalents(150) == {'photos': 150, 'clips': 12})
+          CR.plan_equivalents(150) == {'photos': 150, 'clips': 8})
     check('an empty plan reads as nothing',
           CR.plan_equivalents(0) == {'photos': 0, 'clips': 0})
     cash = CR.cash_for_tokens(12, 'eur')
@@ -599,6 +599,38 @@ def test_character_plus_vault_photos():
         A._character_snapshot, A._media_row = real_snap, real_row
 
 
+def test_wan22_on_runpod():
+    print('wan 2.2 on runpod')
+    import importlib
+    import imagegen as IG
+    import credits as CR
+    check('Wan 2.2 is not offered without a RunPod key',
+          bool(IG.RUNPOD_API_KEY) or all('wan-2-2' not in m for m in CR.JOB_MODELS.values()))
+    os.environ['RUNPOD_API_KEY'] = 'test'
+    try:
+        IG2 = importlib.reload(IG)
+        check('with the key, Wan 2.2 is an Animate model only',
+              [j for j, r in IG2.VIDEO_JOBS.items() if 'wan-2-2' in r['models']] == ['animate'])
+        check('Wan 2.2 runs on RunPod',
+              IG2.provider_name_for({'kind': 'video', 'job': 'animate', 'model': 'wan-2-2'}) == 'runpod')
+        prov = IG2.RunPodProvider()
+        spec = {'reference_url': 'https://x/still.jpg', 'prompt': 'p', 'aspect': '9:16'}
+        check('an explicit clip runs with the safety checker off',
+              prov.payload(dict(spec, explicit=True))['input']['enable_safety_checker'] is False)
+        check('a safe clip runs with it on',
+              prov.payload(spec)['input']['enable_safety_checker'] is True)
+        check('a finished job hands back the video URL',
+              prov._read({'status': 'COMPLETED', 'output': {'video_url': 'https://v/a.mp4'}}).urls
+              == ['https://v/a.mp4'])
+        check('a failed job fails',
+              prov._read({'status': 'FAILED', 'error': 'x'}).status == 'failed')
+    finally:
+        os.environ.pop('RUNPOD_API_KEY', None)
+        importlib.reload(IG)
+    check('a Wan 2.2 clip is priced at no less than RunPod charges for it',
+          CR.video_price('720p', 5, model='wan-2-2') * CR.TOKEN_COST_USD >= 0.90 - 1e-9)
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -607,7 +639,7 @@ if __name__ == '__main__':
                test_stripe_minimums, test_test_pack_is_not_for_sale,
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
-               test_character_plus_vault_photos):
+               test_character_plus_vault_photos, test_wan22_on_runpod):
         fn()
     print()
     if FAILURES:

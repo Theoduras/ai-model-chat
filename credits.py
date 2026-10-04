@@ -41,8 +41,7 @@ TOKEN_COST_USD = 0.04
 # it or nothing starts.
 MIN_MARGIN_MULTIPLE = 2.25
 
-IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro',
-                'nano-banana-pro', 'nano-banana-2')
+IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro')
 # z-image-turbo is parked until its LoRA identity works: its rows below stay,
 # and unparking is adding it back here and to imagegen.EXPLICIT_MODELS.
 RESOLUTIONS = ('2k', '4k')
@@ -59,8 +58,8 @@ DEFAULT_VIDEO_DURATION = 5
 
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                'p-video-animate')
-DEFAULT_VIDEO_MODEL = 'wan-2-5'
+                'p-video-animate', 'wan-2-2')
+DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
 # an uploaded video is always priced and run on it whatever the picker says.
@@ -112,6 +111,9 @@ VIDEO_COST_USD_PER_SECOND = {
     'p-video-animate': {'480p': 0.03, '720p': 0.03, '1080p': 0.06},
     'kling-3-0-mc': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
     'kling-3-0-omni': {'480p': 0.17, '720p': 0.17, '1080p': 0.17},
+    # RunPod's public endpoint, $0.30-$0.90 a video: the top of that range over
+    # its one 5s 720p clip, until a bill says what it really is.
+    'wan-2-2': {'480p': 0.18, '720p': 0.18, '1080p': 0.18},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -248,6 +250,7 @@ MODEL_LABELS = {
     'wan-3-0': 'Wan 3.0',
     'kling-2-6-mc': 'Kling 2.6 motion control',
     'wan-2-2-animate': 'Wan 2.2 Animate',
+    'wan-2-2': 'Wan 2.2',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -284,6 +287,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'wan-2-2-animate': ('sfw', 'nsfw'),
+    'wan-2-2': ('sfw', 'nsfw'),
     'p-video-animate': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a
