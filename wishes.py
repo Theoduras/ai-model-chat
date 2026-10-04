@@ -31,12 +31,21 @@ CLASSIFY_INSTRUCTION = (
     'with the locked photo; tease it, never mention price or unlocking>"}}\n'
     'explicit is true only if the picture involves nudity or sex.')
 
+PLAN_INSTRUCTION = (
+    'You are about to post this: "{text}"\n\n'
+    'Describe one photo of YOU to go with it. Answer with JSON only, no prose:\n'
+    '{{"scene": "<what the photo shows: her outfit or lack of one, pose, setting '
+    '— third person, under 40 words, no names>", '
+    '"outfit": "<just what she wears, or \\"nothing\\" if nude>", '
+    '"explicit": true|false}}\n'
+    'explicit is true only if the picture involves nudity or sex.')
+
 
 def looks_like_wish(text):
     return bool(_CUE_RE.search(text or ''))
 
 
-def parse(raw):
+def parse(raw, need_wish=True):
     """The classifier's JSON, or None when it is not a usable wish."""
     m = re.search(r'\{.*\}', raw or '', re.S)
     if not m:
@@ -45,7 +54,7 @@ def parse(raw):
         d = json.loads(m.group(0))
     except ValueError:
         return None
-    if not isinstance(d, dict) or d.get('wish') is not True:
+    if not isinstance(d, dict) or (need_wish and d.get('wish') is not True):
         return None
     scene = re.sub(r'\s+', ' ', str(d.get('scene') or '')).strip()[:300]
     if not scene:

@@ -13095,6 +13095,64 @@ def api_growth_drafts():
                     'beta': _growth_on(persona)})
 
 
+@app.route('/api/growth/media', methods=['POST'])
+@platform_scoped
+def api_growth_media():
+    """Photos for a planned post, made from what the post already says. One
+    short text call turns the words into a scene, then one batch job on her
+    character; the planner polls /api/generate/job like the studio does. The
+    photos land in staging and only reach the vault when the creator keeps or
+    attaches one."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    user = _current_user()
+    if not user:
+        return jsonify({'error': 'Sign in to generate'}), 401
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not re.match(r'^[a-z0-9_-]+$', persona):
+        return jsonify({'error': 'Invalid slug'}), 400
+    mine = owned_slugs()
+    if mine is not None and persona not in mine:
+        return jsonify({'error': 'Not your persona'}), 403
+    text = (data.get('text') or '').strip()[:600]
+    if not text:
+        return jsonify({'error': 'Write the post first'}), 400
+    try:
+        count = max(1, min(4, int(data.get('count') or 1)))
+    except (TypeError, ValueError):
+        count = 1
+    shot = wishes.parse(_persona_text(
+        persona, wishes.PLAN_INSTRUCTION.format(text=text),
+        max_tokens=200, temperature=0.2), need_wish=False)
+    if not shot:
+        return jsonify({'error': 'Could not picture a photo from that text'}), 422
+    term = wishes.blocked(text, shot['scene'], shot['outfit'])
+    if term:
+        return jsonify({'error': f'Refused: "{term}"'}), 422
+    # The client asks for explicit only when every ticked channel takes it.
+    explicit = (shot['explicit'] and bool(data.get('nsfw'))
+                and bool((_persona_config(persona) or {}).get('nsfw_enabled')))
+    if shot['explicit'] and not explicit:
+        shot['scene'] += ', fully clothed, safe for work'
+        if shot['outfit'].lower() == 'nothing':
+            shot['outfit'] = ''
+    try:
+        spec = _gen_spec(persona, {
+            'kind': 'image', 'batch': count, 'model': 'seedream-4-5',
+            'rating': 'explicit' if explicit else 'sfw',
+            'shot': 'nude' if explicit else 'full',
+            'prompt': shot['scene'], 'clothing': shot['outfit']}, user)
+    except imagegen.GenerationError as e:
+        return jsonify({'error': str(e)}), 400
+    char = _character_snapshot(persona)
+    if char:
+        spec.update(character=char, character_id=char['id'],
+                    character_version=char['version'])
+    return _gen_submit(user, persona, spec, CR.quote(spec))
+
+
 GROWTH_QUEUE_RETRIES = 3
 GROWTH_QUEUE_RETRY_MINS = 10
 # A worker that was down over a slot must not wake up and dump yesterday's posts

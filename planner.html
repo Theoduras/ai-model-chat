@@ -131,6 +131,14 @@
         </label>
         <div class="pl-picked" id="pl-m-picked"></div>
         <div id="pl-m-browse" style="margin:8px 0 2px;"></div>
+        <div id="pl-m-gen" style="margin:8px 0 2px; display:flex; gap:6px; align-items:center;">
+          <button type="button" class="btn-ai" id="pl-m-gen-btn" onclick="plGenMedia(this)">🎨 Create media</button>
+          <select id="pl-m-gen-n" title="How many photos">
+            <option>1</option><option>2</option><option>3</option><option>4</option>
+          </select>
+          <span class="hint" id="pl-m-gen-hint">Made from the post text.</span>
+        </div>
+        <div class="pl-picked" id="pl-m-gen-out"></div>
         <span class="hint" id="pl-m-media-hint" style="margin-top:6px;"></span>
       </div>
 
@@ -302,6 +310,7 @@ let plPlanMedia = {};     // media picked per channel for the next plan, in orde
 let plPlanPickFor = '';   // the channel the media picker is filling for the plan
 // A starting count per channel, from growth.WEEKLY_CADENCE.
 const PL_SUGGEST = { x: 14, threads: 7, fanvue: 7, instagram: 7, tiktok: 7, reddit: 3 };
+let plGenMade = [];       // [{id, url, kept}] from the last Create media
 let plRating = '';        // '', 'sfw' or 'nsfw' for the next draft
 let plRemote = [];        // posts Fanvue already has booked — read-only
 let plFvVault = null;     // her Fanvue vault, fetched the first time it is needed
@@ -1387,6 +1396,9 @@ function plEdit(kind, idx) {
   const ta = document.getElementById('pl-m-text');
   ta.value = kind === 'queued' ? (row.text || '') : (row.idea || '');
   ta.disabled = !editable;
+  plGenMade = [];
+  plGenRender();
+  document.getElementById('pl-m-gen-hint').textContent = 'Made from the post text.';
   document.getElementById('pl-m-label').textContent = kind === 'proposed' ? 'The angle' : 'Post';
   document.getElementById('pl-m-hint').textContent = kind === 'proposed'
     ? 'Edit the angle, then let her write the post from it.'
@@ -1472,6 +1484,10 @@ function plRenderMedia() {
   if (plPickedMedia.length > cap) plPickedMedia = plPickedMedia.slice(0, cap);
 
   const picked = plPickedMedia.map(plMediaById).filter(Boolean);
+  // New photos go to our vault, so not while she posts from her Fanvue vault.
+  document.getElementById('pl-m-gen').style.display =
+    !fvOnly && allowed.indexOf('image') !== -1 ? 'flex' : 'none';
+
   document.getElementById('pl-m-picked').innerHTML = picked.length
     ? picked.map(m => '<span class="pl-attached">'
         + plMediaThumb(m, ' is-picked')
@@ -1514,6 +1530,86 @@ function plRenderMedia() {
         ? 'This channel has no posting API — download the file and post it yourself.'
         : plMediaHint(picked) + ' Write it reads this picture and writes about '
           + 'what is in it.';
+}
+
+// ── Create media from the post ───────────────────────────────────────────────
+// One job for the whole count; the photos stay in staging until one is kept or
+// attached, so a discarded try costs nothing in the vault.
+
+async function plGenMedia(btn) {
+  const hint = document.getElementById('pl-m-gen-hint');
+  const text = document.getElementById('pl-m-text').value.trim();
+  if (!text) { hint.textContent = 'Write the post first.'; return; }
+  const nsfw = plRating !== 'sfw'
+    && !plOpenChans().some(p => PL_NSFW_BANNED.indexOf(p) !== -1);
+  btn.disabled = true;
+  hint.textContent = 'Picturing it…';
+  try {
+    const res = await fetch('/api/growth/media', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: plSlug, text, nsfw,
+        count: +document.getElementById('pl-m-gen-n').value }) });
+    const d = await res.json();
+    if (!res.ok || !d.job) {
+      hint.innerHTML = esc(d.error || 'Could not start it.')
+        + (d.buy_tokens ? ' <a href="/tokens">Buy tokens</a>' : '');
+      return;
+    }
+    hint.textContent = 'Generating · ' + d.tokens + ' tokens…';
+    let job = d.result || {};
+    for (let i = 0; i < 100 && job.status !== 'done' && job.status !== 'failed'; i++) {
+      await new Promise(r => setTimeout(r, 3000));
+      job = await (await fetch('/api/generate/job/' + encodeURIComponent(d.job))).json();
+    }
+    if (job.status !== 'done') {
+      hint.textContent = job.status === 'failed'
+        ? (job.error || 'It failed — tokens refunded.') : 'Still going. Check the studio.';
+      return;
+    }
+    plGenMade = (job.media || []).map(m => ({ id: m.id, url: m.url, kept: false }));
+    hint.textContent = 'Attach or keep the ones you like; the rest expire in 3 days.';
+    plGenRender();
+  } catch (e) {
+    hint.textContent = 'Could not reach the server.';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+function plGenRender() {
+  document.getElementById('pl-m-gen-out').innerHTML = plGenMade.map(m =>
+    '<span class="pl-attached"><img src="' + esc(m.url) + '" alt="" '
+    + 'style="width:72px;height:72px;object-fit:cover;border-radius:8px;display:block;">'
+    + '<span style="display:flex;gap:4px;margin-top:4px;">'
+    + '<button type="button" class="btn-section-save" style="margin-left:0;padding:2px 8px;" '
+    + 'onclick="plGenKeep(\'' + esc(m.id) + '\', true)">Attach</button>'
+    + (m.kept ? '<span class="hint">Kept</span>'
+       : '<button type="button" class="btn-section-save" style="margin-left:0;padding:2px 8px;" '
+         + 'onclick="plGenKeep(\'' + esc(m.id) + '\', false)">Keep</button>')
+    + '</span></span>').join('');
+}
+
+async function plGenKeep(id, attach) {
+  const m = plGenMade.find(x => x.id === id);
+  if (!m) return;
+  if (!m.kept) {
+    try {
+      const d = await (await fetch('/api/generate/keep', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keep: true, media_ids: [id] }) })).json();
+      if (!(d.kept || []).includes(id)) throw new Error();
+    } catch (e) {
+      document.getElementById('pl-m-gen-hint').textContent = 'Could not keep that one.';
+      return;
+    }
+    m.kept = true;
+    await plLoadVault();
+  }
+  if (attach && !plPickedMedia.includes(id)) {
+    plPickedMedia = plPickedMedia.concat(id).slice(-plMediaCap());
+  }
+  plGenRender();
+  plRenderMedia();
 }
 
 // How many files every ticked channel will carry — the strictest wins, the same
