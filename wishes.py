@@ -23,7 +23,11 @@ _BLOCK_TERMS = YOUTH_TERMS + (
 CLASSIFY_INSTRUCTION = (
     'A fan just messaged you: "{text}"\n\n'
     'Decide if they are asking to see a picture of YOU (an outfit, a pose, a '
-    'place, anything they are picturing). Answer with JSON only, no prose:\n'
+    'place, anything they are picturing). It is a wish only if THEY describe '
+    'what they want to see. Asking about wishes, how wishes work, whether you '
+    'do them or what they cost is NOT a wish; neither is a bare "send a pic" '
+    'with nothing described — never invent a scene they did not ask for. '
+    'Answer with JSON only, no prose:\n'
     '{{"wish": true|false, "scene": "<what the photo shows: her outfit or lack '
     'of one, pose, setting — third person, under 40 words, no names>", '
     '"outfit": "<just what she wears, or \\"nothing\\" if nude>", '
