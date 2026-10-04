@@ -7853,8 +7853,8 @@ def api_admin_media_compress():
     if blocked:
         return blocked
     if request.method == 'GET':
-        return jsonify(_COMPRESS_STATE)
-    if _COMPRESS_STATE['running']:
+        return jsonify(_compress_state_load())
+    if _compress_state_load()['running']:
         return jsonify({'error': 'A compression is already running'}), 409
     ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []
            if not str(i).startswith('a:')]
@@ -7862,7 +7862,8 @@ def api_admin_media_compress():
         return jsonify({'error': 'Nothing to compress in the selection'}), 400
     # Marked running before the thread starts, so the page's first poll cannot
     # read the previous run's finished state as this one's.
-    _COMPRESS_STATE.update(running=True, done=0, total=len(ids), saved_bytes=0, errors=0)
+    _compress_state_save(running=True, done=0, total=len(ids), saved_bytes=0, errors=0,
+                         finished_at=0)
     threading.Thread(target=_compress_existing_images, kwargs={'ids': ids},
                      daemon=True).start()
     return jsonify({'ok': True, 'count': len(ids)})
@@ -36477,8 +36478,28 @@ def _grant_all_monthly_tokens():
 
 
 # What the running (or last) compress pass is doing, for the admin media page.
+# Kept in app settings, not memory: the request that starts a pass and the
+# polls that follow it can each land on a different instance.
 _COMPRESS_STATE = {'running': False, 'done': 0, 'total': 0, 'saved_bytes': 0,
-                   'errors': 0, 'current': '', 'started_at': 0, 'finished_at': 0}
+                   'errors': 0, 'current': '', 'started_at': 0, 'finished_at': 0,
+                   'updated_at': 0}
+_COMPRESS_STALE_SECONDS = 900
+
+
+def _compress_state_save(**kw):
+    _COMPRESS_STATE.update(kw, updated_at=int(time.time()))
+    _set_setting('compress_state', json.dumps(_COMPRESS_STATE))
+
+
+def _compress_state_load():
+    try:
+        st = dict(_COMPRESS_STATE, **json.loads(_get_setting('compress_state') or '{}'))
+    except ValueError:
+        st = dict(_COMPRESS_STATE)
+    # A pass whose instance died never writes its end; stop it blocking the next.
+    if st['running'] and time.time() - st.get('updated_at', 0) > _COMPRESS_STALE_SECONDS:
+        st['running'] = False
+    return st
 
 
 def _compress_existing_images(force=False, ids=None):
@@ -36491,8 +36512,9 @@ def _compress_existing_images(force=False, ids=None):
     from db import (PersonaMedia, PersonaImages, PersonaNsfwImages, CharacterImage,
                     compress_images_json)
     st = _COMPRESS_STATE
-    st.update(running=True, done=0, total=len(ids) if selection else 0, saved_bytes=0,
-              errors=0, current='', started_at=int(time.time()), finished_at=0)
+    _compress_state_save(running=True, done=0, total=len(ids) if selection else 0,
+                         saved_bytes=0, errors=0, current='',
+                         started_at=int(time.time()), finished_at=0)
     saved = [0]
 
     def _obj(path, mime):
@@ -36522,9 +36544,11 @@ def _compress_existing_images(force=False, ids=None):
             s.commit()
         if not selection:
             ids = [r[0] for r in s.query(PersonaMedia.id).all()]
-            st['total'] = len(ids)
+            _compress_state_save(total=len(ids))
         for i, mid in enumerate(ids):
             st.update(done=i, current=mid, saved_bytes=saved[0])
+            if i % 5 == 0:
+                _compress_state_save()
             row = s.get(PersonaMedia, mid)
             if not row:
                 continue
@@ -36542,7 +36566,7 @@ def _compress_existing_images(force=False, ids=None):
                 s.commit()
                 s.expunge_all()
         s.commit()
-        st.update(done=len(ids), saved_bytes=saved[0])
+        _compress_state_save(done=len(ids), saved_bytes=saved[0])
         if selection:
             logger.info('IMAGES COMPRESSED (selection) saved=%.1fMB', saved[0] / 1048576)
             return saved[0]
@@ -36555,8 +36579,8 @@ def _compress_existing_images(force=False, ids=None):
         st['errors'] += 1
         error_logger.error('Image backfill stopped', exc_info=True)
     finally:
-        st.update(running=False, current='', saved_bytes=saved[0],
-                  finished_at=int(time.time()))
+        _compress_state_save(running=False, current='', saved_bytes=saved[0],
+                             finished_at=int(time.time()))
         s.close()
 
 

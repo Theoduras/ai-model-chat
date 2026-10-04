@@ -127,9 +127,15 @@ _COMPRESS = {'image/jpeg': ('JPEG', {'quality': 90, 'optimize': True, 'progressi
              'image/webp': ('WEBP', {'quality': 90, 'method': 6})}
 
 
+# Long-side cap for stored photos: sharp on any phone or DM, and a fraction of
+# a camera original's bytes.
+MAX_IMAGE_SIDE = 2048
+
+
 def compress_image(data, mime):
-    """Smaller bytes in the same format with metadata (EXIF, GPS) dropped, or
-    the original when re-encoding would not shrink it."""
+    """Smaller bytes in the same format, at most MAX_IMAGE_SIDE on the long side,
+    with metadata (EXIF, GPS) dropped, or the original when that would not
+    shrink it."""
     fmt = _COMPRESS.get((mime or '').lower())
     if not fmt or not data:
         return data
@@ -139,6 +145,8 @@ def compress_image(data, mime):
         if getattr(img, 'is_animated', False):
             return data
         img = ImageOps.exif_transpose(img)
+        if max(img.size) > MAX_IMAGE_SIDE:
+            img.thumbnail((MAX_IMAGE_SIDE, MAX_IMAGE_SIDE), Image.LANCZOS)
         if fmt[0] == 'JPEG' and img.mode not in ('RGB', 'L'):
             img = img.convert('RGB')
         img.info.pop('exif', None)
