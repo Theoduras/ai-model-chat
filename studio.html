@@ -470,6 +470,8 @@
                       placeholder="Empty = built from your choices above when you generate"></textarea></label>
           <label class="gen-f"><span>Keep out of the shot</span>
             <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
+          <label class="gen-f"><span>Always added</span>
+            <textarea id="gen-negative-base" rows="3" readonly></textarea></label>
           <span class="hint">A safety baseline is always added and can't be removed.</span>
         </details>
       </div>
@@ -616,6 +618,11 @@
           <textarea id="gen-vprompt" rows="6" maxlength="2000" oninput="checkVideoPromptStale()"
                     placeholder="Built from your choices above"></textarea></label>
         <span class="hint">Edit it and it stays as you wrote it. The clause that keeps her clip untouched is always added back.</span>
+        <label class="gen-f"><span>Keep out of the clip</span>
+          <textarea id="gen-vnegative" rows="2" placeholder="other people, sunglasses"></textarea></label>
+        <label class="gen-f"><span>Always added</span>
+          <textarea id="gen-vnegative-base" rows="4" readonly></textarea></label>
+        <span class="hint">Anything your prompt asks for (say, zoom in) is dropped from it automatically; child, teen and underage never are.</span>
       </details>
 
       <div class="note-box" id="gen-video-note" style="display:none">
@@ -868,6 +875,10 @@ async function loadCredits() {
     if (!res.ok) return;
     const d = await res.json();
     genPrices = d.prices;
+    if (genPrices && genPrices.negative_prompt) {
+      el('gen-negative-base').value = genPrices.negative_prompt;
+      el('gen-vnegative-base').value = genPrices.negative_prompt + ', ' + genPrices.video_negative;
+    }
     genEngines = d.engines || null;
     genRate = d.token_rate || null;
     genCosts = d.provider_costs || null;
@@ -3002,6 +3013,7 @@ async function jobPayload() {
     aspect: currentAspect(),
     audio: audioPayload(),
     video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
+    negative: el('gen-vnegative').value.trim(),
   };
   if (genJob === 'swap') {
     return Object.assign(base, {

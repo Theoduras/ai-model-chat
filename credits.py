@@ -698,6 +698,8 @@ def price_table():
         # An Animate with a motion clip runs on one of these whatever the
         # picker says, so the studio quotes and draws the form for that one.
         'explicit_motion_model': _IG.EXPLICIT_MOTION_MODEL,
+        'negative_prompt': _IG.NEGATIVE_PROMPT,
+        'video_negative': _IG.VIDEO_NEGATIVE,
         # The lengths each video model actually serves, so the picker cannot
         # offer one the provider will refuse.
         'video_model_durations': {m: _imagegen_durations(m)
