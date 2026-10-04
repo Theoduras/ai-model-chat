@@ -2387,21 +2387,21 @@ def suggest_motions(description, explicit=False):
 
 
 def write_motion_prompt(idea, base='', explicit=False):
-    """The clip's prompt, written for motion: the photo already carries her
-    face, body, clothes and room, so describing them again only competes with
-    the one sentence that says what she does."""
+    """The clip's prompt with the chosen action written out: the template's
+    fixed clauses kept, its generic movement replaced by what she does."""
     if not (idea or '').strip():
         return ''
     return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
-            'You write prompts for an image-to-video model that animates an existing photo. '
-            'Describe motion only: start with the one main action, say which hand or body part '
-            'does it, its pace and whether it repeats through the clip, then her expression. '
-            'Never describe her looks, hair, tattoos, clothes or the background; they come '
-            'from the photo and must not change. The camera stays fixed unless the action asks '
-            'otherwise. ' + _level_words(explicit) + ' Under 80 words. Output only the prompt.'},
-        {'role': 'user', 'content': f'Action: {idea.strip()}\n\nCurrent prompt, for context: {base}'},
-    ], max_tokens=200)
+            'You rewrite prompts for an image-to-video model that animates an existing photo. '
+            'Keep every fixed clause of the base prompt: the same woman with the same face, hair, '
+            'tattoos, piercings, jewelry and clothes, the camera fixed, the same lighting and '
+            'background. Replace any generic movement in it with the requested action, written '
+            'out: the main action first, which hand or body part does it, its pace, that it '
+            'repeats through the clip, then her expression. Do not add new details about how she '
+            'looks. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
+        {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base}'},
+    ], max_tokens=300)
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────

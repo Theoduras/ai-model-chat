@@ -2689,28 +2689,33 @@ function videoPromptEdited() {
   return !!(ta && ta.value.trim() && !(genVWritten && ta.value === genVWritten.prompt));
 }
 
+let genVPromptForcing = false;
 async function autoWriteVideoPrompt(force) {
   const ta = el('gen-vprompt');
   if (!ta || !slug() || genMake === 'image') return;
+  // A pressed write asks the LLM and takes seconds; an automatic rebuild in the
+  // meantime would answer first and throw the written prompt away.
+  if (!force && genVPromptForcing) return;
   if (!force && videoPromptEdited()) { checkVideoPromptStale(); return; }
   const seq = ++genVPromptSeq;
   const note = el('gen-vwrite-note');
   let payload;
   try { payload = await videoPromptChoices(); } catch (e) { return; }
-  // Only a press asks the LLM; the automatic rebuilds stay on the template.
-  if (force) payload.write = true;
+  const choices = JSON.stringify(payload);
+  if (force) { payload.write = true; genVPromptForcing = true; }
   try {
     const d = await (await fetch('/api/generate/video-prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
     })).json();
+    if (force) genVPromptForcing = false;
     if (seq !== genVPromptSeq) return;
     if (!d.ok) { if (force) note.textContent = '✗ ' + (d.error || 'could not write it'); return; }
     if (!force && videoPromptEdited()) return;
     ta.value = d.prompt;
-    genVWritten = { choices: JSON.stringify(payload), prompt: d.prompt };
+    genVWritten = { choices, prompt: d.prompt };
     note.textContent = 'Follows your choices. Edit it and it stays as you wrote it.';
-  } catch (e) {}
+  } catch (e) { if (force) { genVPromptForcing = false; note.textContent = '✗ could not write it'; } }
 }
 
 // The payload without the heavy parts: the preview needs no frame grab.
@@ -3294,7 +3299,6 @@ function writeFromMotion() {
   el('gen-vadvanced').open = true;
   el('gen-vwrite-note').textContent = 'Writing…';
   autoWriteVideoPrompt(true);
-  genQuote();
 }
 
 function animPhoto() {

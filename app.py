@@ -35672,9 +35672,14 @@ def api_generate_video_prompt():
             spec['character'] = _character_snapshot(slug)
         prompt = _gen_video_prompt(slug, spec)
         if body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
-            prompt = imagegen.write_motion_prompt(
+            written = imagegen.write_motion_prompt(
                 spec.get('prompt_extra') or spec.get('motion', ''), prompt,
-                spec.get('explicit')) or prompt
+                spec.get('explicit'))
+            if written:
+                logger.info('motion prompt written: %s', written)
+                prompt = written
+            else:
+                logger.warning('motion prompt: Qwen gave nothing, kept the template')
         return jsonify({'ok': True, 'prompt': prompt})
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
