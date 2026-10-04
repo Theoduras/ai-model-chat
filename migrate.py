@@ -8,6 +8,7 @@ are skipped — so an interrupted run is finished by pressing Start again.
 Objects keep their paths: the database stores paths, never URLs, so every
 reference stays valid on the new store.
 """
+import datetime
 import threading
 import traceback
 import urllib.parse
@@ -20,6 +21,13 @@ import db
 import storage
 
 BATCH = 100
+KEEP_LOG_DAYS = 30
+# History only: nothing reads rows this old, so trimming them is what brings
+# the database under Neon's free 512 MB.
+LOG_TABLES = {'activity_log': 'created_at', 'visits': 'created_at',
+              'demo_events': 'created_at', 'link_clicks': 'created_at',
+              'referral_clicks': 'created_at', 'x_events': 'created_at',
+              'fan_events': 'ts'}
 
 state = {'running': False, 'step': '', 'tables': {}, 'media': {}, 'log': [],
          'error': '', 'done': False}
@@ -40,12 +48,21 @@ def _target_engine(url):
     return create_engine(url, pool_pre_ping=True)
 
 
-def copy_tables(dst):
+def _keep(table, trim):
+    col = LOG_TABLES.get(table.name) if trim else None
+    if not col:
+        return None
+    return table.c[col] >= db._now() - datetime.timedelta(days=KEEP_LOG_DAYS)
+
+
+def copy_tables(dst, trim=True):
     db.Base.metadata.create_all(dst)
     for table in db.Base.metadata.sorted_tables:
         state['step'] = 'table ' + table.name
+        keep = _keep(table, trim)
         with db.engine.connect() as s:
-            total = s.execute(select(func.count()).select_from(table)).scalar()
+            q = select(func.count()).select_from(table)
+            total = s.execute(q if keep is None else q.where(keep)).scalar()
         info = state['tables'][table.name] = {'total': total, 'copied': 0}
         with dst.connect() as d:
             if d.execute(select(func.count()).select_from(table)).scalar() >= total:
@@ -55,8 +72,9 @@ def copy_tables(dst):
         offset = 0
         while offset < total:
             with db.engine.connect() as s:
+                q = select(table) if keep is None else select(table).where(keep)
                 rows = [dict(r._mapping) for r in s.execute(
-                    select(table).order_by(*order).offset(offset).limit(BATCH))]
+                    q.order_by(*order).offset(offset).limit(BATCH))]
             if not rows:
                 break
             with dst.begin() as d:
@@ -121,13 +139,29 @@ def sizes():
     """How much there is to copy, against the free tiers, so the choice of
     plan is made before the copy rather than when it stops halfway."""
     out = {'database': {}, 'media': {}}
-    tables = {}
+    tables, after = {}, 0
+    pg = db.engine.dialect.name == 'postgresql'
     with db.engine.connect() as s:
         for table in db.Base.metadata.sorted_tables:
             tables[table.name] = s.execute(select(func.count()).select_from(table)).scalar()
-        dbytes = (s.execute(text('SELECT pg_database_size(current_database())')).scalar()
-                  if db.engine.dialect.name == 'postgresql' else 0)
-    out['database'] = {'bytes': dbytes, 'fits_free': dbytes <= NEON_FREE, 'rows': tables}
+        dbytes = s.execute(text('SELECT pg_database_size(current_database())')).scalar() if pg else 0
+        largest = []
+        if pg:
+            largest = [{'table': r[0], 'bytes': r[1]} for r in s.execute(text(
+                "SELECT relname, pg_total_relation_size(relid) FROM pg_catalog.pg_statio_user_tables "
+                "ORDER BY 2 DESC LIMIT 10"))]
+            # Live rows only, as stored (compressed): what a copy actually writes,
+            # plus a third for indexes.
+            for table in db.Base.metadata.sorted_tables:
+                col = LOG_TABLES.get(table.name)
+                where = (f" WHERE {col} >= now() - interval '{KEEP_LOG_DAYS} days'"
+                         if col else '')
+                after += int(s.execute(text(
+                    f'SELECT COALESCE(SUM(pg_column_size(t.*)), 0) FROM {table.name} t{where}'
+                )).scalar() * 1.33)
+    out['database'] = {'bytes': dbytes, 'after_copy_bytes': after,
+                       'fits_free': (after or dbytes) <= NEON_FREE,
+                       'largest': largest, 'rows': tables}
     if storage.backend() == 'gcs':
         kept = staging = n = 0
         for b in storage._bucket().list_blobs():
@@ -143,10 +177,13 @@ def sizes():
     return out
 
 
-def _run(database_url, blob_token):
+def _run(database_url, blob_token, trim, compress):
     try:
+        if compress:
+            state['step'] = 'compressing images'
+            compress()
         if database_url:
-            copy_tables(_target_engine(database_url))
+            copy_tables(_target_engine(database_url), trim)
         if blob_token:
             copy_media(blob_token)
         state['done'] = True
@@ -158,12 +195,12 @@ def _run(database_url, blob_token):
         state['running'] = False
 
 
-def start(database_url, blob_token):
+def start(database_url, blob_token, trim=True, compress=None):
     with _lock:
         if state['running']:
             return False
         state.update(running=True, step='starting', tables={}, media={},
                      error='', done=False)
-    threading.Thread(target=_run, args=(database_url, blob_token),
+    threading.Thread(target=_run, args=(database_url, blob_token, trim, compress),
                      daemon=True).start()
     return True

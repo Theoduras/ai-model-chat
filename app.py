@@ -7686,7 +7686,10 @@ def admin_migrate():
     if request.method == 'POST':
         body = request.get_json(silent=True) or {}
         ok = migrate.start((body.get('database_url') or '').strip(),
-                           (body.get('blob_token') or '').strip())
+                           (body.get('blob_token') or '').strip(),
+                           trim=bool(body.get('trim', True)),
+                           compress=(lambda: _compress_existing_images(True))
+                           if body.get('compress', True) else None)
         return jsonify({'started': ok, 'state': migrate.state})
     if request.args.get('status'):
         return jsonify(migrate.state)
@@ -7705,13 +7708,16 @@ pre{background:#f4f4f4;padding:12px;white-space:pre-wrap;font-size:12px}</style>
 <button onclick="sz()">Check sizes</button><p id="sizes"></p>
 <label>Target DATABASE_URL (Neon)</label><input id="db" placeholder="postgresql://...">
 <label>BLOB_READ_WRITE_TOKEN</label><input id="blob" placeholder="vercel_blob_rw_...">
+<label><input type="checkbox" id="trim" checked style="width:auto"> Leave out logs older than 30 days (activity, visits, clicks, events)</label><br>
+<label><input type="checkbox" id="comp" checked style="width:auto"> Compress images first</label><br><br>
 <button onclick="go()">Start</button><pre id="out">Idle</pre>
 <script>
 function go(){fetch('/admin/migrate',{method:'POST',headers:{'Content-Type':'application/json'},
-body:JSON.stringify({database_url:db.value,blob_token:blob.value})}).then(r=>r.json()).then(poll)}
+body:JSON.stringify({database_url:db.value,blob_token:blob.value,trim:trim.checked,compress:comp.checked})}).then(r=>r.json()).then(poll)}
 function mb(b){return (b/1048576).toFixed(0)+' MB'}
 function sz(){sizes.textContent='Checking...';fetch('/admin/migrate?sizes=1').then(r=>r.json()).then(s=>{
-const d=s.database,m=s.media;sizes.textContent='Database '+mb(d.bytes)+(d.fits_free?' - fits free Neon (512 MB)':' - needs a paid Neon plan')+
+const d=s.database,m=s.media;sizes.textContent='Database '+mb(d.bytes)+', about '+mb(d.after_copy_bytes)+' after the copy'+(d.fits_free?' - fits free Neon (512 MB)':' - needs a paid Neon plan')+
+'. Largest: '+(d.largest||[]).map(t=>t.table+' '+mb(t.bytes)).join(', ')+
 '. Media '+(m.note||(m.files+' files, '+mb(m.bytes)+(m.fits_free?' - fits free Blob (1 GB)':' - needs a paid Blob plan')))+'.'})}
 function poll(){fetch('/admin/migrate?status=1').then(r=>r.json()).then(s=>{
 out.textContent=JSON.stringify(s,null,2);if(s.running)setTimeout(poll,2000)})}
