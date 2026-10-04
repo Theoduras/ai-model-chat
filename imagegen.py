@@ -2340,9 +2340,12 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300):
                              json={'model': model, 'messages': messages,
                                    'max_tokens': max_tokens, 'temperature': 0.7},
                              timeout=60)
-        text = resp.json()['choices'][0]['message']['content'] or ''
+        body = resp.json()
+        text = body['choices'][0]['message']['content'] or ''
     except Exception as e:
-        logger.warning('runpod chat %s failed: %s', model, e)
+        logger.warning('runpod chat %s failed: %s; status=%s body=%.500s', model, e,
+                       getattr(locals().get('resp'), 'status_code', '-'),
+                       getattr(locals().get('resp'), 'text', ''))
         return ''
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     return re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
