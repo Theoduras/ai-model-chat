@@ -2348,7 +2348,12 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300):
                        getattr(locals().get('resp'), 'text', ''))
         return ''
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
-    return re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
+    text = re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
+    # A refusal is not a prompt; sent to the video model it would be one.
+    if re.match(r"(?i)(i('m| am) sorry|i can(no|')t|i won't|sorry,|as an ai)", text):
+        logger.warning('runpod chat %s refused: %.200s', model, text)
+        return ''
+    return text
 
 
 def _level_words(explicit):

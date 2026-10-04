@@ -2697,6 +2697,8 @@ async function autoWriteVideoPrompt(force) {
   const note = el('gen-vwrite-note');
   let payload;
   try { payload = await videoPromptChoices(); } catch (e) { return; }
+  // Only a press asks the LLM; the automatic rebuilds stay on the template.
+  if (force) payload.write = true;
   try {
     const d = await (await fetch('/api/generate/video-prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3265,7 +3267,7 @@ async function loadMotionIdeas() {
       `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
         onclick="useMotionIdea(${i})">${esc(t)}</button>`).join('')
       + `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
-        onclick="el('gen-video-motion').value='';el('gen-video-motion').focus()">Custom…</button>`;
+        onclick="writeFromMotion()">Write the prompt from my motion</button>`;
   };
   if (motionIdeaCache[key]) { show(motionIdeaCache[key]); return; }
   motionIdeaCache[key] = [];
@@ -3284,7 +3286,15 @@ async function loadMotionIdeas() {
 
 function useMotionIdea(i) {
   const ideas = motionIdeaCache[animPhoto() + '|' + genRating] || [];
-  if (ideas[i]) { el('gen-video-motion').value = ideas[i]; genQuote(); }
+  if (ideas[i]) { el('gen-video-motion').value = ideas[i]; writeFromMotion(); }
+}
+
+function writeFromMotion() {
+  if (!el('gen-video-motion').value.trim()) { el('gen-video-motion').focus(); return; }
+  el('gen-vadvanced').open = true;
+  el('gen-vwrite-note').textContent = 'Writing…';
+  autoWriteVideoPrompt(true);
+  genQuote();
 }
 
 function animPhoto() {

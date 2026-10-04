@@ -35645,9 +35645,13 @@ def api_generate_motion_ideas():
     if not row:
         return jsonify({'ok': False, 'error': 'That photo is not in this vault.'}), 400
     explicit = str(body.get('rating') or 'sfw') != 'sfw'
-    ideas = imagegen.suggest_motions(_media_description(slug, row), explicit)
+    description = _media_description(slug, row)
+    if not description:
+        return jsonify({'ok': True, 'ideas': [], 'note':
+                        'Nothing is known about this photo (no generation settings or tags). Type your own.'})
+    ideas = imagegen.suggest_motions(description, explicit)
     return jsonify({'ok': True, 'ideas': ideas, 'note': '' if ideas else
-                    'The model gave no ideas for this photo. Type your own.'})
+                    'Qwen gave no ideas for this photo. Type your own.'})
 
 
 @app.route('/api/generate/video-prompt', methods=['POST'])
@@ -35666,7 +35670,12 @@ def api_generate_video_prompt():
         spec = _gen_spec(slug, body, _current_user())
         if spec.get('identity') == 'character' and not spec.get('character'):
             spec['character'] = _character_snapshot(slug)
-        return jsonify({'ok': True, 'prompt': _gen_video_prompt(slug, spec)})
+        prompt = _gen_video_prompt(slug, spec)
+        if body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
+            prompt = imagegen.write_motion_prompt(
+                spec.get('prompt_extra') or spec.get('motion', ''), prompt,
+                spec.get('explicit')) or prompt
+        return jsonify({'ok': True, 'prompt': prompt})
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
 
