@@ -7721,34 +7721,94 @@ def admin_media():
     return ADMIN_MEDIA_HTML
 
 
+def _admin_media_rows(s, kind='all', q=''):
+    """Every vault file and voice sample as one list, newest first. Audio ids
+    carry an `a:` prefix so one selection can hold both tables."""
+    from sqlalchemy import func
+    from db import PersonaMedia, AudioReference, _epoch
+    rows = []
+    if kind in ('all', 'image', 'video'):
+        query = s.query(PersonaMedia.id, PersonaMedia.slug, PersonaMedia.kind,
+                        PersonaMedia.created_at, PersonaMedia.gcs_path,
+                        PersonaMedia.poster_gcs_path,
+                        func.length(PersonaMedia.image_data),
+                        func.length(PersonaMedia.poster_data))
+        if kind != 'all':
+            query = query.filter(func.coalesce(PersonaMedia.kind, 'image') == kind)
+        if q:
+            query = query.filter(PersonaMedia.slug.ilike(f'%{q}%'))
+        rows += [{'id': r[0], 'slug': r[1], 'kind': r[2] or 'image',
+                  'created': _epoch(r[3]), 'paths': [p for p in (r[4], r[5]) if p],
+                  'db_bytes': int(r[6] or 0) + int(r[7] or 0),
+                  'thumb': f'/api/personas/{r[1]}/media/{r[0]}/image'} for r in query]
+    if kind in ('all', 'audio'):
+        query = s.query(AudioReference)
+        if q:
+            query = query.filter(AudioReference.slug.ilike(f'%{q}%'))
+        rows += [{'id': 'a:' + a.id, 'slug': a.slug, 'kind': 'audio',
+                  'created': _epoch(a.created_at), 'paths': [a.gcs_path] if a.gcs_path else [],
+                  'db_bytes': 0, 'thumb': f'/api/admin/media/audio/{a.id}'} for a in query]
+    rows.sort(key=lambda r: r['created'], reverse=True)
+    return rows
+
+
 @app.route('/api/admin/media')
 def api_admin_media():
     blocked = _require_super_admin()
     if blocked:
         return blocked
-    from sqlalchemy import func
-    from db import PersonaMedia, _epoch
     page = max(int(request.args.get('page') or 0), 0)
-    q = (request.args.get('q') or '').strip().lower()
     s = _db_session()
     try:
-        query = s.query(PersonaMedia.id, PersonaMedia.slug, PersonaMedia.kind,
-                        PersonaMedia.mime, PersonaMedia.created_at,
-                        PersonaMedia.gcs_path, PersonaMedia.approved,
-                        func.length(PersonaMedia.image_data),
-                        func.length(PersonaMedia.poster_data))
-        if q:
-            query = query.filter(PersonaMedia.slug.ilike(f'%{q}%'))
-        total = query.count()
-        rows = (query.order_by(PersonaMedia.created_at.desc())
-                .offset(page * 200).limit(200).all())
-        return jsonify({'total': total, 'page': page, 'items': [{
-            'id': r[0], 'slug': r[1], 'kind': r[2] or 'image', 'mime': r[3] or '',
-            'created': _epoch(r[4]), 'stored': bool(r[5]), 'approved': bool(r[6]),
-            'db_bytes': int(r[7] or 0) + int(r[8] or 0),
-            'thumb': f'/api/personas/{r[1]}/media/{r[0]}/image'} for r in rows]})
+        rows = _admin_media_rows(s, request.args.get('type') or 'all',
+                                 (request.args.get('q') or '').strip().lower())
     finally:
         s.close()
+    items = rows[page * 200:(page + 1) * 200]
+    for r in items:
+        r['stored'] = bool(r.pop('paths'))
+    return jsonify({'total': len(rows), 'page': page, 'items': items})
+
+
+@app.route('/api/admin/media/size', methods=['POST'])
+def api_admin_media_size():
+    """Bytes held by the selection, or by everything the filter shows: what
+    sits in the database plus what sits in the bucket."""
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    s = _db_session()
+    try:
+        rows = _admin_media_rows(s, body.get('type') or 'all',
+                                 (body.get('q') or '').strip().lower())
+    finally:
+        s.close()
+    if not body.get('all'):
+        want = set(str(i) for i in body.get('ids') or [])
+        rows = [r for r in rows if r['id'] in want]
+    sizes = storage.all_sizes() if storage.enabled() else {}
+    db_bytes = sum(r['db_bytes'] for r in rows)
+    file_bytes = sum(sizes.get(p, 0) for r in rows for p in r['paths'])
+    return jsonify({'count': len(rows), 'db_bytes': db_bytes,
+                    'file_bytes': file_bytes, 'bytes': db_bytes + file_bytes})
+
+
+@app.route('/api/admin/media/audio/<audio_id>')
+def api_admin_media_audio(audio_id):
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from db import AudioReference
+    s = _db_session()
+    try:
+        a = s.get(AudioReference, audio_id)
+        if not a or not a.gcs_path:
+            return ('', 404)
+        path, fmt, size = a.gcs_path, a.fmt or 'mp3', int(a.size_bytes or 0)
+    finally:
+        s.close()
+    return _serve_stored(path, 'audio/mpeg' if fmt == 'mp3' else 'audio/wav', size)
 
 
 @app.route('/api/admin/media/compress', methods=['POST'])
@@ -7756,9 +7816,10 @@ def api_admin_media_compress():
     blocked = _require_super_admin()
     if blocked:
         return blocked
-    ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []]
+    ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []
+           if not str(i).startswith('a:')]
     if not ids:
-        return jsonify({'error': 'Nothing selected'}), 400
+        return jsonify({'error': 'Nothing to compress in the selection'}), 400
     threading.Thread(target=_compress_existing_images, kwargs={'ids': ids},
                      daemon=True).start()
     return jsonify({'ok': True, 'count': len(ids)})
@@ -7769,13 +7830,20 @@ def api_admin_media_delete():
     blocked = _require_super_admin()
     if blocked:
         return blocked
-    from db import (PersonaMedia, delete_media_links, drop_model_references,
-                    delete_persona_media)
+    from db import (PersonaMedia, AudioReference, delete_media_links,
+                    drop_model_references, delete_persona_media)
     ids = [str(i) for i in (request.get_json(silent=True) or {}).get('ids') or []]
     s = _db_session()
     gone, paths = 0, []
     try:
         for mid in ids:
+            if mid.startswith('a:'):
+                audio = s.get(AudioReference, mid[2:])
+                if audio:
+                    paths += [audio.gcs_path] if audio.gcs_path else []
+                    s.delete(audio)
+                    gone += 1
+                continue
             row = s.get(PersonaMedia, mid)
             if not row:
                 continue
@@ -7813,8 +7881,11 @@ ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"
 <div class="bar"><span>Media</span><a href="/admin/hub">Admin</a></div>
 <div class="card"><div class="tools">
 <input type="search" id="q" placeholder="Filter by persona">
+<select id="type" style="width:auto;margin:0"><option value="all">All types</option><option value="image">Images</option><option value="video">Videos</option><option value="audio">Audio</option></select>
 <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="all" style="width:auto;margin:0"> Select all</label>
 <span id="count">0 selected</span>
+<button onclick="size(false)">Size of selected</button>
+<button onclick="size(true)">Size of all</button>
 <button onclick="act('compress')">Compress</button>
 <button class="danger" onclick="act('delete')">Delete</button>
 </div><p id="note" style="margin:0 0 10px;color:var(--text-muted)"></p>
@@ -7822,14 +7893,14 @@ ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"
 <script>
 let page=0,items=[],sel=new Set();
 const $=id=>document.getElementById(id);
-function kb(n){return n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB'}
+function kb(n){return n>1073741824?(n/1073741824).toFixed(2)+' GB':n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB'}
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function load(p){
-  page=p;const r=await fetch('/api/admin/media?page='+p+'&q='+encodeURIComponent($('q').value));const d=await r.json();
+  page=p;const r=await fetch('/api/admin/media?page='+p+'&type='+$('type').value+'&q='+encodeURIComponent($('q').value));const d=await r.json();
   if(p===0){items=[];$('grid').innerHTML=''}
   items=items.concat(d.items);
   $('grid').insertAdjacentHTML('beforeend',d.items.map(m=>'<div class="it'+(sel.has(m.id)?' on':'')+'" data-id="'+m.id+'" onclick="tog(this)">'
-    +(m.kind==='video'?'<video src="'+m.thumb+'" preload="none" muted></video>':'<img loading="lazy" src="'+m.thumb+'">')
+    +(m.kind==='video'?'<video src="'+m.thumb+'" preload="none" muted></video>':m.kind==='audio'?'<div style="aspect-ratio:3/4;display:flex;align-items:center;padding:6px"><audio controls preload="none" src="'+m.thumb+'" style="width:100%" onclick="event.stopPropagation()"></audio></div>':'<img loading="lazy" src="'+m.thumb+'">')
     +'<input type="checkbox"'+(sel.has(m.id)?' checked':'')+' tabindex="-1">'
     +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.db_bytes?' · '+kb(m.db_bytes)+' in DB':m.stored?' · file':'')+'</div></div>').join(''));
   $('more').hidden=items.length>=d.total;$('note').textContent=d.total+' files';upd();
@@ -7838,6 +7909,15 @@ function tog(el){const id=el.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);e
 function upd(){$('count').textContent=sel.size+' selected';$('all').checked=items.length>0&&items.every(m=>sel.has(m.id))}
 $('all').onchange=e=>{items.forEach(m=>e.target.checked?sel.add(m.id):sel.delete(m.id));
   document.querySelectorAll('.it').forEach(el=>{el.classList.toggle('on',sel.has(el.dataset.id));el.querySelector('input').checked=sel.has(el.dataset.id)});upd()};
+$('type').onchange=()=>{sel.clear();load(0)};
+async function size(all){
+  if(!all&&!sel.size)return alert('Select something first.');
+  $('note').textContent='Calculating...';
+  const r=await fetch('/api/admin/media/size',{method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({all:all,ids:[...sel],type:$('type').value,q:$('q').value})});
+  const d=await r.json();
+  $('note').textContent=(all?'All shown':'Selected')+': '+d.count+' file(s), '+kb(d.bytes)+' ('+kb(d.db_bytes)+' in the database, '+kb(d.file_bytes)+' in file storage)';
+}
 let t;$('q').oninput=()=>{clearTimeout(t);t=setTimeout(()=>{sel.clear();load(0)},300)};
 async function act(kind){
   if(!sel.size)return alert('Select something first.');

@@ -382,6 +382,23 @@ def size_of(path):
     return int(blob.size or 0)
 
 
+def all_sizes():
+    """Every stored object's size by path, from one listing rather than a
+    request per file."""
+    if backend() == 'blob':
+        out, cursor = {}, None
+        while True:
+            q = '?limit=1000' + ('&cursor=' + urllib.parse.quote(cursor) if cursor else '')
+            body = _blob('GET', q).json()
+            out.update({b['pathname']: int(b.get('size') or 0) for b in body.get('blobs') or []})
+            cursor = body.get('cursor')
+            if not body.get('hasMore') or not cursor:
+                return out
+    if backend() == 'gcs':
+        return {b.name: int(b.size or 0) for b in _bucket().list_blobs()}
+    return {}
+
+
 def purge_staging(days=STAGING_DAYS):
     """Delete staged objects past their window. Only Blob needs this — GCS has
     a lifecycle rule doing it for free — so it is a no-op elsewhere, and it is
