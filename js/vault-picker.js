@@ -108,11 +108,19 @@
       : '<img src="' + esc(m.thumb) + '" alt="" loading="lazy" decoding="async">';
   }
 
-  function mount() {
-    if (document.getElementById('vp-root')) return;
+  // A field can be drawn before the picker is ever opened, so the styles go in
+  // on first use of either rather than only when the picker mounts.
+  function ensureCss() {
+    if (document.getElementById('vp-css')) return;
     const s = document.createElement('style');
+    s.id = 'vp-css';
     s.textContent = css;
     document.head.appendChild(s);
+  }
+
+  function mount() {
+    if (document.getElementById('vp-root')) return;
+    ensureCss();
     const d = document.createElement('div');
     d.id = 'vp-root';
     d.hidden = true;
@@ -438,6 +446,7 @@
 
   // What a page shows in place of a strip: the picked items, and the button.
   function field(f) {
+    ensureCss();
     const items = f.items || [];
     const html = '<div class="vp-field">' + items.map(m => '<span class="vp-mini" title="' + esc(m.purpose || '') + '">'
       + thumb(m) + (m.kind === 'video' ? '<span class="vp-tag">VIDEO</span>' : '')
