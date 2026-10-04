@@ -7778,10 +7778,21 @@ def api_admin_media():
     finally:
         s.close()
     order = request.args.get('sort') or 'new'
+    sizes = None
+    if storage.enabled():
+        try:
+            sizes = storage.all_sizes()
+        except Exception:
+            logger.warning('admin media: storage listing failed', exc_info=True)
+    for r in rows:
+        r['bytes'] = r['db_bytes'] + sum((sizes or {}).get(p, 0) for p in r['paths'])
+        # A row whose stored file is gone: usually an unkept generation the
+        # three-day staging rule deleted while its row stayed behind.
+        r['missing'] = (sizes is not None and not r['db_bytes']
+                        and any(p not in sizes for p in r['paths']))
+    if request.args.get('missing'):
+        rows = [r for r in rows if r['missing']]
     if order in ('big', 'small'):
-        sizes = storage.all_sizes() if storage.enabled() else {}
-        for r in rows:
-            r['bytes'] = r['db_bytes'] + sum(sizes.get(p, 0) for p in r['paths'])
         rows.sort(key=lambda r: r['bytes'], reverse=order == 'big')
     elif order == 'old':
         rows.reverse()
@@ -7789,7 +7800,9 @@ def api_admin_media():
         rows.sort(key=lambda r: r['slug'])
     items = rows[page * 200:(page + 1) * 200]
     for r in items:
-        r['stored'] = bool(r.pop('paths'))
+        paths = r.pop('paths')
+        r['stored'] = bool(paths)
+        r['staging'] = any(p.startswith(storage.STAGING_PREFIX + '/') for p in paths)
     return jsonify({'total': len(rows), 'page': page, 'items': items})
 
 
@@ -7899,13 +7912,14 @@ ADMIN_MEDIA_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"
 .it.on{border-color:#a78bfa}.it img,.it video{width:100%;aspect-ratio:3/4;object-fit:cover;display:block}
 .it input{position:absolute;top:6px;left:6px;width:18px;height:18px;margin:0}
 .it .m{font-size:.72rem;padding:4px 6px;color:var(--text-muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.danger{color:var(--err,#f43f5e)}#more{display:block;margin:14px auto;width:auto}
+.tools button.danger{background:transparent;color:#f43f5e;border:1px solid #f43f5e}#more{display:block;margin:14px auto;width:auto}
 </style></head><body data-page="admin-media"><div class="wrap wide">
 <div class="bar"><span>Media</span><a href="/admin/hub">Admin</a></div>
 <div class="card"><div class="tools">
 <input type="search" id="q" placeholder="Filter by persona">
 <select id="type" style="width:auto;margin:0"><option value="all">All types</option><option value="image">Images</option><option value="video">Videos</option><option value="audio">Audio</option></select>
 <select id="sort" style="width:auto;margin:0"><option value="new">Newest first</option><option value="old">Oldest first</option><option value="big">Largest first</option><option value="small">Smallest first</option><option value="name">Persona A–Z</option></select>
+<label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="miss" style="width:auto;margin:0"> Missing files only</label>
 <label style="display:flex;gap:6px;align-items:center;margin:0"><input type="checkbox" id="all" style="width:auto;margin:0"> Select all</label>
 <span id="count">0 selected</span>
 <button onclick="size(false)">Size of selected</button>
@@ -7920,13 +7934,13 @@ const $=id=>document.getElementById(id);
 function kb(n){return n>1073741824?(n/1073741824).toFixed(2)+' GB':n>1048576?(n/1048576).toFixed(1)+' MB':Math.round(n/1024)+' KB'}
 function esc(t){return String(t).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]))}
 async function load(p){
-  page=p;const r=await fetch('/api/admin/media?page='+p+'&sort='+$('sort').value+'&type='+$('type').value+'&q='+encodeURIComponent($('q').value));const d=await r.json();
+  page=p;const r=await fetch('/api/admin/media?page='+p+($('miss').checked?'&missing=1':'')+'&sort='+$('sort').value+'&type='+$('type').value+'&q='+encodeURIComponent($('q').value));const d=await r.json();
   if(p===0){items=[];$('grid').innerHTML=''}
   items=items.concat(d.items);
   $('grid').insertAdjacentHTML('beforeend',d.items.map(m=>'<div class="it'+(sel.has(m.id)?' on':'')+'" data-id="'+m.id+'" onclick="tog(this)">'
     +(m.kind==='video'?'<video src="'+m.thumb+'" preload="none" muted></video>':m.kind==='audio'?'<div style="aspect-ratio:3/4;display:flex;align-items:center;padding:6px"><audio controls preload="none" src="'+m.thumb+'" style="width:100%" onclick="event.stopPropagation()"></audio></div>':'<img loading="lazy" src="'+m.thumb+'">')
     +'<input type="checkbox"'+(sel.has(m.id)?' checked':'')+' tabindex="-1">'
-    +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.bytes!=null?' · '+kb(m.bytes):m.db_bytes?' · '+kb(m.db_bytes)+' in DB':m.stored?' · file':'')+'</div></div>').join(''));
+    +'<div class="m">'+esc(m.slug)+' · '+m.kind+(m.missing?' · <b style="color:#f43f5e">missing'+(m.staging?' (unkept, expired)':'')+'</b>':m.bytes?' · '+kb(m.bytes):m.stored?' · file':'')+'</div></div>').join(''));
   $('more').hidden=items.length>=d.total;$('note').textContent=d.total+' files';upd();
 }
 function tog(el){const id=el.dataset.id;sel.has(id)?sel.delete(id):sel.add(id);el.classList.toggle('on');el.querySelector('input').checked=sel.has(id);upd()}
@@ -7935,6 +7949,7 @@ $('all').onchange=e=>{items.forEach(m=>e.target.checked?sel.add(m.id):sel.delete
   document.querySelectorAll('.it').forEach(el=>{el.classList.toggle('on',sel.has(el.dataset.id));el.querySelector('input').checked=sel.has(el.dataset.id)});upd()};
 $('type').onchange=()=>{sel.clear();load(0)};
 $('sort').onchange=()=>load(0);
+$('miss').onchange=()=>{sel.clear();load(0)};
 async function size(all){
   if(!all&&!sel.size)return alert('Select something first.');
   $('note').textContent='Calculating...';
