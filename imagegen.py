@@ -145,9 +145,9 @@ RUNPOD_ENDPOINTS = {
     'wan-2-6-rp': os.getenv('RUNPOD_WAN26_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-6-i2v'),
 }
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
-# The prompt side of the pipeline, after RunPod's text-to-video tutorial: Kimi
-# looks at the still and suggests what it could do, Qwen writes the clip's prompt.
-RUNPOD_KIMI_ENDPOINT = os.getenv('RUNPOD_KIMI_ENDPOINT', 'https://api.runpod.ai/v2/moonshot-kimi')
+# The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
+# reads what the still shows and suggests what it could do, then writes the
+# clip's prompt. Qwen reads text only, so the still arrives as its description.
 RUNPOD_QWEN_ENDPOINT = os.getenv('RUNPOD_QWEN_ENDPOINT', 'https://api.runpod.ai/v2/qwen3-32b-awq')
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -2356,19 +2356,19 @@ def _level_words(explicit):
             if explicit else 'Keep it safe for work: no nudity or sexual acts.')
 
 
-def suggest_motions(image, explicit=False):
-    """Short actions this still could plausibly show as a clip, from what is
-    actually in it -- her pose, her hands, what she is holding."""
-    text = _runpod_chat(RUNPOD_KIMI_ENDPOINT, 'kimi-k2.6', [
+def suggest_motions(description, explicit=False):
+    """Short actions this still could plausibly show as a clip, from what it
+    shows -- her pose, her hands, what she is holding, where she is."""
+    if not (description or '').strip():
+        return []
+    text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
-            'You suggest motions for an image-to-video model that animates the given photo. '
-            'Look at her pose, hands, props and setting, and suggest 5 actions the photo can '
-            'continue into without changing who she is, her clothes or the place. Each is '
-            'one action, at most 12 words, camera fixed. ' + _level_words(explicit) +
+            'You suggest motions for an image-to-video model that animates an existing photo. '
+            'From the description of the photo, suggest 5 actions it can continue into without '
+            'changing who she is, her clothes or the place. Each is one action, at most 12 '
+            'words, camera fixed. ' + _level_words(explicit) +
             ' Answer with a JSON array of strings only.'},
-        {'role': 'user', 'content': [
-            {'type': 'image_url', 'image_url': {'url': image}},
-            {'type': 'text', 'text': 'What could she do in this clip?'}]},
+        {'role': 'user', 'content': f'The photo: {description.strip()[:1500]}'},
     ])
     match = re.search(r'\[.*\]', text, flags=re.DOTALL)
     try:

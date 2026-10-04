@@ -35600,6 +35600,35 @@ def api_generate_prompt():
     return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
 
 
+def _media_description(slug, row):
+    """What a still shows, in words: the settings it was generated from, and
+    what the vault knows about it. An upload has only the vault part."""
+    from db import GenerationJob, get_persona_media
+    parts = []
+    vault = {}
+    s = _db_session()
+    try:
+        media = get_persona_media(s, row['id'])
+        vault = {k: getattr(media, k, '') or '' for k in ('location', 'outfit', 'lighting', 'tags')}
+        job = (s.query(GenerationJob)
+               .filter(GenerationJob.slug == slug,
+                       GenerationJob.result_media_ids.contains(row['id']))
+               .order_by(GenerationJob.created_at.desc()).first())
+        spec = json.loads(job.spec_json or '{}') if job else {}
+    except Exception:
+        spec = {}
+    finally:
+        s.close()
+    for key in ('prompt', 'shot', 'direction', 'prompt_extra', 'expression', 'clothing',
+                'scene_text', 'location_text', 'scene', 'location'):
+        if isinstance(spec.get(key), str) and spec[key].strip():
+            parts.append(f'{key}: {spec[key].strip()}')
+    for key, value in vault.items():
+        if value.strip():
+            parts.append(f'{key}: {value.strip()}')
+    return '; '.join(parts)
+
+
 @app.route('/api/generate/motion-ideas', methods=['POST'])
 def api_generate_motion_ideas():
     """Actions a kept still could show as a clip, for the Animate chips."""
@@ -35612,18 +35641,11 @@ def api_generate_motion_ideas():
         return jsonify({'ok': False, 'error': 'Not your persona'}), 403
     if not imagegen.RUNPOD_API_KEY:
         return jsonify({'ok': True, 'ideas': [], 'note': 'RUNPOD_API_KEY is not set on the server.'})
-    try:
-        b64, mime, row = _gen_reference(slug, str(body.get('media') or ''))
-    except imagegen.GenerationError as e:
-        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    row = _media_row(slug, str(body.get('media') or ''))
     if not row:
-        return jsonify({'ok': True, 'ideas': []})
-    if row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL'):
-        image = f"{_callback_origin()}/wish-file/{_wish_file_token(row['id'], ttl=900)}"
-    else:
-        image = f'data:{mime or "image/jpeg"};base64,{b64}'
+        return jsonify({'ok': False, 'error': 'That photo is not in this vault.'}), 400
     explicit = str(body.get('rating') or 'sfw') != 'sfw'
-    ideas = imagegen.suggest_motions(image, explicit)
+    ideas = imagegen.suggest_motions(_media_description(slug, row), explicit)
     return jsonify({'ok': True, 'ideas': ideas, 'note': '' if ideas else
                     'The model gave no ideas for this photo. Type your own.'})
 

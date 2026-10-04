@@ -657,7 +657,7 @@ def test_wan22_on_runpod():
     try:
         _rq.post = lambda *a, **k: _Resp('<think>hm</think>["slow wave", "smile", 3]')
         check('motion ideas are parsed from the answer, junk dropped',
-              IG.suggest_motions('https://x/a.jpg') == ['slow wave', 'smile'])
+              IG.suggest_motions('seated on a bed') == ['slow wave', 'smile'])
         _rq.post = lambda *a, **k: _Resp('<think>plan</think> She waves slowly.')
         check('a written prompt loses its thinking',
               IG.write_motion_prompt('wave') == 'She waves slowly.')
