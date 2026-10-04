@@ -145,6 +145,10 @@ RUNPOD_ENDPOINTS = {
     'wan-2-6-rp': os.getenv('RUNPOD_WAN26_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-6-i2v'),
 }
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
+# The prompt side of the pipeline, after RunPod's text-to-video tutorial: Kimi
+# looks at the still and suggests what it could do, Qwen writes the clip's prompt.
+RUNPOD_KIMI_ENDPOINT = os.getenv('RUNPOD_KIMI_ENDPOINT', 'https://api.runpod.ai/v2/moonshot-kimi')
+RUNPOD_QWEN_ENDPOINT = os.getenv('RUNPOD_QWEN_ENDPOINT', 'https://api.runpod.ai/v2/qwen3-32b-awq')
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
 # carries. It is not a separate "video edit" model, which is why searching for
@@ -1047,7 +1051,9 @@ VIDEO_NEGATIVE = (
     'changing clothes, changing background, extra arms, extra legs, '
     'deformed hands, malformed limbs, unnatural movement, jerky motion, '
     'jitter, flickering, camera movement, zoom, zoom in, zoom out, pan, tilt, '
-    'dolly, orbit, camera shake, scene change, subtitles'
+    'dolly, orbit, camera shake, scene change, subtitles, changing tattoos, '
+    'extra tattoos, new tattoos, missing tattoos, changing piercings, '
+    'extra piercings, new piercings, missing piercings'
 )
 
 
@@ -2318,6 +2324,73 @@ class RunPodProvider(Provider):
             raise GenerationError(f'RunPod status {resp.status_code}',
                                   fatal=resp.status_code in (401, 403))
         return self._read(resp.json())
+
+
+def _runpod_chat(endpoint, model, messages, max_tokens=300):
+    """One chat completion on a RunPod public endpoint, or '' -- a prompt
+    helper that fails must never stop the clip it was helping."""
+    import requests
+    key = (RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
+    if not key:
+        return ''
+    try:
+        resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
+                             headers={'Authorization': f'Bearer {key}',
+                                      'Content-Type': 'application/json'},
+                             json={'model': model, 'messages': messages,
+                                   'max_tokens': max_tokens, 'temperature': 0.7},
+                             timeout=60)
+        text = resp.json()['choices'][0]['message']['content'] or ''
+    except Exception as e:
+        logger.warning('runpod chat %s failed: %s', model, e)
+        return ''
+    text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
+    return re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
+
+
+def _level_words(explicit):
+    return ('This is an adult (18+) explicit clip; sexual acts are allowed.'
+            if explicit else 'Keep it safe for work: no nudity or sexual acts.')
+
+
+def suggest_motions(image, explicit=False):
+    """Short actions this still could plausibly show as a clip, from what is
+    actually in it -- her pose, her hands, what she is holding."""
+    text = _runpod_chat(RUNPOD_KIMI_ENDPOINT, 'kimi-k2.6', [
+        {'role': 'system', 'content':
+            'You suggest motions for an image-to-video model that animates the given photo. '
+            'Look at her pose, hands, props and setting, and suggest 5 actions the photo can '
+            'continue into without changing who she is, her clothes or the place. Each is '
+            'one action, at most 12 words, camera fixed. ' + _level_words(explicit) +
+            ' Answer with a JSON array of strings only.'},
+        {'role': 'user', 'content': [
+            {'type': 'image_url', 'image_url': {'url': image}},
+            {'type': 'text', 'text': 'What could she do in this clip?'}]},
+    ])
+    match = re.search(r'\[.*\]', text, flags=re.DOTALL)
+    try:
+        ideas = json.loads(match.group(0)) if match else []
+    except ValueError:
+        return []
+    return [str(i).strip()[:120] for i in ideas if isinstance(i, str) and i.strip()][:6]
+
+
+def write_motion_prompt(idea, base='', explicit=False):
+    """The clip's prompt, written for motion: the photo already carries her
+    face, body, clothes and room, so describing them again only competes with
+    the one sentence that says what she does."""
+    if not (idea or '').strip():
+        return ''
+    return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
+        {'role': 'system', 'content':
+            'You write prompts for an image-to-video model that animates an existing photo. '
+            'Describe motion only: start with the one main action, say which hand or body part '
+            'does it, its pace and whether it repeats through the clip, then her expression. '
+            'Never describe her looks, hair, tattoos, clothes or the background; they come '
+            'from the photo and must not change. The camera stays fixed unless the action asks '
+            'otherwise. ' + _level_words(explicit) + ' Under 80 words. Output only the prompt.'},
+        {'role': 'user', 'content': f'Action: {idea.strip()}\n\nCurrent prompt, for context: {base}'},
+    ], max_tokens=200)
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────

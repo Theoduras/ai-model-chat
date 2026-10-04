@@ -481,6 +481,8 @@
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
+        <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
+          <div class="motion-ideas"></div></div>
       </div>
       <div id="gen-swap-form" class="gen-stackform" style="display:none">
         <label class="gen-f"><span class="gen-id-lbl">Who she is in the clip</span>
@@ -3232,12 +3234,51 @@ function renderAnimPhotos() {
   const cur = photos.find(v => v.id === genAnimPick);
   box.innerHTML = VaultPicker.field({ items: cur ? [cur] : [], open: "openPhotoPick('anim')",
     label: cur ? 'Change photo' : 'Choose from vault', empty: 'A clip starts from one of her photos.' });
+  loadMotionIdeas();
 }
 
 function pickAnimPhoto(id) {
   genAnimPick = id;
   renderAnimPhotos();
   genQuote();
+}
+
+// The pipeline's first step: a model looks at the still and offers what it
+// could do. Cached per photo and rating, so re-rendering the form costs nothing.
+const motionIdeaCache = {};
+async function loadMotionIdeas() {
+  const box = el('gen-motion-ideas');
+  if (!box) return;
+  const id = animPhoto();
+  if (genJob !== 'animate' || !id) { box.style.display = 'none'; return; }
+  const key = id + '|' + genRating;
+  const list = box.querySelector('.motion-ideas');
+  const show = ideas => {
+    if (animPhoto() + '|' + genRating !== key) return;
+    box.style.display = ideas.length ? '' : 'none';
+    list.innerHTML = ideas.map((t, i) =>
+      `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
+        onclick="useMotionIdea(${i})">${esc(t)}</button>`).join('')
+      + `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
+        onclick="el('gen-video-motion').value='';el('gen-video-motion').focus()">Custom…</button>`;
+  };
+  if (motionIdeaCache[key]) { show(motionIdeaCache[key]); return; }
+  motionIdeaCache[key] = [];
+  box.style.display = '';
+  list.innerHTML = '<span class="hint">Looking at the photo…</span>';
+  try {
+    const d = await (await fetch('/api/generate/motion-ideas', {
+      method: 'POST', headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({persona: slug(), media: id, rating: genRating}),
+    })).json();
+    motionIdeaCache[key] = (d && d.ideas) || [];
+  } catch (e) { motionIdeaCache[key] = []; }
+  show(motionIdeaCache[key]);
+}
+
+function useMotionIdea(i) {
+  const ideas = motionIdeaCache[animPhoto() + '|' + genRating] || [];
+  if (ideas[i]) { el('gen-video-motion').value = ideas[i]; genQuote(); }
 }
 
 function animPhoto() {

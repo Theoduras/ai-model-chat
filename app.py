@@ -35600,6 +35600,32 @@ def api_generate_prompt():
     return jsonify({'ok': True, 'prompt': _gen_image_prompt(slug, spec, has_ref)})
 
 
+@app.route('/api/generate/motion-ideas', methods=['POST'])
+def api_generate_motion_ideas():
+    """Actions a kept still could show as a clip, for the Animate chips."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = _studio_outfit_slug(body.get('persona'))
+    if not slug:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    if not imagegen.RUNPOD_API_KEY:
+        return jsonify({'ok': True, 'ideas': []})
+    try:
+        b64, mime, row = _gen_reference(slug, str(body.get('media') or ''))
+    except imagegen.GenerationError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    if not row:
+        return jsonify({'ok': True, 'ideas': []})
+    if row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL'):
+        image = f"{_callback_origin()}/wish-file/{_wish_file_token(row['id'], ttl=900)}"
+    else:
+        image = f'data:{mime or "image/jpeg"};base64,{b64}'
+    explicit = str(body.get('rating') or 'sfw') != 'sfw'
+    return jsonify({'ok': True, 'ideas': imagegen.suggest_motions(image, explicit)})
+
+
 @app.route('/api/generate/video-prompt', methods=['POST'])
 def api_generate_video_prompt():
     """The prompt a clip would be sent with, for the Advanced panel. Validated
@@ -36119,6 +36145,13 @@ def _gen_start(job_id, slug, spec, workspace):
                         and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
                                              f"{_wish_file_token(_row['id'], ttl=900)}")
+                if spec.get('model') in imagegen.RUNPOD_MODELS and not spec.get('video_prompt'):
+                    written = imagegen.write_motion_prompt(
+                        spec.get('prompt_extra') or spec.get('motion', ''), call.get('prompt', ''),
+                        spec.get('explicit'))
+                    if written:
+                        logger.info('motion prompt job=%s: %s', job_id, written)
+                        call['prompt'] = written
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)

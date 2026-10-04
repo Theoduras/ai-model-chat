@@ -643,6 +643,30 @@ def test_wan22_on_runpod():
     finally:
         os.environ.pop('RUNPOD_API_KEY', None)
         importlib.reload(IG)
+    import requests as _rq
+    real_post = _rq.post
+
+    class _Resp:
+        def __init__(self, text):
+            self.text = text
+
+        def json(self):
+            return {'choices': [{'message': {'content': self.text}}]}
+
+    os.environ['RUNPOD_API_KEY'] = 'test'
+    try:
+        _rq.post = lambda *a, **k: _Resp('<think>hm</think>["slow wave", "smile", 3]')
+        check('motion ideas are parsed from the answer, junk dropped',
+              IG.suggest_motions('https://x/a.jpg') == ['slow wave', 'smile'])
+        _rq.post = lambda *a, **k: _Resp('<think>plan</think> She waves slowly.')
+        check('a written prompt loses its thinking',
+              IG.write_motion_prompt('wave') == 'She waves slowly.')
+        _rq.post = lambda *a, **k: (_ for _ in ()).throw(OSError('down'))
+        check('a failed helper gives nothing rather than failing the clip',
+              IG.write_motion_prompt('wave') == '' and IG.suggest_motions('u') == [])
+    finally:
+        _rq.post = real_post
+        os.environ.pop('RUNPOD_API_KEY', None)
     for secs, cost in ((5, 0.50), (10, 1.00), (15, 1.50)):
         check(f'a {secs}s Wan 2.6 clip is priced at no less than RunPod charges for it',
               CR.video_price('720p', secs, model='wan-2-6-rp') * CR.TOKEN_COST_USD >= cost - 1e-9)
