@@ -137,10 +137,14 @@ DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.2 is open weights, so it runs on RunPod's public endpoint with its
 # safety checker off -- the explicit still-to-clip model. Billed per video.
+# Wan 2.6 is Alibaba-hosted behind RunPod's switch, so whether its output is
+# really unfiltered is what running it explicit is testing.
 RUNPOD_API_KEY = (os.getenv('RUNPOD_API_KEY') or '').strip()
-RUNPOD_ENDPOINT = os.getenv('RUNPOD_ENDPOINT',
-                            'https://api.runpod.ai/v2/wan-2-2-i2v-720')
-RUNPOD_MODELS = ('wan-2-2',)
+RUNPOD_ENDPOINTS = {
+    'wan-2-2': os.getenv('RUNPOD_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-2-i2v-720'),
+    'wan-2-6-rp': os.getenv('RUNPOD_WAN26_ENDPOINT', 'https://api.runpod.ai/v2/wan-2-6-i2v'),
+}
+RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
 # carries. It is not a separate "video edit" model, which is why searching for
@@ -468,6 +472,7 @@ _RUNG_SHORT_SIDE = {'480p': 480, '720p': 720, '1080p': 1080}
 # phone clip's own 480p dimensions are not a size it can be asked for. Snapping
 # is the only option a swap has: the source is whatever the creator filmed.
 MODEL_VIDEO_SIZES = {
+    'wan-2-6-rp': ((1280, 720), (720, 1280), (1920, 1080), (1080, 1920)),
     'wan-2-7': ((1280, 720), (720, 1280), (960, 960), (1088, 832), (832, 1088),
                 (1920, 1080), (1080, 1920), (1440, 1440), (1632, 1248),
                 (1248, 1632)),
@@ -495,6 +500,7 @@ MODEL_VIDEO_SIZES = {
 # length the provider refuses.
 MODEL_VIDEO_DURATIONS = {
     'wan-2-2': (5, 8, 10, 15),
+    'wan-2-6-rp': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -513,6 +519,7 @@ _NO_DURATION_MODELS = frozenset({'ml-face-swap'})
 
 MODEL_VIDEO_SECONDS = {
     'wan-2-2': (5, 15),
+    'wan-2-6-rp': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2220,6 +2227,21 @@ class RunPodProvider(Provider):
             if spec.get('reference_b64') else '')
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
+        model = spec.get('model') or 'wan-2-2'
+        if model == 'wan-2-6-rp':
+            width, height = video_size(model, resolution=spec.get('resolution') or '720p',
+                                       aspect=spec.get('aspect'))
+            return {'input': {
+                'prompt': spec.get('prompt') or build_video_prompt(),
+                'image': image,
+                'negative_prompt': spec.get('negative') or NEGATIVE_PROMPT,
+                'size': f'{width}*{height}',
+                'duration': video_seconds(model, spec.get('seconds')),
+                'shot_type': 'single',
+                'seed': int(spec['seed']) if spec.get('seed') is not None else -1,
+                'enable_prompt_expansion': False,
+                'enable_safety_checker': not spec.get('explicit'),
+            }}
         width, height = video_px(spec.get('aspect'), '720p')
         body = {
             'prompt': spec.get('prompt') or build_video_prompt(),
@@ -2241,14 +2263,23 @@ class RunPodProvider(Provider):
         raise GenerationError('RunPod only runs Wan 2.2 video here', fatal=True)
 
     def submit_video(self, spec):
-        body = _post(f'{RUNPOD_ENDPOINT}/run', self.payload(spec), self._headers(),
+        model = spec.get('model') if spec.get('model') in RUNPOD_ENDPOINTS else 'wan-2-2'
+        body = _post(f'{RUNPOD_ENDPOINTS[model]}/run', self.payload(spec), self._headers(),
                      timeout=VIDEO_TIMEOUT)
-        return str(body.get('id') or ''), self._read(body)
+        job = str(body.get('id') or '')
+        return (f'{model}|{job}' if job else ''), self._read(body)
+
+    @staticmethod
+    def _endpoint(job_id):
+        # Jobs submitted before Wan 2.6 carry a bare id, and were all Wan 2.2.
+        model, _, job = job_id.rpartition('|')
+        return RUNPOD_ENDPOINTS.get(model or 'wan-2-2', RUNPOD_ENDPOINTS['wan-2-2']), job
 
     def poll(self, job_id, expect=1):
         import requests
         try:
-            resp = requests.get(f'{RUNPOD_ENDPOINT}/status/{job_id}',
+            endpoint, job = self._endpoint(job_id)
+            resp = requests.get(f'{endpoint}/status/{job}',
                                 headers=self._headers(), timeout=TIMEOUT)
         except Exception as e:
             raise ProviderUnreachable(f'RunPod unreachable: {e}', fatal=False)

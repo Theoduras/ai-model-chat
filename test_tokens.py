@@ -619,6 +619,15 @@ def test_wan22_on_runpod():
               prov.payload(dict(spec, explicit=True))['input']['enable_safety_checker'] is False)
         check('a safe clip runs with it on',
               prov.payload(spec)['input']['enable_safety_checker'] is True)
+        check('Wan 2.6 runs on RunPod too',
+              IG2.provider_name_for({'kind': 'video', 'job': 'animate', 'model': 'wan-2-6-rp'}) == 'runpod')
+        w26 = prov.payload(dict(spec, model='wan-2-6-rp', explicit=True, seconds=10))['input']
+        check('an explicit Wan 2.6 clip runs with the checker off at a size it serves',
+              w26['enable_safety_checker'] is False and w26['size'] == '720*1280'
+              and w26['duration'] == 10)
+        check('a job id finds its way back to its own endpoint',
+              prov._endpoint('wan-2-6-rp|abc') == (IG2.RUNPOD_ENDPOINTS['wan-2-6-rp'], 'abc')
+              and prov._endpoint('old') == (IG2.RUNPOD_ENDPOINTS['wan-2-2'], 'old'))
         check('the payload carries the fields RunPod requires',
               'num_inference_steps' in prov.payload(spec)['input'])
         check('the clip runs the length it was priced at',
@@ -631,6 +640,9 @@ def test_wan22_on_runpod():
     finally:
         os.environ.pop('RUNPOD_API_KEY', None)
         importlib.reload(IG)
+    for secs, cost in ((5, 0.50), (10, 1.00), (15, 1.50)):
+        check(f'a {secs}s Wan 2.6 clip is priced at no less than RunPod charges for it',
+              CR.video_price('720p', secs, model='wan-2-6-rp') * CR.TOKEN_COST_USD >= cost - 1e-9)
     for secs, cost in ((5, 0.30), (8, 0.48), (10, 0.60), (15, 0.90)):
         check(f'a {secs}s Wan 2.2 clip is priced at no less than RunPod charges for it',
               CR.video_price('720p', secs, model='wan-2-2') * CR.TOKEN_COST_USD >= cost - 1e-9)
