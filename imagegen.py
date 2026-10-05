@@ -2513,11 +2513,29 @@ class RunPodProvider(Provider):
 H3_STEPS = 8
 
 
-# Names her photo in the prompt; H3 only uses a reference the prompt names.
-H3_IDENTITY_LEAD = ('The woman in <Picture 1> (ref), with exactly her face, hair, body, '
-                    'tattoos and piercings. The video starts exactly on <Picture 2> (frame0): '
-                    'the same position, pose, framing, camera angle and background, '
-                    'and continues from there. ')
+# H3 prompts are fixed locks around one written action, so nothing but the
+# action varies from clip to clip and her identity never rides on wording.
+H3_LOCKS = ('exact face, exact hair, exact body, exact tattoos, exact piercings, '
+            'exact clothes, exact background')
+H3_START = ('Video starts exactly on <Picture 2> (frame0): same position, pose, framing, '
+            'and background, and continues from there.')
+H3_CAMERA = ('Camera locked to reference: same framing, same angle, same distance, no zoom, '
+             'no pan, no tilt, no dolly, no orbit, no shake.')
+H3_CLOSE = ('Identity never changes. No new tattoos. No missing tattoos. No extra piercings. '
+            'No missing piercings. Camera stays fixed.')
+
+
+def h3_prompt(action, explicit=False, chained=False, triggers=()):
+    who = 'The woman in <Picture 1> (ref)' if chained else 'The woman in the reference image'
+    head = 'Photorealistic, explicit' if explicit else 'Photorealistic'
+    parts = [f'{head}. {who} keeps {H3_LOCKS} for the entire clip.']
+    if chained:
+        parts.append(H3_START)
+    parts.append(H3_CAMERA)
+    if triggers:
+        parts.append(', '.join(triggers) + '.')
+    parts += [(action or '').strip(), H3_CLOSE]
+    return ' '.join(p for p in parts if p)
 
 
 def h3_payload(spec, image, ref=None):
@@ -2584,7 +2602,8 @@ def h3_payload(spec, image, ref=None):
         wf['ref'] = {'class_type': 'LoadImage', 'inputs': {'image': 'ref.png'}}
         wf['cond'] = {'class_type': 'MiniMaxH3ReferenceToVideo', 'inputs': {
             'clip': ['clip', 0], 'vae': ['vae', 0], 'audio_vae': ['avae', 0],
-            'prompt': prompt if '<Picture 1>' in prompt else H3_IDENTITY_LEAD + prompt,
+            'prompt': prompt if '<Picture 1>' in prompt else (
+                f'The woman in <Picture 1> (ref) keeps {H3_LOCKS}. {H3_START} ' + prompt),
             'width': width, 'height': height, 'length': frames,
             'ref_image_size': 'match', 'ref_images.ref_image_0': ['ref', 0],
             'ref_images.ref_image_1': ['fit', 0]}}
@@ -2783,6 +2802,28 @@ def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
             'looks. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
         {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base} /no_think'},
     ], max_tokens=600, why=why)
+
+
+def write_h3_action(idea, explicit=False, why=None):
+    """Only the action of an H3 clip, written out; h3_prompt adds the locks."""
+    if not (idea or '').strip():
+        return ''
+    return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
+        {'role': 'system', 'content':
+            'You write the action part of a prompt for an image-to-video model that animates an '
+            'existing photo. Write only what she does: the main action first, which hand or body '
+            'part does it, its pace and how it changes, her body movement, breathing, sounds and '
+            'expression, in short plain sentences. Never describe her face, hair, body, tattoos, '
+            'piercings, clothes, the camera or the background: those are fixed elsewhere. '
+            + _level_words(explicit) + ' Under 80 words. Output only the action.'},
+        {'role': 'user', 'content': f'Action: {idea.strip()} /no_think'},
+    ], max_tokens=400, why=why) or idea.strip()
+
+
+def write_h3_prompt(idea, spec, chained=False, why=None):
+    style = lora_style(spec) or {}
+    return h3_prompt(write_h3_action(idea, spec.get('explicit'), why), spec.get('explicit'),
+                     chained, style.get('triggers') or ())
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────

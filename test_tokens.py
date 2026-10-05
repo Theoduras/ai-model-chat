@@ -661,6 +661,11 @@ def test_wan22_on_runpod():
               IG2.lora_url('https://civitai.com/api/download/models/1') ==
               'https://civitai.com/api/download/models/1?token=tok'
               and IG2.lora_url('https://h/a') == 'https://h/a')
+        one, two = IG2.h3_prompt('she rubs', True), IG2.h3_prompt('she rubs', True, chained=True)
+        check('an H3 prompt is fixed locks around the action, naming frame0 only when chained',
+              'exact tattoos' in one and 'she rubs' in one and one.endswith('Camera stays fixed.')
+              and '<Picture 2> (frame0)' not in one and '<Picture 2> (frame0)' in two
+              and '<Picture 1> (ref)' in two)
         h3 = IG2.h3_payload({'aspect': '9:16', 'seconds': 15}, 'A', 'B')['input']
         check('a later H3 part starts on the last frame and holds her photo as <Picture 1>',
               [i['name'] for i in h3['images']] == ['still.png', 'ref.png']

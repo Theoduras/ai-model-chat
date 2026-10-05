@@ -36165,7 +36165,10 @@ def api_generate_video_prompt():
             motion = spec.get('prompt_extra') or spec.get('motion', '')
             prompt = _gen_video_prompt(slug, spec)
         note = ''
-        if body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
+        if body.get('write') and spec.get('model') == 'h3-gv':
+            prompt = imagegen.write_h3_prompt(
+                motion, spec, chained=part >= 2 and body.get('chain_identity') is not False)
+        elif body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
             why = {}
             written = imagegen.write_motion_prompt(
                 motion, prompt, spec.get('explicit'), style=imagegen.lora_style(spec), why=why)
@@ -36681,7 +36684,11 @@ def _gen_start(job_id, slug, spec, workspace):
                         and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
                                              f"{_wish_file_token(_row['id'], ttl=900)}")
-                if spec.get('model') in imagegen.RUNPOD_MODELS and not spec.get('video_prompt'):
+                if spec.get('model') == 'h3-gv' and not spec.get('video_prompt'):
+                    call['prompt'] = imagegen.write_h3_prompt(
+                        spec.get('prompt_extra') or spec.get('motion', ''), spec)
+                    logger.info('h3 prompt job=%s: %s', job_id, call['prompt'])
+                elif spec.get('model') in imagegen.RUNPOD_MODELS and not spec.get('video_prompt'):
                     written = imagegen.write_motion_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), call.get('prompt', ''),
                         spec.get('explicit'), style=imagegen.lora_style(spec))
@@ -37090,22 +37097,22 @@ def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
                      ', '.join(x for x in (spec.get('negative_extra'),
                                            _previous_action(spec, done)) if x),
                      video=True)})
-    template = imagegen.build_chain_prompt(motion)
-    # A part prompt the creator wrote or edited runs as written.
-    stored = chain.get('prompts') or []
-    call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
-        imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
-                                     style=imagegen.lora_style(spec)) or template)
-    logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
-                len(chain['plan']), call['prompt'])
     if spec.get('model') == 'h3-gv' and not chain.get('plain'):
         # Her original photo rides along as an identity image, so a
         # long clip does not drift from part to part.
         ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
         if ref_b64:
             call.update({'identity_b64': ref_b64, 'identity_mime': ref_mime})
-            if '<Picture 1>' not in call['prompt']:
-                call['prompt'] = imagegen.H3_IDENTITY_LEAD + call['prompt']
+    template = imagegen.build_chain_prompt(motion)
+    # A part prompt the creator wrote or edited runs as written.
+    stored = chain.get('prompts') or []
+    call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
+        imagegen.write_h3_prompt(motion, spec, chained=bool(call.get('identity_b64')))
+        if spec.get('model') == 'h3-gv' else
+        imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
+                                     style=imagegen.lora_style(spec)) or template)
+    logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
+                len(chain['plan']), call['prompt'])
     spec.setdefault('sent', []).append(dict(
         _video_sent(call, provider_name), ref_paths=_ref_paths(slug, call),
         start='frame%d' % (done - 1) if done - 1 < len(chain.get('frames') or []) else '',
