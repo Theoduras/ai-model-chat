@@ -11440,7 +11440,8 @@ def api_platforms_overview():
             'fanvue': {'connected': bool(_fanvue_tokens(slug).get('access_token')),
                        'username': ''},
             'threads': {'connected': bool(th.get('access_token'))
-                                     or bool(_ig_account(slug).get('session')),
+                                     or bool(_ig_account(slug).get('session'))
+                                     or bool(_get_setting(f'threads_session_{slug}')),
                         'username': th.get('username', '')
                                     or _ig_account(slug).get('username', '')},
             # Read off the stored account rather than the session blob: this is
@@ -29543,10 +29544,33 @@ def _threads_publishing_limit(persona):
 import threads_rest as THR
 
 
+def _th_own_session(persona):
+    """threads.com's own sign-in. Its write calls refuse instagram.com's
+    cookies, so posting needs this; reads still work off Instagram's."""
+    blob = _get_setting(f'threads_session_{persona}') or ''
+    if not blob:
+        return {}
+    try:
+        return json.loads(_ig_fernet().decrypt(blob.encode()).decode())
+    except Exception:
+        logger.warning('threads session for %s could not be decrypted', persona)
+        return {}
+
+
+def _th_set_own_session(persona, session):
+    _set_setting(f'threads_session_{persona}',
+                 _ig_fernet().encrypt(json.dumps(session).encode()).decode()
+                 if session else '')
+
+
 def _th_session(persona):
-    """Threads rides Instagram's session; there is no Threads-specific one."""
+    own = _th_own_session(persona)
+    if not own.get('cookie'):
+        own = {}
     session = _ig_session(persona)
-    return session if (session.get('cookie') and session.get('csrftoken')) else {}
+    if session.get('cookie') and session.get('csrftoken'):
+        return dict(session, threads=own) if own else session
+    return dict(own, threads=own) if own else {}
 
 
 def _th_mode(persona):
@@ -29562,8 +29586,10 @@ def _th_identity(persona):
     mode = _th_mode(persona)
     if mode == 'instagram':
         account = _ig_account(persona)
+        own = _th_own_session(persona)
         return {'mode': mode, 'username': account.get('username') or '',
-                'user_id': str(account.get('user_id') or '')}
+                'user_id': str(account.get('user_id') or own.get('user_id') or ''),
+                'own_session': bool(own.get('cookie'))}
     if mode == 'oauth':
         token = _threads_load_tokens().get(persona) or {}
         return {'mode': mode, 'username': token.get('username') or '',
@@ -29631,8 +29657,8 @@ def _th_post_rows(persona, text, rows, reply_control='everyone'):
             result = rest.post_carousel(items, text, reply_control)
     except THR.ThreadsApiError as e:
         if e.code >= 500 and not getattr(rest, 'has_own_session', True):
-            raise ValueError('Threads needs its own sign-in: reconnect Instagram once '
-                             'and Threads is captured with it.')
+            raise ValueError('Threads needs its own sign-in: click "Sign in to Threads" '
+                             'on the Threads page, then post again.')
         if e.code in (401, 403):
             raise ValueError('Threads refused the Instagram session '
                              f'(HTTP {e.code}). Reconnect Instagram and try again.')
@@ -30181,10 +30207,116 @@ def api_threads_status():
         identity = _th_identity(slug)
         if identity['mode'] == 'instagram':
             out[slug] = {'username': identity['username'], 'connected': True,
-                         'mode': 'instagram'}
+                         'mode': 'instagram', 'own_session': identity['own_session']}
         elif identity['mode'] == '' and slug == asked:
             out.setdefault(slug, {'username': '', 'connected': False, 'mode': ''})
     return jsonify(out)
+
+
+_TH_ATTEMPT = 'threads_attempt_{}'
+
+
+@app.route('/threads/connect')
+def threads_connect_page():
+    if not _current_user():
+        return redirect('/login?next=/threads')
+    return send_from_directory(BASE_DIR, 'of_connect.html')
+
+
+@app.route('/api/threads/connect', methods=['DELETE'])
+@platform_scoped
+def api_threads_connect():
+    _th_set_own_session(request_persona(), {})
+    return jsonify({'ok': True})
+
+
+@app.route('/api/threads/connect/browser', methods=['POST'])
+@platform_scoped
+def api_threads_connect_browser():
+    persona = request_persona()
+    d = request.json or {}
+
+    def _side(value, fallback, low, high):
+        try:
+            return max(low, min(int(value), high))
+        except (TypeError, ValueError):
+            return fallback
+
+    viewport = {'width': _side(d.get('width'), 1000, 600, 1600),
+                'height': _side(d.get('height'), 760, 500, 1200)}
+    try:
+        attempt = _ig_conn().start(
+            persona, f'th_{persona}', proxy=_ig_proxy_for(persona),
+            viewport=viewport, site='threads')
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    _set_setting(_TH_ATTEMPT.format(persona), attempt.id)
+    return jsonify({'ok': True, 'attempt': attempt.status()})
+
+
+@app.route('/api/threads/connect/frame')
+@platform_scoped
+def api_threads_connect_frame():
+    persona = request_persona()
+    attempt_id = (request.args.get('attempt')
+                  or _get_setting(_TH_ATTEMPT.format(persona)) or '')
+    _held_from = time.time()
+    attempt = _ig_conn().get(attempt_id, frame=True, since=_signin_since(),
+                             quality=_signin_quality(), wait=_signin_wait()) \
+        if attempt_id else None
+    held = round(time.time() - _held_from, 3)
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    status = attempt.status()
+    if status.get('state') == 'connected':
+        try:
+            session = _ig_conn().claim(attempt) or {}
+        except Exception:
+            session = {}
+        if session.get('cookie'):
+            _th_set_own_session(persona, session)
+            _set_setting(_TH_ATTEMPT.format(persona), '')
+        elif not _th_own_session(persona).get('cookie'):
+            status = dict(status, state='failed',
+                          error='the sign-in finished but handed back no usable session')
+    return jsonify({'ok': True, 'attempt': status, 'held': held,
+                    'frame': attempt.snapshot(_signin_since())})
+
+
+@app.route('/api/threads/connect/input', methods=['POST'])
+@platform_scoped
+def api_threads_connect_input():
+    persona = request_persona()
+    d = request.json or {}
+    import of_connect as _ofc
+    kind = (d.get('kind') or '').strip()
+    if kind not in _ofc.INPUT_KINDS:
+        return jsonify({'ok': False, 'error': 'unknown input'}), 400
+    attempt_id = d.get('attempt') or _get_setting(_TH_ATTEMPT.format(persona)) or ''
+    attempt = _ig_conn().get(attempt_id) if attempt_id else None
+    if not attempt:
+        return jsonify({'ok': False, 'error': 'no such sign-in'}), 404
+    try:
+        attempt.act(kind, x=d.get('x'), y=d.get('y'), text=d.get('text'),
+                    key=d.get('key'), dy=d.get('dy'), url=d.get('url'),
+                    points=(d.get('points') or [])[:60])
+    except Exception as e:
+        return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    return jsonify({'ok': True})
+
+
+@app.route('/api/threads/connect/cancel', methods=['POST'])
+@platform_scoped
+def api_threads_connect_cancel():
+    persona = request_persona()
+    attempt_id = _get_setting(_TH_ATTEMPT.format(persona)) or ''
+    if attempt_id:
+        try:
+            _ig_conn().cancel(attempt_id)
+        except Exception:
+            pass
+    _set_setting(_TH_ATTEMPT.format(persona), '')
+    return jsonify({'ok': True})
 
 
 @app.route('/api/threads/post-now', methods=['POST'])

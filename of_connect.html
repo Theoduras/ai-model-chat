@@ -63,7 +63,7 @@ const persona = q.get('persona') || '';
 // the operator's own mouse and keys going back to it. Only the site it opened
 // and the routes that reach it differ, so those are read from the URL rather
 // than duplicated into a second copy of this window.
-const site = ['discord', 'instagram', 'reddit'].includes(q.get('site')) ? q.get('site') : 'onlyfans';
+const site = ['discord', 'instagram', 'threads', 'reddit'].includes(q.get('site')) ? q.get('site') : 'onlyfans';
 const API = '/api/' + site + '/connect';
 const SITES = {
   onlyfans: {host: 'onlyfans.com',
@@ -80,6 +80,10 @@ const SITES = {
                   + 'Her password goes to Instagram, never to us. Do the human check '
                   + 'and any 2FA or emailed code here — this window is a real '
                   + 'browser, so Instagram treats it as one.'},
+  threads: {host: 'threads.com',
+            foot: '<b>Sign in exactly as you would on your own phone.</b> '
+                + 'Log in with her Instagram username and password. They go to Threads, '
+                + 'never to us. Do the human check and any 2FA or emailed code here.'},
   reddit: {host: 'reddit.com',
            foot: '<b>Sign in exactly as you would on your own laptop.</b> '
                + 'Her password goes to Reddit, never to us. Do the human check '
@@ -96,7 +100,7 @@ const GIVE_UP_AFTER = 5;
 
 const $ = id => document.getElementById(id);
 const img = $('frame');
-const TITLES = {discord: 'Discord', instagram: 'Instagram', reddit: 'Reddit',
+const TITLES = {discord: 'Discord', instagram: 'Instagram', threads: 'Threads', reddit: 'Reddit',
                 onlyfans: 'OnlyFans'};
 document.title = 'Connect ' + TITLES[site];
 document.querySelector('.url').textContent = SITES[site].host;

@@ -53,6 +53,8 @@ SITES = {
                 'prefix': 'dcc_'},
     'instagram': {'url': 'https://www.instagram.com/accounts/login/',
                   'origin': 'https://www.instagram.com', 'prefix': 'igc_'},
+    'threads': {'url': 'https://www.threads.com/login', 'origin': 'https://www.threads.com',
+                'prefix': 'thc_'},
     'reddit': {'url': 'https://www.reddit.com/login', 'origin': 'https://www.reddit.com',
                'prefix': 'rdc_'},
 }
@@ -583,6 +585,8 @@ class Attempt:
             self._watch_instagram(page)
         elif self.site == 'reddit':
             self._watch_reddit(page)
+        elif self.site == 'threads':
+            pass
         else:
             self._watch_signing(page)
         try:
@@ -967,11 +971,6 @@ class Attempt:
                    'cookie': cookie_header, 'csrftoken': csrftoken, 'app_id': app_id,
                    'user_agent': agent or self.user_agent, 'proxy': self.proxy,
                    'verified': self.capture_note == 'captured'}
-        threads = self._capture_threads(page, context)
-        if threads:
-            session['threads'] = threads
-        else:
-            self.capture_note = 'threads_missing'
         self.result = {'user_id': session['user_id'], 'username': session['username']}
         if _sink:
             _sink(self.account, session)
@@ -980,35 +979,37 @@ class Attempt:
         self.state = 'connected'
         self._done.set()
 
-    def _capture_threads(self, page, context, wait_s=45):
-        """threads.com issues its own sessionid through "Continue with
-        Instagram"; the instagram.com cookies alone get a bare 500 on every
-        write there. Best effort: Instagram stays connected without it."""
-        origin = 'https://www.threads.com'
+    def _capture_threads(self, page, context):
+        """threads.com issues its own sessionid, and its write calls refuse
+        instagram.com's cookies, so Threads is signed in on its own."""
+        self.probes += 1
         try:
-            page.goto(origin + '/login', wait_until='domcontentloaded', timeout=30000)
+            self.page_url = page.url
         except Exception:
-            return {}
-        deadline = time.time() + wait_s
-        clicked = False
-        while time.time() < deadline:
-            try:
-                cookies = context.cookies(origin)
-            except Exception:
-                cookies = []
-            if any(c['name'] == 'sessionid' for c in cookies):
-                return {'cookie': '; '.join(f"{c['name']}={c['value']}" for c in cookies),
-                        'csrftoken': next((c['value'] for c in cookies
-                                           if c['name'] == 'csrftoken'), '')}
-            if not clicked:
-                try:
-                    page.get_by_text(re.compile(r'(Continue|Log in) with Instagram', re.I)
-                                     ).first.click(timeout=3000)
-                    clicked = True
-                except Exception:
-                    pass
-            page.wait_for_timeout(1000)
-        return {}
+            pass
+        cookies = context.cookies(self._site['origin'])
+        names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
+        if 'sessionid' not in names:
+            self.capture_note = 'awaiting_cookies'
+            return
+        value = {c['name']: c['value'] for c in cookies}
+        try:
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            agent = self.user_agent
+        session = {'user_id': value.get('ds_user_id', ''), 'username': '',
+                   'cookie': '; '.join(f"{c['name']}={c['value']}" for c in cookies),
+                   'csrftoken': value.get('csrftoken', ''),
+                   'user_agent': agent or self.user_agent, 'proxy': self.proxy}
+        self.capture_note = 'captured'
+        self.result = {'user_id': session['user_id'], 'username': ''}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
 
     def _watch_reddit(self, page):
         """Take Reddit's own bearer token and chat handshake off the page.
@@ -1142,6 +1143,8 @@ class Attempt:
             return self._capture_instagram(page, context)
         if self.site == 'reddit':
             return self._capture_reddit(page, context)
+        if self.site == 'threads':
+            return self._capture_threads(page, context)
         self.probes += 1
         try:
             self.page_url = page.url

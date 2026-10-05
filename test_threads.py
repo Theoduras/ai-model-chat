@@ -7,6 +7,7 @@ import os
 import sys
 
 os.environ.setdefault('GEMINI_API_KEY', 'test')
+os.environ.setdefault('INSTAGRAM_SESSION_KEY', 'Efqszy31Wf5Mr9glXFgGg_4teET8KHTn3HPSr0vZtPY=')
 
 import app
 
@@ -327,7 +328,7 @@ class IgOnly(Refusing):
 
 app._th_rest = lambda persona: IgOnly(500)
 check('a 500 on the instagram cookie says to reconnect',
-      'its own sign-in' in fails(lambda: app._th_post_rows('lilith', 'hi', [ROW_IMG])))
+      'Sign in to Threads' in fails(lambda: app._th_post_rows('lilith', 'hi', [ROW_IMG])))
 app._th_rest = lambda persona: FAKE
 rest.post_carousel([(b'a', 'photo', 1, 1, 0), (b'b', 'photo', 1, 1, 0)])
 ids = [c['upload_id'] for c in BODIES[-1][1]['children_metadata']]
@@ -343,6 +344,21 @@ LOGGED.clear()
 out = app._th_post_now('lilith', 'out it goes', [])
 check('post-now returns the id it got', out['id'] and out['kind'] == 'text')
 check('post-now is logged', LOGGED and LOGGED[0][0] == 'text')
+
+SETTINGS = {}
+_gs, _ss = app._get_setting, app._set_setting
+app._get_setting = lambda k, *d: SETTINGS.get(k, '')
+app._set_setting = lambda k, v: SETTINGS.__setitem__(k, v)
+app._th_set_own_session('lilith', {'cookie': 'sessionid=th', 'csrftoken': 'thc'})
+check('a threads sign-in rides beside the instagram one',
+      app._th_session('lilith')['threads']['cookie'] == 'sessionid=th'
+      and app._th_session('lilith')['cookie'] == 'sessionid=x')
+app._th_set_own_session('solo', {'cookie': 'sessionid=th2', 'csrftoken': 'c2'})
+check('a threads sign-in alone connects',
+      app._th_mode('solo') == 'instagram'
+      and threads_rest.Rest(app._th_session('solo')).cookie == 'sessionid=th2')
+check('the console knows it has its own sign-in', app._th_identity('lilith')['own_session'])
+app._get_setting, app._set_setting = _gs, _ss
 
 print('the scheduler sends through whichever side is live')
 SENT = []

@@ -112,18 +112,20 @@
           <select id="persona" onchange="switchPersona()"></select>
         </div>
         <span class="conn-pill" id="conn-pill">—</span>
+        <button class="btn-ai" id="signin-btn" onclick="signInThreads()">Sign in to Threads</button>
         <button class="btn-ai" id="connect-btn" onclick="toggleConnect()">Connect Threads</button>
         <button class="btn-ai" id="disconnect-btn" style="background:var(--border); display:none;" onclick="disconnectThreads()">Disconnect</button>
       </div>
       <span class="hint">Threads is public-only — no DMs.</span>
       <div class="hint" id="ig-note" style="display:none; margin-top:8px; color:#4ade80;">
-        ✓ Riding this persona's Instagram session — a Threads account <i>is</i> an Instagram
-        account, so there is nothing to connect here. Manage it on
-        <a href="/instagram" style="color:var(--accent);">the Instagram console</a>.
+        ✓ Signed in to Threads — posts go out from her account.
+      </div>
+      <div class="hint" id="own-note" style="display:none; margin-top:8px; color:var(--warn);">
+        Threads will not take posts on the Instagram sign-in alone. Click
+        <b>Sign in to Threads</b> and log in with her Instagram username and password.
       </div>
       <div class="hint" id="no-conn-note" style="display:none; margin-top:8px;">
-        Connect this persona on <a href="/instagram" style="color:var(--accent);">Instagram</a>
-        and Threads comes with it — or connect a Threads app below.
+        Click <b>Sign in to Threads</b> and log in with her Instagram username and password.
       </div>
     </div>
 
@@ -343,7 +345,10 @@ function paintConn(){
   document.getElementById('connect-btn').style.display = viaIg?'none':'inline-flex';
   document.getElementById('connect-btn').textContent = connected?'Reconnect':'Connect Threads';
   document.getElementById('disconnect-btn').style.display = (connected&&!viaIg)?'inline-flex':'none';
-  document.getElementById('ig-note').style.display = viaIg?'block':'none';
+  const own=!!info.own_session;
+  document.getElementById('signin-btn').textContent = own?'Sign in again':'Sign in to Threads';
+  document.getElementById('ig-note').style.display = (viaIg&&own)?'block':'none';
+  document.getElementById('own-note').style.display = (viaIg&&!own)?'block':'none';
   document.getElementById('no-conn-note').style.display = connected?'none':'block';
   document.getElementById('url-panel').style.display = (connected&&!viaIg)?'block':'none';
   document.getElementById('connect-panel').style.display='none';
@@ -497,6 +502,20 @@ async function planWeek(btn){
     window.open('/planner?persona='+encodeURIComponent(persona()),'_blank');
   }catch(e){ alert('Could not plan the week.'); }
   finally{ btn.disabled=false; btn.textContent=was; loadQueue(); }
+}
+
+function signInThreads(){
+  const win = window.open('/threads/connect?site=threads&persona=' + encodeURIComponent(persona()),
+    'threads-signin', 'width=1040,height=860');
+  const t = setInterval(async () => {
+    if (win && !win.closed) return;
+    clearInterval(t);
+    try {
+      const r = await fetch('/api/threads/status?persona=' + encodeURIComponent(persona()));
+      Object.assign(connStatus, await r.json());
+    } catch (e) {}
+    paintConn();
+  }, 1000);
 }
 
 function toggleConnect(){
