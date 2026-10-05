@@ -7691,6 +7691,74 @@ def admin_activity():
         s.close()
 
 
+ADMIN_VIDEOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<title>Video log</title><style>""" + ACCOUNT_CSS + """
+.v{border:1px solid var(--border,#333);border-radius:10px;padding:12px;margin:0 0 12px}
+.v h3{margin:0 0 6px;font-size:.95rem}.m{color:var(--text-muted);font-size:.8rem}
+.v pre{white-space:pre-wrap;word-break:break-word;font-size:.8rem;margin:4px 0 8px}
+.part{border-top:1px dashed var(--border,#333);padding-top:8px;margin-top:8px}
+.failed{color:#ef4444}.done{color:#22c55e}
+</style></head><body data-page="admin-videos"><div class="wrap wide">
+<div class="bar"><span>Video log</span><a href="/admin/hub">Admin</a></div>
+<form method="get"><input name="q" value="{{ q }}" placeholder="Filter by email, persona, LoRA or prompt"></form>
+{% for j in jobs %}<div class="v">
+<h3>{{ j.slug }} · <span class="{{ j.status }}">{{ j.status }}</span> · {{ j.spec.get('job', '') }}</h3>
+<div class="m">{{ j.created }} UTC · {{ j.email }} · {{ j.tokens }} tokens · job {{ j.id }}</div>
+{% if j.error %}<div class="failed">{{ j.error }}</div>{% endif %}
+{% for p in j.sent %}<div class="part">
+<div class="m">{% if j.sent|length > 1 %}Part {{ loop.index }} · {% endif %}{{ p.at }} · {{ p.provider }} / <b>{{ p.model }}</b>
+· {{ p.seconds }}s {{ p.resolution }} {{ p.aspect }} · seed {{ p.seed }} · {{ 'explicit' if p.explicit else 'safe' }}
+· {{ p.references }} refs{% if p.source_clip %} · source clip{% endif %}</div>
+<div class="m">LoRAs:</div><pre>{% for l in p.loras %}{{ l.name }} @ {{ l.scale }} (high {{ l.high }}, low {{ l.low }}){% if l.trigger %} trigger: {{ l.trigger }}{% endif %}
+{% else %}none{% endfor %}</pre>
+{% if p.prompt_extra or p.motion %}<div class="m">Creator wrote:</div><pre>{{ p.prompt_extra or p.motion }}</pre>{% endif %}
+<div class="m">Prompt sent:</div><pre>{{ p.prompt }}</pre>
+<div class="m">Negative:</div><pre>{{ p.negative }}</pre>
+</div>{% else %}<div class="m">Not logged (submitted before the video log, or failed before submit).
+Creator wrote: {{ j.spec.get('prompt_extra') or j.spec.get('motion') or '-' }} · model {{ j.spec.get('model', '') }}
+· LoRAs {{ (j.spec.get('loras') or [])|map(attribute='name')|join(', ') or 'none' }}</div>{% endfor %}
+</div>{% else %}<p>No videos yet.</p>{% endfor %}
+</div></body></html>"""
+
+
+@app.route('/admin/videos')
+def admin_videos():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from db import GenerationJob, Membership, User
+    q = (request.args.get('q') or '').strip().lower()
+    s = _db_session()
+    try:
+        users = {u.id: u.email for u in s.query(User.id, User.email)}
+        by_ws = dict(users)
+        for m in s.query(Membership).all():
+            by_ws.setdefault(m.workspace_id, users.get(m.user_id))
+        jobs = []
+        for j in (s.query(GenerationJob).filter(GenerationJob.kind == 'video')
+                  .order_by(GenerationJob.created_at.desc()).limit(300)):
+            try:
+                spec = json.loads(j.spec_json or '{}')
+            except ValueError:
+                spec = {}
+            email = by_ws.get(j.workspace_id) or j.workspace_id
+            row = {'id': j.id, 'slug': j.slug, 'status': j.status, 'error': j.error,
+                   'tokens': j.tokens, 'email': email, 'spec': spec,
+                   'sent': spec.get('sent') or [],
+                   'created': j.created_at.strftime('%Y-%m-%d %H:%M:%S') if j.created_at else ''}
+            if q and q not in json.dumps([email, j.slug, row['sent'], spec.get('prompt_extra'),
+                                          spec.get('loras')]).lower():
+                continue
+            jobs.append(row)
+            if len(jobs) >= 100:
+                break
+        return render_template_string(ADMIN_VIDEOS_HTML, jobs=jobs, q=q)
+    finally:
+        s.close()
+
+
 _ADMIN_PAGES = [
     ('Users', '/admin/users', 'Accounts, plans, roles'),
     ('Media', '/admin/media', 'Every uploaded photo and clip: compress, delete'),
@@ -7701,6 +7769,7 @@ _ADMIN_PAGES = [
     ('Trials', '/admin/trials', 'Free-trial links and redemptions'),
     ('Register links', '/admin/register-links', 'Tracked signup links'),
     ('Permissions', '/admin/permissions', 'What admin seats may do'),
+    ('Video log', '/admin/videos', 'Prompts, LoRAs and settings each video ran with'),
     ('X chats', '/admin/xchats', 'X DM conversations'),
     ('X log', '/admin/xlog', 'X bot activity'),
     ('Persona builder', '/admin', 'Edit persona voice and prompt'),
@@ -36545,6 +36614,7 @@ def _gen_start(job_id, slug, spec, workspace):
                     if written:
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
+                spec['sent'] = [_video_sent(call, provider.name)]
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
@@ -36560,13 +36630,38 @@ def _gen_start(job_id, slug, spec, workspace):
         s = _db_session()
         try:
             update_generation(s, job_id, status='running',
-                              provider_job_id=provider_job or '')
+                              provider_job_id=provider_job or '',
+                              **({'spec_json': json.dumps(spec)} if spec.get('sent') else {}))
         finally:
             s.close()
         if result.status == 'done':
             _gen_finish(job_id, slug, spec, workspace, result.urls)
         elif result.status == 'failed':
             _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _video_sent(call, provider_name):
+    """What a video submit actually hands the provider, for /admin/videos.
+    The seed is fixed here so the logged one is the one that ran."""
+    if call.get('seed') is None and call.get('model') in imagegen.RUNPOD_MODELS:
+        call['seed'] = random.randint(0, 2**31 - 1)
+    return {
+        'at': datetime.utcnow().strftime('%Y-%m-%d %H:%M:%S'),
+        'provider': provider_name, 'model': call.get('model') or '',
+        'prompt': call.get('prompt') or '', 'motion': call.get('motion') or '',
+        'prompt_extra': call.get('prompt_extra') or '',
+        'negative': imagegen.negative_for(call),
+        'loras': [{'name': l.get('name', ''), 'scale': l.get('scale'),
+                   'trigger': l.get('trigger', ''),
+                   'high': (l.get('high') or '').rsplit('/', 1)[-1],
+                   'low': (l.get('low') or '').rsplit('/', 1)[-1]}
+                  for l in (call.get('loras') or [])],
+        'seed': call.get('seed'), 'seconds': call.get('seconds'),
+        'resolution': call.get('resolution') or '', 'aspect': call.get('aspect') or '',
+        'explicit': bool(call.get('explicit')), 'job': call.get('job') or '',
+        'source_clip': bool(call.get('source_url')),
+        'references': len(call.get('reference_urls') or []),
+    }
 
 
 def _gen_claim_late(job_id, workspace, result, provider_job):
@@ -36906,6 +37001,7 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
                                              style=imagegen.lora_style(spec)) or template)
             logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
                         len(chain['plan']), call['prompt'])
+            spec.setdefault('sent', []).append(_video_sent(call, provider_name))
             new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
             if not new_job:
                 raise imagegen.GenerationError('part %d was not accepted' % (done + 1))

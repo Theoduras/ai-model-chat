@@ -117,12 +117,12 @@ VIDEO_COST_USD_PER_SECOND = {
     'wan-2-6-rp': {'480p': 0.10, '720p': 0.10, '1080p': 0.15},
     # RunPod's Wan 2.2 LoRA page: $0.35 for 5s, $0.56 for 8s -- $0.07 a second.
     'wan-2-2-lora': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
-    # Our generate_video endpoint on an RTX PRO 6000 Blackwell at $3.49/hr: a 5s
-    # 720p clip ran 333s plus a 13s boot on a fresh worker (~$0.34), 180s on a warm
-    # one (~$0.17). Priced at the fresh one, because each burst also pays the
-    # idle minutes that no clip is charged for. 480p is scaled from that,
-    # unmeasured; 1080p is not offered (imagegen rungs). Then raised 1.5x, which
-    # also covers the 5 idle minutes (~$0.29) each burst pays.
+    # Our generate_video endpoint on RunPod's 48 GB PRO tier ($1.75/hr; its
+    # workers land on half an RTX PRO 6000 Blackwell). A 5s 720p clip ran 317s
+    # plus a 12s boot on a fresh worker (~$0.16), 288s on a warm one (~$0.14);
+    # each burst also pays up to 5 idle minutes (~$0.15) no clip is charged for.
+    # The price is set well above that on purpose (raised 1.5x on a full card
+    # that cost twice as much). 480p is unmeasured; 1080p is not offered.
     'wan-2-2-gv': {'480p': 0.0675, '720p': 0.105, '1080p': 0.27},
 }
 

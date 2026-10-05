@@ -467,7 +467,7 @@ live on the Cloud Run service, not in this repository; change them with
   two hosts means two bots answering the same fan.
 - Explicit Photo to Video, "Explicit Video Realism Pro" (`wan-2-2-gv`), runs on our own RunPod
   serverless endpoint `ys8km1d7sayxtz` (hub listing `wlsdml1114/generate_video`,
-  RTX PRO 6000 Blackwell, 0 active, max 2, FlashBoot, 5 min idle). It is the code default for
+  48 GB PRO tier, 0 active, max 2, FlashBoot, 5 min idle). It is the code default for
   `RUNPOD_GV_ENDPOINT`; it only needs `RUNPOD_API_KEY` on the host (and `CIVITAI_TOKEN` for
   Civitai LoRAs). Its template's start command runs `infra/runpod-gv-patch.py`, which makes the
   stock worker take LoRA links, our seed and our steps; re-install it if the template is rebuilt.
