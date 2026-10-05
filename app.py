@@ -7700,6 +7700,9 @@ ADMIN_VIDEOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8
 .v pre{white-space:pre-wrap;word-break:break-word;font-size:.8rem;margin:4px 0 8px}
 .part{border-top:1px dashed var(--border,#333);padding-top:8px;margin-top:8px}
 .failed{color:#ef4444}.done{color:#22c55e}
+.imgs{display:flex;gap:10px;flex-wrap:wrap;margin:6px 0}.imgs figure{margin:0}
+.imgs img{height:160px;border-radius:6px;display:block}.imgs figcaption{font-size:.75rem;opacity:.7}
+video.res{max-height:360px;max-width:100%;border-radius:6px}
 </style></head><body data-page="admin-videos"><div class="wrap wide">
 <div class="bar"><span>Video log</span><a href="/admin/hub">Admin</a></div>
 <form method="get"><input name="q" value="{{ q }}" placeholder="Filter by email, persona, LoRA or prompt"></form>
@@ -7711,6 +7714,8 @@ ADMIN_VIDEOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8
 <div class="m">{% if j.sent|length > 1 %}Part {{ loop.index }} · {% endif %}{{ p.at }} · {{ p.provider }} / <b>{{ p.model }}</b>
 · {{ p.seconds }}s {{ p.resolution }} {{ p.aspect }} · seed {{ p.seed }} · {{ 'explicit' if p.explicit else 'safe' }}
 · {{ p.references }} refs{% if p.source_clip %} · source clip{% endif %}</div>
+{% if p.start or p.identity %}<div class="imgs">{% if p.start %}<figure><a href="/admin/videos/{{ j.id }}/img/{{ p.start }}" target="_blank"><img src="/admin/videos/{{ j.id }}/img/{{ p.start }}" loading="lazy"></a><figcaption>{{ 'Start photo' if p.start == 'ref' else 'Start frame (end of part ' ~ (loop.index - 1) ~ ')' }}</figcaption></figure>{% endif %}
+{% if p.identity %}<figure><a href="/admin/videos/{{ j.id }}/img/ref" target="_blank"><img src="/admin/videos/{{ j.id }}/img/ref" loading="lazy"></a><figcaption>Identity image</figcaption></figure>{% endif %}</div>{% endif %}
 <div class="m">LoRAs:</div><pre>{% for l in p.loras %}{{ l.name }} @ {{ l.scale }} (high {{ l.high }}, low {{ l.low }}){% if l.trigger %} trigger: {{ l.trigger }}{% endif %}
 {% else %}none{% endfor %}</pre>
 {% if p.prompt_extra or p.motion %}<div class="m">Creator wrote:</div><pre>{{ p.prompt_extra or p.motion }}</pre>{% endif %}
@@ -7719,6 +7724,7 @@ ADMIN_VIDEOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8
 </div>{% else %}<div class="m">Not logged (submitted before the video log, or failed before submit).
 Creator wrote: {{ j.spec.get('prompt_extra') or j.spec.get('motion') or '-' }} · model {{ j.spec.get('model', '') }}
 · LoRAs {{ (j.spec.get('loras') or [])|map(attribute='name')|join(', ') or 'none' }}</div>{% endfor %}
+{% for r in j.results %}<div class="m">Result:</div><video src="/admin/videos/{{ j.id }}/img/res{{ r }}" controls preload="none" class="res"></video>{% endfor %}
 </div>{% else %}<p>No videos yet.</p>{% endfor %}
 </div></body></html>"""
 
@@ -7747,6 +7753,7 @@ def admin_videos():
             row = {'id': j.id, 'slug': j.slug, 'status': j.status, 'error': j.error,
                    'tokens': j.tokens, 'email': email, 'spec': spec,
                    'sent': spec.get('sent') or [],
+                   'results': [m for m in (j.result_media_ids or '').split(',') if m],
                    'created': j.created_at.strftime('%Y-%m-%d %H:%M:%S') if j.created_at else ''}
             if q and q not in json.dumps([email, j.slug, row['sent'], spec.get('prompt_extra'),
                                           spec.get('loras')]).lower():
@@ -7757,6 +7764,37 @@ def admin_videos():
         return render_template_string(ADMIN_VIDEOS_HTML, jobs=jobs, q=q)
     finally:
         s.close()
+
+
+@app.route('/admin/videos/<job_id>/img/<key>')
+def admin_video_image(job_id, key):
+    """The images and clips a logged video ran with: its start photo, each
+    part's start frame, and the result."""
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    from db import GenerationJob
+    s = _db_session()
+    try:
+        j = s.get(GenerationJob, job_id)
+        spec = json.loads(j.spec_json or '{}') if j else {}
+        slug = j.slug if j else ''
+    finally:
+        s.close()
+    try:
+        if key == 'ref':
+            data, mime = _media_bytes(_media_row(slug, spec.get('reference_media')) or {})
+        elif key.startswith('frame'):
+            data, mime = storage.get(((spec.get('chain') or {}).get('frames') or [])[int(key[5:])]), 'image/jpeg'
+        elif key.startswith('res'):
+            data, mime = _media_bytes(_media_row(slug, key[3:]) or {})
+        else:
+            data = b''
+    except Exception:
+        data = b''
+    if not data:
+        return 'Gone (staged media expires after three days).', 404
+    return Response(data, mimetype=mime, headers={'Cache-Control': 'private, max-age=3600'})
 
 
 _ADMIN_PAGES = [
@@ -36650,7 +36688,8 @@ def _gen_start(job_id, slug, spec, workspace):
                     if written:
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
-                spec['sent'] = [_video_sent(call, provider.name)]
+                spec['sent'] = [dict(_video_sent(call, provider.name),
+                                     start='ref' if spec.get('reference_media') else '')]
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
@@ -37045,7 +37084,10 @@ def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
         ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
         if ref_b64:
             call.update({'identity_b64': ref_b64, 'identity_mime': ref_mime})
-    spec.setdefault('sent', []).append(_video_sent(call, provider_name))
+    spec.setdefault('sent', []).append(dict(
+        _video_sent(call, provider_name),
+        start='frame%d' % (done - 1) if done - 1 < len(chain.get('frames') or []) else '',
+        identity='ref' if call.get('identity_b64') else ''))
     new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
     if not new_job:
         raise imagegen.GenerationError('part %d was not accepted' % (done + 1))
@@ -37080,6 +37122,7 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
             frame = imagegen.last_frame(data)
             if not frame:
                 raise imagegen.GenerationError('could not read the end of part %d' % done)
+            chain.setdefault('frames', []).append(storage.put(slug, frame, 'image/jpeg'))
             new_job = _gen_chain_submit(job_id, slug, spec, provider_name, done, frame)
             s = _db_session()
             try:
