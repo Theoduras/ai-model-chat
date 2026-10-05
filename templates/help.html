@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <link rel="icon" href="/favicon.ico" sizes="any">
-<title>{{ p.title + ' · Help' if p else 'Help Center' }}</title>
+<title>{{ p.title + ' · Docs' if p else 'Docs' }}</title>
 <meta name="description" content="{{ p.summary if p else 'How to use every feature: steps, options, tips and best practices.' }}">
 <script src="/js/analytics.js" defer></script>
 <link rel="stylesheet" href="/css/site-nav.css">
@@ -57,23 +57,23 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
 <body>
 <div class="wrap">
   <nav class="toc">
-    <a href="/help"{% if not p %} class="on"{% endif %}>Help Center</a>
+    <a href="/docs"{% if not p %} class="on"{% endif %}>Docs</a>
     {% for g in groups %}
     <h4>{{ g }}</h4>
     {% for slug in order if pages[slug].group == g %}
-    <a href="/help/{{ slug }}"{% if p and slug == slug_on %} class="on"{% endif %}>{{ pages[slug].title }}</a>
+    <a href="/docs/{{ slug }}"{% if p and slug == slug_on %} class="on"{% endif %}>{{ pages[slug].title }}</a>
     {% endfor %}
     {% endfor %}
   </nav>
   <main>
   {% if not p %}
-    <h1>Help Center</h1>
+    <h1>Docs</h1>
     <p class="lede">How to use every feature: the steps, what every option does, and tips from creators who use it daily.</p>
     {% for g in groups %}
     <h2>{{ g }}</h2>
     <div class="cards">
       {% for slug in order if pages[slug].group == g %}
-      <a class="card" href="/help/{{ slug }}"><b>{{ pages[slug].title }}</b><span>{{ pages[slug].summary }}</span></a>
+      <a class="card" href="/docs/{{ slug }}"><b>{{ pages[slug].title }}</b><span>{{ pages[slug].summary }}</span></a>
       {% endfor %}
     </div>
     {% endfor %}

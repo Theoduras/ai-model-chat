@@ -8846,6 +8846,12 @@ def _platform_marketing_page(slug):
 
 @app.route('/help', methods=['GET'])
 @app.route('/help/<slug>', methods=['GET'])
+def help_redirect(slug=None):
+    return redirect('/docs' + ('/' + slug if slug else ''), 301)
+
+
+@app.route('/docs', methods=['GET'])
+@app.route('/docs/<slug>', methods=['GET'])
 def help_page(slug=None):
     if not _current_user():
         return redirect('/login?next=' + urllib.parse.quote(request.path))

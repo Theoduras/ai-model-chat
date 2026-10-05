@@ -1,4 +1,4 @@
-"""Creator Help Center: one page per feature, rendered by templates/help.html.
+"""Creator Docs (/docs): one page per feature, rendered by templates/help.html.
 
 The platform consoles already explain every control in their own setup wizards
 (js/*-guide.js). Their help pages render those same steps (`guide`), so the
