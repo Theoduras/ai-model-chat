@@ -4,6 +4,7 @@ import os
 import sys
 import functools
 import platform_pages
+import help_pages
 import free_tools
 import copy
 import json
@@ -2444,7 +2445,7 @@ _OPEN_PATHS = (
                # consoles (/telegram-ai-chatbot vs /telegram), and _PAID_PAGES
                # matches on prefix, so they have to be named before it.
                tuple('/' + s for s in platform_pages.PAGES) +
-               ('/login', '/register', '/logout', '/pricing', '/billing',
+               ('/help', '/login', '/register', '/logout', '/pricing', '/billing',
                '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
@@ -8841,6 +8842,15 @@ def tos_page():
 def _platform_marketing_page(slug):
     return render_template('platform.html', p=platform_pages.PAGES[slug],
                            origin=_site_origin())
+
+
+@app.route('/help', methods=['GET'])
+@app.route('/help/<slug>', methods=['GET'])
+def help_page(slug=None):
+    if slug is not None and slug not in help_pages.PAGES:
+        return 'Not found', 404
+    return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug,
+                           pages=help_pages.PAGES, order=help_pages.ORDER, groups=help_pages.GROUPS)
 
 
 for _pp_slug in platform_pages.PAGES:
