@@ -68,8 +68,8 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # the upload rather than truncated after it is paid for.
 VIDEO_MAX_SECONDS = 15
 # A chained clip (parts joined end to start) on the models that can chain.
-CHAIN_MAX_SECONDS = 32
-CHAIN_MODELS = ('wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv')
+CHAIN_MAX_SECONDS = 120
+CHAIN_MODELS = ('wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv', 'h3-gv')
 
 # ── What the provider actually bills us, in USD ───────────────────────────────
 # This is the source of every number in this file: the token tables below are

@@ -549,7 +549,8 @@ MODEL_VIDEO_DURATIONS = {
 # Only lengths that split into whole parts the model serves, so what is
 # generated is exactly what is priced. Needs ffmpeg for the frame and the join.
 CHAIN_DURATIONS = {'wan-2-2': (20, 30), 'wan-2-6-rp': (20, 30),
-                   'wan-2-2-lora': (16, 24, 32), 'wan-2-2-gv': (10, 16, 24, 32)}
+                   'wan-2-2-lora': (16, 24, 32), 'wan-2-2-gv': (10, 16, 24, 32),
+                   'h3-gv': (30, 45, 60, 90, 120)}
 
 
 def chain_plan(model_key, seconds):
@@ -1595,22 +1596,33 @@ def join_clips(videos):
             with open(p, 'wb') as f:
                 f.write(v)
             cmd += ['-i', p]
+        n = len(videos)
         chains = [f'[{i}:v]' + ('trim=start_frame=1,setpts=PTS-STARTPTS,' if i else '')
                   + f'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[v{i}]'
-                  for i in range(len(videos))]
-        graph = ';'.join(chains) + ';' + ''.join(f'[v{i}]' for i in range(len(videos))) \
-            + f'concat=n={len(videos)}:v=1:a=0[out]'
+                  for i in range(n)]
+        # Parts with sound (H3) keep it, trimmed by the same dropped frame;
+        # silent parts have no audio stream, so that graph fails and the
+        # video-only one runs.
+        sound = [f'[{i}:a]' + (f'atrim=start={1 / 24:.4f},asetpts=PTS-STARTPTS,' if i else '')
+                 + f'aresample=48000[a{i}]' for i in range(n)]
+        tries = (
+            (';'.join(chains + sound) + ';' + ''.join(f'[v{i}][a{i}]' for i in range(n))
+             + f'concat=n={n}:v=1:a=1[out][aout]', ['-map', '[out]', '-map', '[aout]', '-c:a', 'aac']),
+            (';'.join(chains) + ';' + ''.join(f'[v{i}]' for i in range(n))
+             + f'concat=n={n}:v=1:a=0[out]', ['-map', '[out]']))
         out = os.path.join(d, 'out.mp4')
-        try:
-            subprocess.run(cmd + ['-filter_complex', graph, '-map', '[out]', '-c:v', 'libx264',
-                                  '-preset', 'medium', '-crf', '18', '-pix_fmt', 'yuv420p',
-                                  '-movflags', '+faststart', out],
-                           check=True, timeout=300, capture_output=True)
-            with open(out, 'rb') as f:
-                return f.read()
-        except Exception as e:
-            logging.getLogger(__name__).warning('join failed: %s', str(e)[:300])
-            return b''
+        for graph, maps in tries:
+            try:
+                subprocess.run(cmd + ['-filter_complex', graph] + maps + [
+                                   '-c:v', 'libx264', '-preset', 'medium', '-crf', '18',
+                                   '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out],
+                               check=True, timeout=600, capture_output=True)
+                with open(out, 'rb') as f:
+                    return f.read()
+            except Exception as e:
+                last = e
+        logging.getLogger(__name__).warning('join failed: %s', str(last)[:300])
+        return b''
 
 
 def _ffmpeg(video, args, audio=None):
