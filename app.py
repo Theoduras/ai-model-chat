@@ -33640,12 +33640,13 @@ def _gen_spec(slug, body, user):
                 and not any(p['trigger'] == 'piston_dildo_style' for p in picked)):
             want = ('dildo-h3' if family == 'h3' else 'dildo-22-v2-closeup'
                     if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
-            lora = library.get(want)
-            if lora and lora.get('enabled', True) is not False:
-                picked.append({'name': lora['name'], 'high': lora['high'],
-                               'low': lora['low'], 'scale': lora['scale'],
-                               'trigger': lora['trigger'],
-                               'examples': lora.get('examples', '')})
+            _auto_lora(picked, library.get(want))
+        if spec['explicit'] and family == 'h3':
+            for words, want in ((_VAGINA_WORDS, 'vagina-h3'), (_MASTURBATION_WORDS, 'masturbation-h3')):
+                lora = library.get(want)
+                if (len(picked) < 4 and words.search(text) and lora
+                        and not any(p['high'] == lora['high'] for p in picked)):
+                    _auto_lora(picked, lora)
         spec['loras'] = picked
     return spec
 
@@ -33675,10 +33676,28 @@ _DEFAULT_VIDEO_LORAS = [{
     # The same Civitai model's MiniMax H3 version: one file, for h3-gv only.
     'id': 'dildo-h3', 'name': 'Solo Dildo (H3)', 'scale': 1.0, 'family': 'h3',
     'trigger': 'piston_dildo_style', 'examples': '',
-    'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}]
+    'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}, {
+    # Civitai model 2835594, v0.2.
+    'id': 'vagina-h3', 'name': 'H3 Vagina v0.2', 'scale': 1.0, 'family': 'h3',
+    'trigger': '', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3200540', 'low': ''}, {
+    # Civitai model 2926109, v1.0.
+    'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 1.0, 'family': 'h3',
+    'trigger': 'masturbating, orgasmic contractions', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3311155', 'low': ''}]
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
+_VAGINA_WORDS = re.compile(r'\b(pussy|vagina|labia|spread)\b', re.I)
+_MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|fingering|wand|massager)\b', re.I)
+
+
+def _auto_lora(picked, lora):
+    if lora and lora.get('enabled', True) is not False:
+        picked.append({'name': lora['name'], 'high': lora['high'],
+                       'low': lora['low'], 'scale': lora['scale'],
+                       'trigger': lora['trigger'],
+                       'examples': lora.get('examples', '')})
 
 
 _LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
