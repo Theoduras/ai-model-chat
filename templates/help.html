@@ -86,7 +86,7 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
     <ol class="steps">{% for s in p.steps %}<li>{{ s | safe }}</li>{% endfor %}</ol>
     {% endif %}
     {% if p.options %}
-    <h2>Options</h2>
+    <h2>{{ p.options_title or 'Options' }}</h2>
     <dl class="opts">{% for k, v in p.options %}<dt>{{ k }}</dt><dd>{{ v | safe }}</dd>{% endfor %}</dl>
     {% endif %}
     {% if p.option_groups %}

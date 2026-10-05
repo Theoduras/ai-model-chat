@@ -20,6 +20,7 @@ PAGES = {
             'Connect a <b>platform</b> (Fanvue, Telegram, X, Threads, Instagram, Discord) and switch her on.',
             'Publish your <b>Link in bio</b> page and put it in your social bios.',
         ],
+        'options_title': 'Good to know',
         'options': [
             ('Free plan', 'Characters, the studio, token top-ups and one link-in-bio page. Chatbot features show as <i>Subscribers only</i>.'),
             ('Paid plans', 'Everything on Free, plus personas, chat, the planner and every platform.'),
@@ -43,7 +44,6 @@ PAGES = {
         ],
         'options': [
             ('Free', '15 one-time tokens. Studio, characters, one link-in-bio page.'),
-            ('Demo', '25 tokens a month.'),
             ('Starter', '150 tokens a month, personas and chat.'),
             ('Pro', '800 tokens a month.'),
             ('Agency', '2,500 tokens a month.'),

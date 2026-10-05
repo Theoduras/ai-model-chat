@@ -8851,7 +8851,8 @@ def help_page(slug=None):
         return 'Not found', 404
     prices = None
     if slug == 'plans-and-tokens' and _current_user():
-        prices = {'plans': [(t['name'], t['price']) for t in _BASE_TIERS.values()],
+        prices = {'plans': [(t['name'], t['price']) for k, t in _BASE_TIERS.items()
+                            if k != DEMO_TIER_KEY],
                   'annual_months': ANNUAL_MONTHS_CHARGED,
                   'packs': [(size, p['eur']) for size, p in CR.PACK_PRICES.items()]}
     return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug, prices=prices,
