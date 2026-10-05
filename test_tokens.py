@@ -656,6 +656,29 @@ def test_wan22_on_runpod():
               and wf['video']['inputs']['audio'] == ['audio', 0]
               and h3['images'] == [{'name': 'still.png', 'image': 'img'}]
               and 'h3-gv' not in IG2.SILENT_MODELS)
+        check('H3 asks for the int8 weights the live workers have',
+              wf['unet']['inputs']['unet_name'] == 'minimax_h3_fl2va_pruned_int8_convrot.safetensors'
+              and wf['clip']['inputs']['clip_name'] == 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors')
+        import importlib.util, json, types
+        sys.modules.setdefault('runpod', types.ModuleType('runpod'))
+        stub = types.ModuleType('comfy_handler')
+        stub.handler = lambda job: job
+        sys.modules['comfy_handler'] = stub
+        spec_ = importlib.util.spec_from_file_location(
+            'h3_handler', os.path.join(os.path.dirname(os.path.abspath(__file__)), 'infra/runpod-h3/handler.py'))
+        H3H = importlib.util.module_from_spec(spec_)
+        spec_.loader.exec_module(H3H)
+        with tempfile.TemporaryDirectory() as root:
+            for folder, name in (('unet', 'minimax_h3_fl2va_pruned_w6a8.safetensors'),
+                                 ('clip', 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')):
+                os.makedirs(os.path.join(root, folder))
+                open(os.path.join(root, folder, name), 'w').close()
+            H3H.MODELS = (root,)
+            plain = {k: v for k, v in json.loads(json.dumps(wf)).items() if not k.startswith('lora')}
+            got = H3H.handler({'input': {'workflow': plain}})['input']['workflow']
+        check('the H3 worker swaps in whichever weights it has on disk',
+              got['unet']['inputs']['unet_name'] == 'minimax_h3_fl2va_pruned_w6a8.safetensors'
+              and got['clip']['inputs']['clip_name'] == 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors')
         IG2.CIVITAI_TOKEN = 'tok'
         check('a Civitai link carries the token, any other link does not',
               IG2.lora_url('https://civitai.com/api/download/models/1') ==

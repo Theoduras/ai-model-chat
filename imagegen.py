@@ -2569,7 +2569,7 @@ def h3_payload(spec, image, ref=None):
     model = ['unet', 0]
     wf = {
         'unet': {'class_type': 'UNETLoader', 'inputs': {
-            'unet_name': 'minimax_h3_fl2va_pruned_w6a8.safetensors', 'weight_dtype': 'default'}},
+            'unet_name': 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'weight_dtype': 'default'}},
         'turbo': {'class_type': 'LoraLoaderModelOnly', 'inputs': {
             'model': model, 'lora_name': 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
             'strength_model': 1.0}},
@@ -2583,7 +2583,7 @@ def h3_payload(spec, image, ref=None):
             model = [f'lora{i}', 0]
     wf.update({
         'clip': {'class_type': 'CLIPLoader', 'inputs': {
-            'clip_name': 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
+            'clip_name': 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
             'type': 'minimax', 'device': 'default'}},
         'vae': {'class_type': 'VAELoader', 'inputs': {
             'vae_name': 'minimax_h3_video_vae_int8_convrot.safetensors'}},

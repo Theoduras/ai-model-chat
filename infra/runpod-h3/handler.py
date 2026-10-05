@@ -10,6 +10,23 @@ import runpod
 import comfy_handler
 
 LORAS = '/comfyui/models/loras'
+MODELS = ('/comfyui/models', '/runpod-volume/models')
+# The worker's own H3 files win over the names the app sends, so which weights
+# deploy.py downloaded (int8, or the smaller nvfp4/w6a8) never fails a job.
+SWAP = {'UNETLoader': ('unet_name', ('unet', 'diffusion_models'), 'minimax_h3_fl2va'),
+        'CLIPLoader': ('clip_name', ('clip', 'text_encoders'), 'qwen3vl_32b_minimax_h3')}
+
+
+def present(folders, prefix):
+    for root in MODELS:
+        for folder in folders:
+            try:
+                names = sorted(os.listdir(os.path.join(root, folder)))
+            except OSError:
+                continue
+            for name in names:
+                if name.startswith(prefix) and name.endswith('.safetensors'):
+                    yield name
 
 
 def fetch(url):
@@ -29,6 +46,11 @@ def handler(job):
         inputs = node.get('inputs') or {}
         if node.get('class_type') == 'LoraLoaderModelOnly' and str(inputs.get('lora_name', '')).startswith('http'):
             inputs['lora_name'] = fetch(inputs['lora_name'])
+        if node.get('class_type') in SWAP:
+            key, folders, prefix = SWAP[node['class_type']]
+            have = list(present(folders, prefix))
+            if have and inputs.get(key) not in have:
+                inputs[key] = have[0]
     return comfy_handler.handler(job)
 
 
