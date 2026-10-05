@@ -129,20 +129,25 @@ def download(vol, dc):
         sys.exit(f'download failed: {status.get("error")}')
 
 
-def deploy(dc):
-    vol = find('/networkvolumes', 'h3-models') or call('POST', '/networkvolumes', {
-        'name': 'h3-models', 'size': 80, 'dataCenterId': dc})
-    dc = vol.get('dataCenterId') or dc
-    print('volume', vol['id'], dc, flush=True)
-    download(vol, dc)
-    print('weights on the volume', flush=True)
+def start_cmd():
+    """Install handler.py, fetch any weight the container disk lacks (all of
+    them on a fresh worker), then start worker-comfyui."""
+    gets = ' & '.join(
+        f'(f=/comfyui/models/{folder}/{src.split("/")[-1]}; [ -s "$f" ] || '
+        f'(mkdir -p /comfyui/models/{folder} && wget -q -c -O "$f.part" "{HF}/{src}" '
+        f'&& mv "$f.part" "$f"))' for folder, src in FILES)
+    return ['bash', '-c', 'mv -n /handler.py /comfy_handler.py; '
+            'echo "$H3_HANDLER" | base64 -d > /handler.py && '
+            f'{gets} & wait; exec /start.sh']
 
+
+def deploy(dc=None):
+    """No network volume: one pins the endpoint to its data centre. Each new
+    worker downloads the ~52 GB itself, so any 80 GB GPU anywhere can serve."""
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py'), 'rb') as f:
         handler = base64.b64encode(f.read()).decode()
-    body = {'name': 'h3-worker', 'imageName': IMAGE, 'isServerless': True, 'containerDiskInGb': 20,
-            'env': {'H3_HANDLER': handler},
-            'dockerStartCmd': ['bash', '-c', 'mv -n /handler.py /comfy_handler.py; '
-                               'echo "$H3_HANDLER" | base64 -d > /handler.py && exec /start.sh']}
+    body = {'name': 'h3-worker', 'imageName': IMAGE, 'isServerless': True, 'containerDiskInGb': 80,
+            'env': {'H3_HANDLER': handler}, 'dockerStartCmd': start_cmd()}
     tpl = find('/templates', 'h3-worker')
     if tpl:
         body.pop('isServerless')
@@ -151,14 +156,18 @@ def deploy(dc):
         tpl = call('POST', '/templates', body)
     print('template', tpl['id'], flush=True)
 
-    settings = {'templateId': tpl['id'], 'networkVolumeId': vol['id'], 'dataCenterIds': [dc],
+    settings = {'templateId': tpl['id'], 'networkVolumeIds': [],
                 'computeType': 'GPU', 'gpuTypeIds': GPUS, 'gpuCount': 1, 'workersMin': 0,
                 'workersMax': 2, 'idleTimeout': 300, 'flashboot': True,
                 'executionTimeoutMs': 30 * 60 * 1000}
+    if dc:
+        settings['dataCenterIds'] = [dc]
     ep = find('/endpoints', 'h3-gv')
-    ep = call('PATCH', f'/endpoints/{ep["id"]}', settings) if ep else call(
+    # An update refuses computeType; it is fixed when the endpoint is made.
+    ep = call('PATCH', f'/endpoints/{ep["id"]}', {k: v for k, v in settings.items()
+                                                 if k != 'computeType'}) if ep else call(
         'POST', '/endpoints', dict(settings, name='h3-gv'))
-    print('ENDPOINT', ep['id'])
+    print('ENDPOINT', ep['id'], ep.get('networkVolumeIds'), ep.get('dataCenterIds'))
 
 
 def still_png(w=480, h=832):
@@ -206,4 +215,4 @@ if __name__ == '__main__':
     if sys.argv[1:2] == ['test']:
         test(sys.argv[2])
     else:
-        deploy(sys.argv[1] if len(sys.argv) > 1 else 'EU-RO-1')
+        deploy(sys.argv[1] if len(sys.argv) > 1 else None)
