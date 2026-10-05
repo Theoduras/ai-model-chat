@@ -384,9 +384,6 @@ Stay completely in character. Never mention being an AI.
   review. The media is kept and approved in her vault (reusable like any kept photo)
   and uploaded to her Fanvue vault's `Wishes` folder, and a fan's next wish
   waits until the last one is bought, because each one spends the creator's tokens.
-- **Z-Image Turbo** (`runware:z-image@turbo`) is **parked** until its LoRA identity works: out of
-  `credits.IMAGE_MODELS` and `imagegen.EXPLICIT_MODELS` (add it back to both to unpark). It takes no reference photos: identity is the persona's LoRA air id
-  (wish panel, blank = prompt only), plus `RW_ZIMAGE_NSFW_LORA` stacked on explicit shots.
 - **Tokens are pegged to provider cost** — `credits.TOKEN_COST_USD`, one
   number — so margin is identical whatever is generated and a new model is a
   table entry, not a pricing decision. `credits.py` asserts at import that every
