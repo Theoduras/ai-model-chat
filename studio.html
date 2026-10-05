@@ -491,7 +491,9 @@
             <input type="text" id="gen-lora-high" placeholder="High-noise .safetensors link (https://…)" style="margin:4px 0">
             <input type="text" id="gen-lora-low" placeholder="Low-noise .safetensors link (https://…)" style="margin:4px 0">
             <input type="number" id="gen-lora-scale" value="1" min="0" max="2" step="0.05" style="width:90px;margin:4px 0">
-            <button type="button" class="btn-ai btn-ai-secondary" onclick="addLora()">Add</button>
+            <input type="text" id="gen-lora-trigger" placeholder="Trigger words, comma separated (e.g. nsfwsks)" style="margin:4px 0">
+            <textarea id="gen-lora-examples" rows="4" placeholder="Example prompts from the LoRA's page; prompts are written in their style" style="margin:4px 0"></textarea>
+            <button type="button" class="btn-ai btn-ai-secondary" id="gen-lora-save" onclick="addLora()">Add</button>
             <span class="hint" id="gen-lora-note"></span>
           </details></div>
       </div>
@@ -3364,7 +3366,8 @@ function renderLoras() {
       <span style="flex:1">${esc(l.name)}</span>
       <input type="number" min="0" max="2" step="0.05" style="width:80px"
         value="${picked ? genLoraPick[l.id] : l.scale}" onchange="genLoraPick['${esc(l.id)}'] = +this.value">
-      ${genVideoOpen ? `<button type="button" class="btn-ai btn-ai-secondary" onclick="removeLora('${esc(l.id)}')">×</button>` : ''}
+      ${genVideoOpen ? `<button type="button" class="btn-ai btn-ai-secondary" onclick="editLora('${esc(l.id)}')">Edit</button>
+        <button type="button" class="btn-ai btn-ai-secondary" onclick="removeLora('${esc(l.id)}')">×</button>` : ''}
     </label>`;
   }).join('') : '<span class="hint">No LoRAs yet.</span>';
 }
@@ -3383,9 +3386,30 @@ async function saveLoras(body) {
   genLoras = d.loras; el('gen-lora-note').textContent = 'Saved.'; renderLoras();
 }
 
+let genLoraEditing = '';
 function addLora() {
-  saveLoras({ name: el('gen-lora-name').value, high: el('gen-lora-high').value,
-              low: el('gen-lora-low').value, scale: +el('gen-lora-scale').value });
+  saveLoras({ update: genLoraEditing || undefined,
+              name: el('gen-lora-name').value, high: el('gen-lora-high').value,
+              low: el('gen-lora-low').value, scale: +el('gen-lora-scale').value,
+              trigger: el('gen-lora-trigger').value, examples: el('gen-lora-examples').value });
+  genLoraEditing = '';
+  el('gen-lora-save').textContent = 'Add';
+}
+
+// Links are not sent back, so an edit leaves them blank: blank keeps them.
+function editLora(id) {
+  const l = (genLoras || []).find(x => x.id === id);
+  if (!l) return;
+  genLoraEditing = id;
+  el('gen-lora-admin').open = true;
+  el('gen-lora-name').value = l.name;
+  el('gen-lora-high').value = ''; el('gen-lora-low').value = '';
+  el('gen-lora-high').placeholder = 'High-noise link (blank keeps the current one)';
+  el('gen-lora-low').placeholder = 'Low-noise link (blank keeps the current one)';
+  el('gen-lora-scale').value = l.scale;
+  el('gen-lora-trigger').value = l.trigger || '';
+  el('gen-lora-examples').value = l.examples || '';
+  el('gen-lora-save').textContent = 'Save changes';
 }
 
 function removeLora(id) {

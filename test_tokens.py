@@ -678,6 +678,13 @@ def test_wan22_on_runpod():
         _rq.post = lambda *a, **k: _Resp('<think>plan</think> She waves slowly.')
         check('a written prompt loses its thinking',
               IG.write_motion_prompt('wave') == 'She waves slowly.')
+        style = IG.lora_style({'loras': [{'trigger': 'abc, xyz', 'examples': 'ex one'}]})
+        check('a LoRA job carries its trigger words and examples',
+              style == {'triggers': ['abc', 'xyz'], 'examples': 'ex one'}
+              and IG.lora_style({'loras': [{'trigger': '', 'examples': ''}]}) is None)
+        _rq.post = lambda *a, **k: _Resp('xyz, she waves slowly')
+        check('a styled prompt gets the trigger words it left out',
+              IG.write_motion_prompt('wave', style=style) == 'abc, xyz, she waves slowly')
         _rq.post = lambda *a, **k: (_ for _ in ()).throw(OSError('down'))
         check('a failed helper gives nothing rather than failing the clip',
               IG.write_motion_prompt('wave') == '' and IG.suggest_motions('u') == [])

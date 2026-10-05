@@ -33362,7 +33362,9 @@ def _gen_spec(slug, body, user):
                 except (TypeError, ValueError):
                     scale = lora['scale']
                 picked.append({'name': lora['name'], 'high': lora['high'],
-                               'low': lora['low'], 'scale': scale})
+                               'low': lora['low'], 'scale': scale,
+                               'trigger': lora.get('trigger', ''),
+                               'examples': lora.get('examples', '')})
         spec['loras'] = picked
     return spec
 
@@ -33371,6 +33373,7 @@ def _gen_spec(slug, body, user):
 # pair from Civitai (model 1307155, v0.08a high and low).
 _DEFAULT_VIDEO_LORAS = [{
     'id': 'nsfw-22-v008a', 'name': 'General NSFW v0.08a', 'scale': 1.0,
+    'trigger': 'nsfwsks', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2073605',
     'low': 'https://civitai.com/api/download/models/2083303'}]
 
@@ -33383,29 +33386,39 @@ def _video_loras():
     return loras if isinstance(loras, list) else list(_DEFAULT_VIDEO_LORAS)
 
 
+def _lora_view(loras, full):
+    # Links are never sent: a link can carry a download token.
+    keys = ('id', 'name', 'scale') + (('trigger', 'examples') if full else ())
+    return [{k: l.get(k, '') for k in keys} for l in loras]
+
+
 @app.route('/api/generate/loras', methods=['GET'])
 def api_generate_loras():
-    """The LoRAs a Wan 2.2 + LoRA clip can use. Links are left out: a link can
-    carry a download token."""
+    """The LoRAs a Wan 2.2 + LoRA clip can use; admins also get the trigger
+    words and example prompts, to edit them."""
     blocked = _require_active()
     if blocked:
         return blocked
-    return jsonify({'ok': True, 'loras': [
-        {'id': l['id'], 'name': l['name'], 'scale': l['scale']} for l in _video_loras()]})
+    full = bool((_current_user() or {}).get('is_admin'))
+    return jsonify({'ok': True, 'loras': _lora_view(_video_loras(), full)})
 
 
 @app.route('/api/admin/video-loras', methods=['POST'])
 def api_admin_video_loras():
-    """Add (name, high and/or low link, strength) or remove (`remove`: id)."""
+    """Add a LoRA, change one (`update`: id; a blank link keeps the old one),
+    or remove one (`remove`: id)."""
     blocked = _require_admin()
     if blocked:
         return blocked
     body = request.get_json(silent=True) or {}
     loras = [l for l in _video_loras() if l['id'] != str(body.get('remove') or '')]
     if not body.get('remove'):
-        name = str(body.get('name') or '').strip()[:80]
-        high = str(body.get('high') or '').strip()[:800]
-        low = str(body.get('low') or '').strip()[:800]
+        old = next((l for l in loras if l['id'] == str(body.get('update') or '')), None)
+        if body.get('update') and not old:
+            return jsonify({'ok': False, 'error': 'That LoRA is gone.'}), 404
+        name = str(body.get('name') or '').strip()[:80] or (old or {}).get('name', '')
+        high = str(body.get('high') or '').strip()[:800] or (old or {}).get('high', '')
+        low = str(body.get('low') or '').strip()[:800] or (old or {}).get('low', '')
         if not name or not (high or low):
             return jsonify({'ok': False, 'error': 'A name and at least one link are needed.'}), 400
         if any(u and not u.startswith('https://') for u in (high, low)):
@@ -33414,11 +33427,16 @@ def api_admin_video_loras():
             scale = max(0.0, min(2.0, float(body.get('scale', 1.0))))
         except (TypeError, ValueError):
             scale = 1.0
-        loras.append({'id': secrets.token_hex(6), 'name': name, 'high': high,
-                      'low': low, 'scale': scale})
+        entry = {'id': (old or {}).get('id') or secrets.token_hex(6), 'name': name,
+                 'high': high, 'low': low, 'scale': scale,
+                 'trigger': str(body.get('trigger') or '').strip()[:200],
+                 'examples': str(body.get('examples') or '').strip()[:3000]}
+        if old:
+            loras[loras.index(old)] = entry
+        else:
+            loras.append(entry)
     _set_setting('video_loras', json.dumps(loras))
-    return jsonify({'ok': True, 'loras': [
-        {'id': l['id'], 'name': l['name'], 'scale': l['scale']} for l in loras]})
+    return jsonify({'ok': True, 'loras': _lora_view(loras, True)})
 
 # Under kept/, outside the three-day staging sweep: an uploaded clip is listed
 # in the studio for reuse and goes only when its creator deletes it.
@@ -35756,7 +35774,7 @@ def api_generate_video_prompt():
         if body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
             written = imagegen.write_motion_prompt(
                 spec.get('prompt_extra') or spec.get('motion', ''), prompt,
-                spec.get('explicit'))
+                spec.get('explicit'), style=imagegen.lora_style(spec))
             if written:
                 logger.info('motion prompt written: %s', written)
                 prompt = written
@@ -36270,7 +36288,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 if spec.get('model') in imagegen.RUNPOD_MODELS and not spec.get('video_prompt'):
                     written = imagegen.write_motion_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), call.get('prompt', ''),
-                        spec.get('explicit'))
+                        spec.get('explicit'), style=imagegen.lora_style(spec))
                     if written:
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
@@ -36617,7 +36635,8 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
                                                              video=True)})
             template = ('Continue the motion seamlessly from the first frame. '
                         + imagegen.build_video_prompt(motion))
-            call['prompt'] = (imagegen.write_motion_prompt(motion, template, spec.get('explicit'))
+            call['prompt'] = (imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
+                                                           style=imagegen.lora_style(spec))
                               or template)
             logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
                         len(chain['plan']), call['prompt'])

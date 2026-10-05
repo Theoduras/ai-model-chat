@@ -2492,11 +2492,46 @@ def suggest_motions(description, explicit=False):
     return ideas
 
 
-def write_motion_prompt(idea, base='', explicit=False):
+def lora_style(spec):
+    """The trigger words and example prompts of the LoRAs a job runs with:
+    a LoRA follows prompts shaped like the ones it was trained on."""
+    loras = spec.get('loras') or []
+    triggers = [t.strip() for l in loras for t in (l.get('trigger') or '').split(',') if t.strip()]
+    examples = '\n\n'.join((l.get('examples') or '').strip() for l in loras
+                            if (l.get('examples') or '').strip())
+    return {'triggers': triggers, 'examples': examples[:3000]} if (triggers or examples) else None
+
+
+def _styled_prompt(idea, base, explicit, style):
+    examples = style.get('examples') or ''
+    triggers = style.get('triggers') or []
+    text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
+        {'role': 'system', 'content':
+            'You write prompts for an image-to-video model running a LoRA that responds best to '
+            'prompts shaped like its training prompts. Match the structure and density of the '
+            'examples: a short quality opener, then the trigger word(s) '
+            + (', '.join(triggers) or '(none)') + ', then the requested action written out in '
+            'comma-separated detail: what she does and with which hand, the pace and how it '
+            'changes, her body movement, her expression and breathing. The clip animates a real '
+            'photo: keep it photorealistic, never a drawing, animation or anime. Do not copy '
+            'objects, creatures or effects that belong only to the examples. End with a short '
+            'clause: same woman, same face, hair, tattoos and piercings, camera fixed, same '
+            'background. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
+        {'role': 'user', 'content': (f'Examples:\n{examples}\n\n' if examples else '')
+            + f'Action: {idea.strip()}\n\nBase prompt, for the fixed details: {base} /no_think'},
+    ], max_tokens=600)
+    missing = [t for t in triggers if t.lower() not in text.lower()]
+    return (', '.join(missing) + ', ' + text) if text and missing else text
+
+
+def write_motion_prompt(idea, base='', explicit=False, style=None):
     """The clip's prompt with the chosen action written out: the template's
-    fixed clauses kept, its generic movement replaced by what she does."""
+    fixed clauses kept, its generic movement replaced by what she does. With
+    a LoRA's style, written the way that LoRA's prompts are written."""
     if not (idea or '').strip():
         return ''
+    if style:
+        return _styled_prompt(idea, base, explicit, style)
     return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
             'You rewrite prompts for an image-to-video model that animates an existing photo. '
