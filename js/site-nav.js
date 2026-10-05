@@ -116,7 +116,6 @@
   var ACCOUNT_IN = [
     { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
-    { href: '/docs', label: 'Docs', keep: true },
     { href: '/dashboard?view=personas', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
     { href: '/account', label: 'Account', icon: 'account', avatar: true },
