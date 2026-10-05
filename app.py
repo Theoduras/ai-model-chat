@@ -33573,7 +33573,12 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'anatomy-22-v2', 'name': 'Pussy and Anus v2', 'scale': 1.0,
     'trigger': 'vagina', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3034683',
-    'low': 'https://civitai.com/api/download/models/3034713'}]
+    'low': 'https://civitai.com/api/download/models/3034713'}, {
+    # Civitai model 1707303, v2.0 I2V-A14B full-body high and low.
+    'id': 'dildo-22-v2-fullbody', 'name': 'Solo Dildo v2 (full body)', 'scale': 1.0,
+    'trigger': 'piston_dildo_style', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/2405917',
+    'low': 'https://civitai.com/api/download/models/2405930'}]
 
 
 _LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
