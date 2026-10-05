@@ -29577,6 +29577,23 @@ def _th_rest(persona):
     return THR.Rest(session)
 
 
+def _th_jpeg(blob):
+    """A library photo as the JPEG the upload headers say it is, with its real
+    size: Threads processes what it is told it got, and a PNG labelled JPEG or
+    a 0x0 photo is answered with a bare 500. Unreadable bytes go up as they
+    are, so Threads is the one to say what is wrong with them."""
+    try:
+        import io
+        from PIL import Image
+        im = Image.open(io.BytesIO(blob))
+        width, height = im.size
+        out = io.BytesIO()
+        im.convert('RGB').save(out, 'JPEG', quality=90)
+        return out.getvalue(), width, height
+    except Exception:
+        return blob, 0, 0
+
+
 def _th_post_rows(persona, text, rows, reply_control='everyone'):
     """Publish through the cookie session. `rows` are library rows, the same
     ones _growth_publish already resolved, so a scheduled post and a post-now
@@ -29597,7 +29614,8 @@ def _th_post_rows(persona, text, rows, reply_control='everyone'):
                 result = rest.post_video(blob, text, width, height, duration_ms,
                                          reply_control)
             else:
-                result = rest.post_image(blob, text, reply_control=reply_control)
+                jpeg, width, height = _th_jpeg(blob)
+                result = rest.post_image(jpeg, text, width, height, reply_control)
         else:
             items = []
             for row in rows:
@@ -29606,10 +29624,16 @@ def _th_post_rows(persona, text, rows, reply_control='everyone'):
                     width, height, duration_ms = _mp4_probe(blob)
                     items.append((blob, 'video', width, height, duration_ms))
                 else:
-                    items.append((blob, 'photo', 0, 0, 0))
+                    jpeg, width, height = _th_jpeg(blob)
+                    items.append((jpeg, 'photo', width, height, 0))
             result = rest.post_carousel(items, text, reply_control)
     except THR.ThreadsApiError as e:
+        if e.code in (401, 403):
+            raise ValueError('Threads refused the Instagram session '
+                             f'(HTTP {e.code}). Reconnect Instagram and try again.')
+        where = ', '.join(x for x in (e.step, f'HTTP {e.code}' if e.code else '') if x)
         raise ValueError('Threads would not accept that post'
+                         + (f' ({where})' if where else '')
                          + (f': {e.detail[:160]}' if e.detail else '.'))
     return result
 

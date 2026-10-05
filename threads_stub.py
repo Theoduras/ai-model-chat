@@ -38,7 +38,7 @@ class FakeRest:
 
     def post_image(self, media_bytes, caption='', width=0, height=0,
                    reply_control='everyone'):
-        return self._record('image', caption)
+        return self._record('image', caption, media=media_bytes, width=width, height=height)
 
     def post_video(self, media_bytes, caption='', width=0, height=0,
                    duration_ms=0, reply_control='everyone'):

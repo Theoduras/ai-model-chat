@@ -41,6 +41,8 @@ THREADS_UPLOAD_TIMEOUT = int(os.getenv('THREADS_UPLOAD_TIMEOUT', '120'))
 # and swapping it for Instagram's is the one header that turns an Instagram
 # session into a Threads session.
 DEFAULT_APP_ID = os.getenv('THREADS_APP_ID', '238260118697367')
+# Threads' web client sends this on every call; Instagram's web client does too.
+ASBD_ID = os.getenv('THREADS_ASBD_ID', '129477')
 DEFAULT_UA = ('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 '
               '(KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36')
 
@@ -103,6 +105,26 @@ def _opener(proxy):
         urllib.request.ProxyHandler({'http': proxy, 'https': proxy}))
 
 
+_last_upload_id = [0]
+_upload_id_lock = threading.Lock()
+
+
+def _new_upload_id():
+    """Millisecond clock, but never the same value twice: a carousel uploads
+    its children back to back, and two in one millisecond would collide."""
+    with _upload_id_lock:
+        _last_upload_id[0] = max(int(time.time() * 1000), _last_upload_id[0] + 1)
+        return str(_last_upload_id[0])
+
+
+def _cookie_value(cookie, name):
+    for part in (cookie or '').split(';'):
+        key, _, value = part.strip().partition('=')
+        if key == name:
+            return value
+    return ''
+
+
 def _encode_form(body):
     parts = {}
     for k, v in body.items():
@@ -117,11 +139,14 @@ def _encode_form(body):
 
 class ThreadsApiError(RuntimeError):
     """`code` is the HTTP status and `detail` what Threads said, so a caller can
-    tell a dead session (401/403) from a rejected post (400)."""
+    tell a dead session (401/403) from a rejected post (400). `step` names the
+    call that failed — an upload and the configure after it fail with the same
+    body, and only the step says which one Threads refused."""
 
-    def __init__(self, code, detail=''):
+    def __init__(self, code, detail='', step=''):
         self.code = code
         self.detail = detail
+        self.step = step
         super().__init__(f'Threads API {code}: {detail}'.strip())
 
 
@@ -134,6 +159,8 @@ class Rest:
         self.csrftoken = session.get('csrftoken') or ''
         self.user_agent = session.get('user_agent') or DEFAULT_UA
         self.proxy = session.get('proxy') or ''
+        self.user_id = (_cookie_value(self.cookie, 'ds_user_id')
+                        or str(session.get('user_id') or ''))
         # Deliberately not session['app_id']: that one is Instagram's, and the
         # same call with it answers for Instagram instead of Threads.
         self.app_id = DEFAULT_APP_ID
@@ -153,6 +180,7 @@ class Rest:
             'Cookie': self.cookie,
             'X-CSRFToken': self.csrftoken,
             'X-IG-App-ID': self.app_id,
+            'X-ASBD-ID': ASBD_ID,
             'User-Agent': self.user_agent,
             'X-Requested-With': 'XMLHttpRequest',
             'X-Instagram-AJAX': '1',
@@ -171,12 +199,12 @@ class Rest:
                     return
             time.sleep(min(left, 5.0))
 
-    def call(self, method, url, body=None, headers=None, raw=False, retries=1):
+    def call(self, method, url, body=None, headers=None, raw=False, retries=1, step=''):
         """One request. Form-urlencoded unless `raw`, which sends file bytes and
         signs its own content headers — the same split instagram_rest.call makes,
         because it is the same web stack answering."""
         if not self.configured():
-            raise ThreadsApiError(0, 'No Instagram session for this persona')
+            raise ThreadsApiError(0, 'No Instagram session for this persona', step)
         self._wait()
         data = body if raw else (_encode_form(body) if body is not None else None)
         req = urllib.request.Request(url, data=data, method=method.upper())
@@ -205,11 +233,11 @@ class Rest:
                 with self._lock:
                     self._until = time.time() + after
                 self._wait()
-                return self.call(method, url, body, headers, raw, retries - 1)
+                return self.call(method, url, body, headers, raw, retries - 1, step)
             logger.warning('threads %s %s -> %s: %s', method, url, e.code, detail[:300])
-            raise ThreadsApiError(e.code, detail)
+            raise ThreadsApiError(e.code, detail, step)
         except urllib.error.URLError as e:
-            raise ThreadsApiError(0, str(getattr(e, 'reason', e))[:200])
+            raise ThreadsApiError(0, str(getattr(e, 'reason', e))[:200], step)
 
     # ── The calls the poster actually makes ──────────────────────────────────
 
@@ -230,6 +258,17 @@ class Rest:
     def _info(self, reply_control='everyone'):
         return {'reply_control': REPLY_CONTROL.get(reply_control, 0)}
 
+    def _configure(self, caption, reply_control, **fields):
+        """The fields every Threads client sends on a configure call, whatever
+        the post holds. Leaving them out is answered with a bare 500."""
+        body = {'caption': caption or '', 'source_type': '4',
+                'timezone_offset': '0', 'audience': 'default',
+                'text_post_app_info': self._info(reply_control)}
+        if self.user_id:
+            body['_uid'] = self.user_id
+        body.update(fields)
+        return body
+
     def _upload(self, media_bytes, kind, width=0, height=0, duration_ms=0):
         """Hand over the bytes, get back an upload_id to configure into a post.
 
@@ -237,7 +276,7 @@ class Rest:
         shared, and only the configure call afterwards decides which app the
         post lands in.
         """
-        upload_id = str(int(time.time() * 1000))
+        upload_id = _new_upload_id()
         is_video = kind == 'video'
         name = f'{upload_id}_0_{"video" if is_video else "photo"}'
         path = PATH_UPLOAD_VIDEO if is_video else PATH_UPLOAD_PHOTO
@@ -255,39 +294,39 @@ class Rest:
             'Content-Type': 'application/octet-stream',
             'X-Instagram-Rupload-Params': json.dumps(params),
         }
-        self.call('POST', url, body=media_bytes, headers=headers, raw=True)
+        self.call('POST', url, body=media_bytes, headers=headers, raw=True,
+                  step='upload video' if is_video else 'upload photo')
         return upload_id
 
     def post_text(self, caption, reply_control='everyone', reply_to_id=''):
         """A text-only Thread. No upload at all — the upload_id is just the
         client-minted post id Threads keys the write on."""
-        body = {'upload_id': str(int(time.time() * 1000)),
-                'caption': caption or '',
-                'text_post_app_info': self._info(reply_control),
-                'publish_mode': 'text_post'}
+        body = self._configure(caption, reply_control, upload_id=_new_upload_id(),
+                               publish_mode='text_post')
         if reply_to_id:
             body['text_post_app_info'] = dict(body['text_post_app_info'],
                                               reply_id=str(reply_to_id))
-        return self.call('POST', f'{self.base}{PATH_CONFIGURE_TEXT}', body=body)
+        return self.call('POST', f'{self.base}{PATH_CONFIGURE_TEXT}', body=body,
+                         step='post text')
 
     def post_image(self, media_bytes, caption='', width=0, height=0,
                    reply_control='everyone'):
         upload_id = self._upload(media_bytes, 'photo', width, height)
-        body = {'upload_id': upload_id, 'caption': caption or '',
-                'source_type': '4',
-                'text_post_app_info': self._info(reply_control)}
-        return self.call('POST', f'{self.base}{PATH_CONFIGURE_IMAGE}', body=body)
+        body = self._configure(caption, reply_control, upload_id=upload_id,
+                               scene_capture_type='')
+        return self.call('POST', f'{self.base}{PATH_CONFIGURE_IMAGE}', body=body,
+                         step='post image')
 
     def post_video(self, media_bytes, caption='', width=0, height=0,
                    duration_ms=0, reply_control='everyone'):
         upload_id = self._upload(media_bytes, 'video', width, height, duration_ms)
-        body = {'upload_id': upload_id, 'caption': caption or '',
-                'source_type': '4', 'length': round((duration_ms or 0) / 1000, 3),
-                'text_post_app_info': self._info(reply_control)}
+        body = self._configure(caption, reply_control, upload_id=upload_id,
+                               length=round((duration_ms or 0) / 1000, 3))
         if width and height:
             body['width'] = int(width)
             body['height'] = int(height)
-        return self.call('POST', f'{self.base}{PATH_CONFIGURE_VIDEO}', body=body)
+        return self.call('POST', f'{self.base}{PATH_CONFIGURE_VIDEO}', body=body,
+                         step='post video')
 
     def post_carousel(self, items, caption='', reply_control='everyone'):
         """`items` are (media_bytes, kind, width, height, duration_ms) tuples.
@@ -299,10 +338,10 @@ class Rest:
             if kind == 'video':
                 child['length'] = round((duration_ms or 0) / 1000, 3)
             children.append(child)
-        body = {'caption': caption or '', 'client_sidecar_id': str(int(time.time() * 1000)),
-                'source_type': '4', 'children_metadata': children,
-                'text_post_app_info': self._info(reply_control)}
-        return self.call('POST', f'{self.base}{PATH_CONFIGURE_SIDECAR}', body=body)
+        body = self._configure(caption, reply_control, client_sidecar_id=_new_upload_id(),
+                               children_metadata=children)
+        return self.call('POST', f'{self.base}{PATH_CONFIGURE_SIDECAR}', body=body,
+                         step='post carousel')
 
     # ── Direct messages ──────────────────────────────────────────────────
 

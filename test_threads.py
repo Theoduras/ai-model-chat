@@ -270,6 +270,54 @@ check('text is trimmed to the threads cap',
 check('nothing at all is refused',
       'text, media' in fails(lambda: app._th_post_rows('lilith', '', [])))
 
+import io
+from PIL import Image
+_png = io.BytesIO()
+Image.new('RGBA', (640, 800)).save(_png, 'PNG')
+_media_bytes = app._media_bytes
+app._media_bytes = lambda row: (_png.getvalue(), 'image/png')
+app._th_post_rows('lilith', 'hi', [ROW_IMG])
+check('a png photo goes up as a jpeg',
+      FAKE.posted[-1]['media'][:3] == b'\xff\xd8\xff')
+check('with its real size', (FAKE.posted[-1]['width'], FAKE.posted[-1]['height']) == (640, 800))
+app._media_bytes = _media_bytes
+
+import threads_rest
+
+
+class Refusing(threads_stub.FakeRest):
+    def __init__(self, code):
+        super().__init__()
+        self.code = code
+
+    def post_image(self, *a, **kw):
+        raise threads_rest.ThreadsApiError(
+            self.code, '{"message":"Unknown Server Error.","status":"fail"}', 'post image')
+
+
+app._th_rest = lambda persona: Refusing(500)
+why = fails(lambda: app._th_post_rows('lilith', 'hi', [ROW_IMG]))
+check('a refusal names the step and the status',
+      'post image' in why and 'HTTP 500' in why and 'Unknown Server Error' in why, why)
+app._th_rest = lambda persona: Refusing(401)
+check('a dead session says to reconnect',
+      'Reconnect Instagram' in fails(lambda: app._th_post_rows('lilith', 'hi', [ROW_IMG])))
+app._th_rest = lambda persona: FAKE
+
+BODIES = []
+rest = threads_rest.Rest({'cookie': 'csrftoken=c; ds_user_id=777; sessionid=s',
+                          'csrftoken': 'c'})
+rest.call = lambda method, url, body=None, **kw: BODIES.append((url, body, kw)) or {}
+rest.post_text('hi')
+check('a configure call carries the account id off the cookie',
+      BODIES[-1][1].get('_uid') == '777')
+check('and the fields every client sends',
+      all(k in BODIES[-1][1] for k in ('source_type', 'timezone_offset', 'audience')))
+check('and says which step it is', BODIES[-1][2].get('step') == 'post text')
+rest.post_carousel([(b'a', 'photo', 1, 1, 0), (b'b', 'photo', 1, 1, 0)])
+ids = [c['upload_id'] for c in BODIES[-1][1]['children_metadata']]
+check('carousel children never share an upload id', len(set(ids)) == 2, ids)
+
 app._media_row = lambda persona, mid: {'id': mid, 'kind': 'image'}
 check('a url cannot ride the cookie session',
       'library' in fails(lambda: app._th_post_now('lilith', 'hi', [],
