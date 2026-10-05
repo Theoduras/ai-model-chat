@@ -7721,7 +7721,7 @@ video.res{max-height:360px;max-width:100%;border-radius:6px}
 {% else %}none{% endfor %}</pre>
 {% if p.prompt_extra or p.motion %}<div class="m">Creator wrote:</div><pre>{{ p.prompt_extra or p.motion }}</pre>{% endif %}
 <div class="m">Prompt sent:</div><pre>{{ p.prompt }}</pre>
-<div class="m">Negative:</div><pre>{{ p.negative }}</pre>
+{% if p.model == 'h3-gv' %}<div class="m">Negative: none — H3 has no negative input; the Avoid sentence above carries it.</div>{% else %}<div class="m">Negative:</div><pre>{{ p.negative }}</pre>{% endif %}
 </div>{% else %}<div class="m">Not logged (submitted before the video log, or failed before submit).
 Creator wrote: {{ j.spec.get('prompt_extra') or j.spec.get('motion') or '-' }} · model {{ j.spec.get('model', '') }}
 · LoRAs {{ (j.spec.get('loras') or [])|map(attribute='name')|join(', ') or 'none' }}</div>{% endfor %}

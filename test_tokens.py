@@ -663,19 +663,19 @@ def test_wan22_on_runpod():
               and IG2.lora_url('https://h/a') == 'https://h/a')
         one, two = IG2.h3_prompt('she rubs', True), IG2.h3_prompt('she rubs', True, chained=True)
         check('an H3 prompt is fixed locks around the action, naming frame0 only when chained',
-              'exact tattoos' in one and 'she rubs' in one and one.endswith('Camera stays fixed.')
+              'exact tattoos' in one and 'she rubs' in one and 'Camera stays fixed.' in one
               and '<Picture 2> (frame0)' not in one and '<Picture 2> (frame0)' in two
               and '<Picture 1> (ref)' in two)
-        cfg = IG2.h3_payload({'aspect': '9:16', 'seconds': 5, 'prompt': 'p', 'negative': 'blurry'}, 'A', 'B')['input']['workflow']
-        check('an H3 clip runs its negative through CFG, conditioned like the positive',
-              cfg['guider']['class_type'] == 'CFGGuider' and cfg['guider']['inputs']['negative'] == ['nguide', 0]
-              and cfg['ncond']['inputs']['prompt'] == 'blurry'
-              and cfg['ncond']['inputs']['ref_images.ref_image_0'] == ['ref', 0])
+        avoid = IG2.h3_prompt('a', True)
+        check('an H3 prompt carries the negatives as an Avoid sentence, never the age words',
+              'Avoid: ' in avoid and 'different person' in avoid and 'teen' not in avoid
+              and IG2.h3_payload({'seconds': 5, 'prompt': 'p'}, 'A')['input']['workflow']
+              ['guider']['class_type'] == 'BasicGuider')
         h3 = IG2.h3_payload({'aspect': '9:16', 'seconds': 15}, 'A', 'B')['input']
         check('a later H3 part starts on the last frame and holds her photo as <Picture 1>',
               [i['name'] for i in h3['images']] == ['still.png', 'ref.png']
               and h3['workflow']['guide']['inputs']['frame_idx'] == 0
-              and h3['workflow']['guider']['inputs']['positive'] == ['guide', 0])
+              and h3['workflow']['guider']['inputs']['conditioning'] == ['guide', 0])
         if IG2.HAS_FFMPEG:
             check('a long clip splits into whole parts the model serves',
                   IG2.chain_plan('wan-2-2', 30) == [15, 15]

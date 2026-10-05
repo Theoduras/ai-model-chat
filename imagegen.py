@@ -2511,12 +2511,6 @@ class RunPodProvider(Provider):
 
 # H3 at 24 fps wants 17n+5 frames; turbo LoRA at 8 steps, as Comfy's template.
 H3_STEPS = 8
-# Above 1 the negative prompt counts, at the price of a second model pass per
-# step (about twice the GPU time). 1 is Comfy's turbo template: no negative.
-try:
-    H3_CFG = float(os.getenv('H3_CFG') or 2.0)
-except ValueError:
-    H3_CFG = 2.0
 
 
 # H3 prompts are fixed locks around one written action, so nothing but the
@@ -2531,7 +2525,19 @@ H3_CLOSE = ('Identity never changes. No new tattoos. No missing tattoos. No extr
             'No missing piercings. Camera stays fixed.')
 
 
-def h3_prompt(action, explicit=False, chained=False, triggers=()):
+# Age words never go into the positive: naming them there invites them.
+_H3_NO_AVOID = {'child', 'teen', 'underage'}
+
+
+def h3_avoid(negative=None):
+    """The negative prompt as a sentence: H3 has no negative input, so what
+    it must not do is said in the prompt itself."""
+    terms = [t.strip() for t in (negative or merge_negative('', video=True)).split(',')]
+    terms = [t for t in terms if t and t.lower() not in _H3_NO_AVOID]
+    return ('Avoid: ' + ', '.join(terms) + '.') if terms else ''
+
+
+def h3_prompt(action, explicit=False, chained=False, triggers=(), negative=None):
     who = 'The woman in <Picture 1> (ref)' if chained else 'The woman in the reference image'
     head = 'Photorealistic, explicit' if explicit else 'Photorealistic'
     parts = [f'{head}. {who} keeps {H3_LOCKS} for the entire clip.']
@@ -2540,7 +2546,7 @@ def h3_prompt(action, explicit=False, chained=False, triggers=()):
     parts.append(H3_CAMERA)
     if triggers:
         parts.append(', '.join(triggers) + '.')
-    parts += [(action or '').strip(), H3_CLOSE]
+    parts += [(action or '').strip(), H3_CLOSE, h3_avoid(negative)]
     return ' '.join(p for p in parts if p)
 
 
@@ -2618,20 +2624,6 @@ def h3_payload(spec, image, ref=None):
             'image': ['fit', 0], 'frame_idx': 0}}
         wf['guider']['inputs']['conditioning'] = ['guide', 0]
         images.append({'name': 'ref.png', 'image': ref})
-    negative = negative_for(spec)
-    if H3_CFG > 1 and negative:
-        # The negative is conditioned exactly like the positive -- same frame,
-        # same references -- so the two passes differ only in the words.
-        wf['ncond'] = {'class_type': wf['cond']['class_type'],
-                       'inputs': dict(wf['cond']['inputs'], prompt=negative)}
-        neg = ['ncond', 0]
-        if 'guide' in wf:
-            wf['nguide'] = {'class_type': 'MiniMaxH3AddGuide',
-                            'inputs': dict(wf['guide']['inputs'], positive=['ncond', 0])}
-            neg = ['nguide', 0]
-        wf['guider'] = {'class_type': 'CFGGuider', 'inputs': {
-            'model': model, 'positive': wf['guider']['inputs']['conditioning'],
-            'negative': neg, 'cfg': H3_CFG}}
     return {'input': {'workflow': wf, 'images': images}}
 
 
@@ -2843,7 +2835,8 @@ def write_h3_action(idea, explicit=False, why=None):
 def write_h3_prompt(idea, spec, chained=False, why=None):
     style = lora_style(spec) or {}
     return h3_prompt(write_h3_action(idea, spec.get('explicit'), why), spec.get('explicit'),
-                     chained, style.get('triggers') or ())
+                     chained, style.get('triggers') or (),
+                     merge_negative(spec.get('negative_extra'), video=True))
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
