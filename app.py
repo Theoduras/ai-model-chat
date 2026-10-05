@@ -33643,6 +33643,9 @@ def _gen_spec(slug, body, user):
     spec.update({'resolution': resolution, 'seconds': seconds,
                  'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
                  'motion': (body.get('motion') or '')[:300]})
+    if (level == 'sfw' and job not in CR.SFW_ANY_MODEL_JOBS
+            and model not in CR.SFW_VIDEO_MODELS):
+        raise imagegen.GenerationError('That model is not offered for safe-for-work video.')
     plan = imagegen.chain_plan(model, seconds) if job == 'animate' else None
     if plan:
         # Parts after the first carry on from the last frame of the one before,

@@ -333,6 +333,13 @@ VIDEO_MODEL_RATINGS = {
 }
 
 
+# Safe-work video offers only these; Extend and Multi-reference run on Wan 2.7
+# alone, so they keep their own list.
+SFW_VIDEO_MODELS = ('seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5',
+                    'kling-3-0-omni', 'kling-3-0-mc')
+SFW_ANY_MODEL_JOBS = ('extend', 'multiref')
+
+
 def image_resolutions_for(model):
     """The rungs a still model is priced at, which are the rungs it serves."""
     return [r for r in RESOLUTIONS if r in PROVIDER_COST_USD.get(model, {})]
@@ -689,6 +696,8 @@ def price_table():
         # gains a model or a mode gains it in one place.
         'jobs': list(JOB_MODELS),
         'job_models': {j: list(m) for j, m in JOB_MODELS.items()},
+        'sfw_video_models': list(SFW_VIDEO_MODELS),
+        'sfw_any_model_jobs': list(SFW_ANY_MODEL_JOBS),
         'job_kinds': dict(JOB_KINDS),
         'job_ratings': {j: list(r) for j, r in JOB_RATINGS.items()},
         'job_labels': dict(JOB_LABELS),

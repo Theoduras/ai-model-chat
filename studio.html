@@ -1403,7 +1403,11 @@ function videoModels() {
   }
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const rt = (genPrices && genPrices.video_ratings) || {};
-  const serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
+  let serves = list.filter(m => (rt[m] || ['sfw']).includes(want));
+  const sfwOnly = genPrices.sfw_video_models;
+  if (want === 'sfw' && sfwOnly && !(genPrices.sfw_any_model_jobs || []).includes(genJob)) {
+    serves = serves.filter(m => sfwOnly.includes(m));
+  }
   return serves.length ? serves : list;
 }
 
