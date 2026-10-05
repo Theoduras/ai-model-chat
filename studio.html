@@ -2923,7 +2923,7 @@ function genQuote() {
     btn.textContent = (blocked || total === undefined)
       ? (blocked || 'Upload a clip first')
       : `Swap her in · ${total} token${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
-    
+    noteShort(total);
     showEngines();
     return total;
   }
@@ -2949,7 +2949,7 @@ function genQuote() {
     btn.textContent = blocked ||
       `${JOB_VERBS[genJob] || 'Generate'} · ${per} token${per === 1 ? '' : 's'}` +
       (cash ? ` · ${cash}` : '');
-    
+    noteShort(per);
     el('gen-video-note').textContent = genDrive
       ? `Her photo will perform that clip's motion, for its whole ${genDrive.seconds}s.`
       : 'An animate always starts from a photo that is already kept, so its '
@@ -2982,14 +2982,24 @@ function genQuote() {
     (cash ? ` · ${cash}` : '');
   renderModelChips();
   showEngines();
-  const short = genTokens !== null && genTokens < total;
-  
-  if (short) setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left \u2014 top up from the tokens button at the top.`, false);
+  // A video tab's blocker must not outlive the quote.
+  el('gen-run-btn').disabled = false;
+  noteShort(total);
   return total;
 }
 
+// The low-balance note follows the current quote, so an earlier, pricier pick
+// never leaves it behind.
+function noteShort(total) {
+  if (genTokens !== null && total !== undefined && genTokens < total) {
+    setGenStatus(`Only ${genTokens} token${genTokens === 1 ? '' : 's'} left \u2014 top up from the tokens button at the top.`, false);
+  } else if (/top up from the tokens/.test((el('gen-status') || {}).textContent || '')) {
+    setGenStatus('');
+  }
+}
+
 function cashFor(tokens) {
-  if (!genRate || !genRate.amount || !tokens) return '';
+  if (!genVideoOpen || !genRate || !genRate.amount || !tokens) return '';
   const n = tokens * genRate.amount;
   return (genRate.symbol || '\u20ac') +
     (n < 100 ? n.toFixed(2) : Math.round(n).toLocaleString());
