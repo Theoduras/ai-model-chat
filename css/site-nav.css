@@ -146,3 +146,12 @@
 .sn-avatar:hover{border-color:var(--accent,#ff5c38)}
 .sn-avatar img{width:100%;height:100%;object-fit:cover}
 .sn-avatar .sn-ico{width:17px;height:17px;flex-basis:17px}
+
+/* The Generation Studio button, first in every marketing menu. */
+.site-nav .sn-links a.studio-cta{display:inline-flex;flex:none;white-space:nowrap;align-items:center;gap:8px;padding:9px 16px;border-radius:999px;color:#fff;
+  font-weight:700;font-size:.9rem;text-decoration:none;background:var(--grad,linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38));background-size:300% 100%;
+  animation:studio-cta-shift 6s linear infinite;box-shadow:0 0 0 2px rgba(255,92,56,.35),0 8px 28px rgba(255,45,120,.45)}
+.site-nav .sn-links a.studio-cta small{font-weight:600;font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.28)}
+.site-nav .sn-links a.studio-cta:hover{transform:translateY(-2px);box-shadow:0 0 0 3px rgba(255,92,56,.5),0 12px 34px rgba(255,45,120,.6)}
+@keyframes studio-cta-shift{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.site-nav .sn-links a.studio-cta{animation:none}}

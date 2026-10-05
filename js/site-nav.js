@@ -104,6 +104,7 @@
   ];
 
   var PAGE_LINKS = [
+    { href: '/signup-studio-home', studio: true },
     { menu: 'Features', groups: FEATURES },
     { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
@@ -189,10 +190,14 @@
       }).join('') + '</div></div>';
   }
 
-  var avatarUrl = '';
+  var avatarUrl = '', signedIn = false;
   function linksHtml(items) {
     return items.map(function (i) {
       if (i.menu) return menuHtml(i);
+      // Not on the studio itself, where it would only link back to the page.
+      if (i.studio) return /^\/studio/.test(location.pathname) ? '' :
+        '<a data-sn data-keep href="' + i.href + '" class="studio-cta">&#10022; Generation Studio' +
+        (signedIn ? '' : ' <small>15 free tokens</small>') + '</a>';
       if (i.avatar) return '<a data-sn href="' + i.href + '" class="sn-avatar" title="Account" aria-label="Account">' +
         (avatarUrl ? '<img src="' + avatarUrl + '" alt="">' : ICONS.account) + '</a>';
       return '<a data-sn href="' + i.href + '"' +
@@ -366,6 +371,7 @@
       .then(function (me) {
         if (!me || !me.signed_in) return;
         avatarUrl = me.avatar || '';
+        signedIn = true;
         paint(me.guest ? ACCOUNT_GUEST : ACCOUNT_IN);
         var t = me.usage && me.usage.tokens;
         paintTokens(t && 'balance' in t ? t.balance : 0);

@@ -2908,6 +2908,14 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .site-nav .nav-ghost:hover{color:var(--text);background:var(--surface)}
 .site-nav .nav-btn{color:#fff;background:var(--accent);border:1px solid var(--accent)}
 .site-nav .nav-btn:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.site-nav .nav-left{display:flex;align-items:center;gap:16px;min-width:0}
+.site-nav .nav-studio{display:inline-flex;align-items:center;gap:8px;color:#fff;font-weight:700;
+  background:linear-gradient(120deg,#ff5c38,#ff2d78 30%,#7c3aed 60%,#ff2d78 80%,#ff5c38);background-size:300% 100%;
+  animation:nav-studio-shift 6s linear infinite;box-shadow:0 0 0 2px rgba(255,92,56,.3),0 6px 20px rgba(255,45,120,.35)}
+.site-nav .nav-studio small{font-weight:600;font-size:.7rem;padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.28)}
+.site-nav .nav-studio:hover{box-shadow:0 0 0 3px rgba(255,92,56,.45),0 10px 26px rgba(255,45,120,.5)}
+@keyframes nav-studio-shift{to{background-position:300% 0}}
+@media(prefers-reduced-motion:reduce){.site-nav .nav-studio{animation:none}}
 .theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;padding:0;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-2);cursor:pointer}
 .theme-toggle:hover{color:var(--accent);background:var(--surface);transform:none;box-shadow:none;animation:none}
 .theme-toggle svg{width:17px;height:17px}
@@ -2917,6 +2925,7 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 body[data-page="pricing"]{display:block;padding:92px 16px 48px}
 body[data-page="pricing"] .wrap{margin:0 auto}
 @media(max-width:700px){.site-nav{padding:10px 14px;gap:8px}
+.site-nav .nav-left{gap:8px}.site-nav .nav-studio small{display:none}
 .site-nav .brand{font-size:.95rem}
 .site-nav .links{gap:6px}
 .site-nav a{padding:7px 11px;font-size:.75rem}
@@ -2957,7 +2966,8 @@ WORKSPACE_JS = """<script>
 
 # The signed-out header from the pricing page, for the sign-in pages.
 AUTH_NAV_HTML = """<header class="site-nav">
-<a class="brand" href="/">Velvetfunneler<i>.com</i></a>
+<div class="nav-left"><a class="brand" href="/">Velvetfunneler<i>.com</i></a>
+<a class="nav-studio" href="/signup-studio-home">&#10022; Generation Studio <small>15 free tokens</small></a></div>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
@@ -3058,7 +3068,8 @@ BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <style>""" + ACCOUNT_CSS + """
 </style><script src="/js/analytics.js" defer></script></head><body data-page="pricing">
 <header class="site-nav">
-<a class="brand" href="/">Velvetfunneler<i>.com</i></a>
+<div class="nav-left"><a class="brand" href="/">Velvetfunneler<i>.com</i></a>
+<a class="nav-studio" href="/signup-studio-home">&#10022; Generation Studio{% if not user.email %} <small>15 free tokens</small>{% endif %}</a></div>
 <div class="links">
 <button type="button" class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
 <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
