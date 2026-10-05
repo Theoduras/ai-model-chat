@@ -34228,7 +34228,7 @@ def api_persona_video_source(slug):
     The bytes go under kept/ and stay until deleted (see the list route), so a
     clip can be reused. It is working material, not vault media.
     """
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     if not re.match(r'^[a-z0-9_-]+$', slug or ''):
@@ -34341,7 +34341,7 @@ def api_persona_video_source(slug):
 @app.route('/api/personas/<slug>/video-sources', methods=['GET'])
 def api_persona_video_sources(slug):
     """The clips this persona has uploaded, newest first, for reuse."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     mine = owned_slugs()
@@ -34368,7 +34368,7 @@ def api_persona_video_sources(slug):
 
 @app.route('/api/personas/<slug>/video-sources/<source_id>', methods=['DELETE'])
 def api_persona_video_source_delete(slug, source_id):
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return blocked
     mine = owned_slugs()
@@ -34403,7 +34403,7 @@ def _video_source_urls(slug, source_id, poster_path):
 
 def _owned_video_source(slug, source_id):
     """The row, or a Flask reply refusing the request."""
-    blocked = _require_admin()
+    blocked = _require_active()
     if blocked:
         return None, blocked
     mine = owned_slugs()

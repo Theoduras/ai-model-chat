@@ -245,9 +245,12 @@ Stay completely in character. Never mention being an AI.
 - **Generation and characters are open to every active plan; video is not.**
   `/studio`, `/characters` and the `/api/generate/*` and `/api/characters*`
   routes go through `_require_active` (404 for an inactive account). A
-  non-admin runs image jobs and explicit **Photo to Video** (the `animate` job,
-  `open` in `imagegen.VIDEO_JOBS`); `/api/generate/job` refuses any other video
-  job, and the studio shows those tiles grayed out as Coming soon. Every plan
+  non-admin runs image jobs, **Photo to Video** (safe and explicit), and safe-work
+  **Reel** and **Swap** (`open` in `imagegen.VIDEO_JOBS`); `/api/generate/job`
+  refuses any other video job, and the studio shows those tiles grayed out as
+  Coming soon. Signed-out visitors get the studio as a hidden guest account
+  (`/api/guest/start`, `_guest_guard`): 15 tokens once per device, safe-work only,
+  no downloads; registering claims that same account. Every plan
   spends from the ledger — Demo 25, Starter 150, Pro 800, Agency 2500 tokens a
   month (`credits.MONTHLY_TOKENS`), grandfathered accounts included; only an
   admin (`UNLIMITED_CAPS`) generates without being charged. The allowance is

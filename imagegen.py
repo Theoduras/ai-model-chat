@@ -206,14 +206,14 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 VIDEO_JOBS = {
     'reel': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0',
                         'kling-3-0-mc', 'kling-3-0-omni'), 'needs': (),
-             'kind': 'video', 'ratings': ('sfw',),
+             'kind': 'video', 'ratings': ('sfw',), 'open': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
     # Swap, Extend and Multi-reference are hidden from explicit work, not
     # removed: explicit video is Photo to Video alone for now.
     'swap': {'models': ('kling-3-0-mc', 'ml-face-swap', 'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw',),
-             'clause': 'preserve',
+             'open': ('sfw',), 'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
@@ -222,9 +222,9 @@ VIDEO_JOBS = {
                           + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
-                # Every plan may run it at these ratings; other video stays
-                # admin-only while it is in testing.
-                'open': ('nsfw',),
+                # Every plan may run it at these ratings; Extend and
+                # Multi-reference stay admin-only while they are in testing.
+                'open': ('sfw', 'nsfw'),
                 'label': 'Photo to Video',
                 'note': 'One of her approved photos, brought to life as a clip.'},
     'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
