@@ -2513,8 +2513,8 @@ H3_STEPS = 8
 
 
 # Names her photo in the prompt; H3 only uses a reference the prompt names.
-H3_IDENTITY_LEAD = ('The woman in <Picture 1>, with exactly her face, hair, body, '
-                    'tattoos and piercings. The video starts exactly on <Picture 2>: '
+H3_IDENTITY_LEAD = ('The woman in <Picture 1> (ref), with exactly her face, hair, body, '
+                    'tattoos and piercings. The video starts exactly on <Picture 2> (frame0): '
                     'the same position, pose, framing, camera angle and background, '
                     'and continues from there. ')
 

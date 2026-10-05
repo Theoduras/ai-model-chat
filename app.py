@@ -7716,7 +7716,7 @@ video.res{max-height:360px;max-width:100%;border-radius:6px}
 · {{ p.references }} refs{% if p.source_clip %} · source clip{% endif %}</div>
 {% if p.start or p.identity %}<div class="imgs">{% if p.start %}<figure><a href="/admin/videos/{{ j.id }}/img/{{ p.start }}" target="_blank"><img src="/admin/videos/{{ j.id }}/img/{{ p.start }}" loading="lazy"></a><figcaption>{{ 'ref · start photo' if p.start == 'ref' else p.start ~ ' · <Picture 2> · start frame (end of part ' ~ (loop.index - 1) ~ ')' }}</figcaption></figure>{% endif %}
 {% if p.identity %}<figure><a href="/admin/videos/{{ j.id }}/img/ref" target="_blank"><img src="/admin/videos/{{ j.id }}/img/ref" loading="lazy"></a><figcaption>ref · &lt;Picture 1&gt; · identity image</figcaption></figure>{% endif %}</div>{% endif %}
-<div class="m">LoRAs:</div><pre>{% for l in p.loras %}{{ l.name }} @ {{ l.scale }} (high {{ l.high }}, low {{ l.low }}){% if l.trigger %} trigger: {{ l.trigger }}{% endif %}
+<div class="m">LoRAs:</div><pre>{% for l in p.loras %}{{ l.name }} @ {{ l.scale }} ({% if l.low %}high {{ l.high }}, low {{ l.low }}{% else %}file {{ l.high }}{% endif %}){% if l.trigger %} trigger: {{ l.trigger }}{% endif %}
 {% else %}none{% endfor %}</pre>
 {% if p.prompt_extra or p.motion %}<div class="m">Creator wrote:</div><pre>{{ p.prompt_extra or p.motion }}</pre>{% endif %}
 <div class="m">Prompt sent:</div><pre>{{ p.prompt }}</pre>
