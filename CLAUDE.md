@@ -460,9 +460,10 @@ live on the Cloud Run service, not in this repository; change them with
 
 - Vercel and Railway are on hold. Never run the loops on more than one host:
   two hosts means two bots answering the same fan.
-- `RUNPOD_GV_ENDPOINT` points the explicit Animate option at our own RunPod
-  serverless endpoint (hub listing `wlsdml1114/generate_video`, RTX 6000 Ada,
-  0 active workers).
+- The explicit Animate option "Wan 2.2 (own endpoint)" runs on our own RunPod
+  serverless endpoint `ys8km1d7sayxtz` (hub listing `wlsdml1114/generate_video`,
+  RTX 6000 Ada, 0 active, max 2, FlashBoot, 10 min idle). It is the code default for
+  `RUNPOD_GV_ENDPOINT`; it only needs `RUNPOD_API_KEY` on the host.
 
 ---
 

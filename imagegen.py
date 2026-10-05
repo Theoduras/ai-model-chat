@@ -148,7 +148,8 @@ RUNPOD_ENDPOINTS = {
 }
 # Our own serverless endpoint from the hub's wlsdml1114/generate_video (Wan 2.2
 # I2V on ComfyUI, no safety checker at all). Billed per GPU-second, not per clip.
-_GV = (os.getenv('RUNPOD_GV_ENDPOINT') or '').strip().rstrip('/')
+# The id is the default so no host needs config; set the variable empty to drop it.
+_GV = os.getenv('RUNPOD_GV_ENDPOINT', 'ys8km1d7sayxtz').strip().rstrip('/')
 if _GV:
     RUNPOD_ENDPOINTS['wan-2-2-gv'] = _GV if '/' in _GV else f'https://api.runpod.ai/v2/{_GV}'
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
@@ -335,6 +336,8 @@ MAX_VIDEO_REFERENCES = 30
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
     'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
+    # 1080p at 81 frames was never run on the endpoint's 48 GB card.
+    'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
 }
 
 
