@@ -8815,6 +8815,9 @@ def studio():
     if _is_guest(user):
         with open(os.path.join(BASE_DIR, 'studio.html'), encoding='utf-8') as f:
             page = f.read().replace('<html', '<html data-guest="1"', 1)
+        # One photo by default, so the first quote fits a guest's 15 tokens.
+        page = page.replace('<option value="1">1</option>', '<option value="1" selected>1</option>', 1)
+        page = page.replace('<option value="4" selected>4</option>', '<option value="4">4</option>', 1)
         # The marketing bar in place of the app header; site-nav.js fills it
         # and moves the theme toggle into the account pill.
         page = page.replace('</head>', '<link rel="stylesheet" href="/css/site-nav.css">\n</head>', 1)
