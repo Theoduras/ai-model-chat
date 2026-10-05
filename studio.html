@@ -3883,6 +3883,12 @@ function guestMode() {
     + 'register free to unlock NSFW and download your work &middot; no credit card needed</span>'
     + '<a href="/register?next=/studio">Register free</a>';
   document.body.appendChild(bar);
+  let hide = 0;
+  document.addEventListener('scroll', () => {
+    bar.classList.add('show');
+    clearTimeout(hide);
+    hide = setTimeout(() => bar.classList.remove('show'), 1500);
+  }, true);
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && 'sp'.includes(e.key.toLowerCase())) e.preventDefault();
   }, true);
@@ -3894,14 +3900,15 @@ function guestMode() {
 }
 </script>
 <style>
-html[data-guest] body{padding-top:96px;padding-bottom:64px}
+html[data-guest] body{padding-top:96px}
 /* The marketing bar, not the app header this page's dashboard styles expect. */
 html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;left:60px;right:auto;
   display:inline-flex;justify-content:flex-start;gap:20px;padding:14px 18px;background:transparent;
   border:0;z-index:1000}
 @media (max-width:760px){html[data-guest] body.page-dashboard header.site-nav{top:16px;left:14px;gap:12px;padding:10px 14px}}
-.guest-bar{position:fixed;left:0;right:0;bottom:0;z-index:2147483646;display:flex;gap:12px;align-items:center;justify-content:center;
+.guest-bar{position:fixed;left:0;right:0;bottom:0;z-index:900;transform:translateY(100%);transition:transform .3s ease;display:flex;gap:12px;align-items:center;justify-content:center;
   flex-wrap:wrap;padding:10px 16px;background:linear-gradient(120deg,#ff5c38,#ff2d78,#7c3aed);color:#fff;font-size:.9rem}
+.guest-bar.show{transform:none}
 @media (max-width:600px){.guest-bar{font-size:.76rem;padding:7px 12px;gap:6px}}
 .guest-bar a{color:#fff;font-weight:700;padding:5px 14px;border-radius:999px;background:rgba(0,0,0,.3);text-decoration:none}
 .guest img,.guest video{-webkit-user-drag:none;user-select:none;-webkit-touch-callout:none}
