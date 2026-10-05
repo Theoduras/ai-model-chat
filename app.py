@@ -7714,7 +7714,8 @@ video.res{max-height:360px;max-width:100%;border-radius:6px}
 <div class="m">{% if j.sent|length > 1 %}Part {{ loop.index }} · {% endif %}{{ p.at }} · {{ p.provider }} / <b>{{ p.model }}</b>
 · {{ p.seconds }}s {{ p.resolution }} {{ p.aspect }} · seed {{ p.seed }} · {{ 'explicit' if p.explicit else 'safe' }}
 · {{ p.references }} refs{% if p.source_clip %} · source clip{% endif %}</div>
-{% if p.start or p.identity %}<div class="imgs">{% if p.start %}<figure><a href="/admin/videos/{{ j.id }}/img/{{ p.start }}" target="_blank"><img src="/admin/videos/{{ j.id }}/img/{{ p.start }}" loading="lazy"></a><figcaption>{{ 'ref · start photo' if p.start == 'ref' else p.start ~ ' · <Picture 2> · start frame (end of part ' ~ (loop.index - 1) ~ ')' }}</figcaption></figure>{% endif %}
+{% if p.start or p.identity or p.ref_paths %}<div class="imgs">{% if p.start %}<figure><a href="/admin/videos/{{ j.id }}/img/{{ p.start }}" target="_blank"><img src="/admin/videos/{{ j.id }}/img/{{ p.start }}" loading="lazy"></a><figcaption>{{ 'ref · start photo' if p.start == 'ref' else p.start ~ ' · <Picture 2> · start frame (end of part ' ~ (loop.index - 1) ~ ')' }}</figcaption></figure>{% endif %}
+{% set pi = loop.index0 %}{% for r in p.ref_paths or [] %}<figure><a href="/admin/videos/{{ j.id }}/img/refs{{ pi }}-{{ loop.index0 }}" target="_blank"><img src="/admin/videos/{{ j.id }}/img/refs{{ pi }}-{{ loop.index0 }}" loading="lazy"></a><figcaption>reference {{ loop.index }}</figcaption></figure>{% endfor %}
 {% if p.identity %}<figure><a href="/admin/videos/{{ j.id }}/img/ref" target="_blank"><img src="/admin/videos/{{ j.id }}/img/ref" loading="lazy"></a><figcaption>ref · &lt;Picture 1&gt; · identity image</figcaption></figure>{% endif %}</div>{% endif %}
 <div class="m">LoRAs:</div><pre>{% for l in p.loras %}{{ l.name }} @ {{ l.scale }} ({% if l.low %}high {{ l.high }}, low {{ l.low }}{% else %}file {{ l.high }}{% endif %}){% if l.trigger %} trigger: {{ l.trigger }}{% endif %}
 {% else %}none{% endfor %}</pre>
@@ -7786,6 +7787,9 @@ def admin_video_image(job_id, key):
             data, mime = _media_bytes(_media_row(slug, spec.get('reference_media')) or {})
         elif key.startswith('frame'):
             data, mime = storage.get(((spec.get('chain') or {}).get('frames') or [])[int(key[5:])]), 'image/jpeg'
+        elif key.startswith('refs'):
+            part, i = (int(x) for x in key[4:].split('-'))
+            data, mime = storage.get(spec['sent'][part]['ref_paths'][i]), 'image/jpeg'
         elif key.startswith('res'):
             data, mime = _media_bytes(_media_row(slug, key[3:]) or {})
         else:
@@ -33681,8 +33685,8 @@ def _gen_spec(slug, body, user):
                     if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
             _auto_lora(picked, library.get(want))
         if spec['explicit'] and family == 'h3':
-            for words, want in ((_VAGINA_WORDS, 'vagina-h3'), (_FINGERING_WORDS, 'fingering-h3'),
-                               (_MASTURBATION_WORDS, 'masturbation-h3')):
+            for words, want in ((_FINGERING_WORDS, 'fingering-h3'),
+                                (_MASTURBATION_WORDS, 'masturbation-h3')):
                 lora = library.get(want)
                 if (len(picked) < 4 and words.search(text) and lora
                         and not any(p['high'] == lora['high'] for p in picked)):
@@ -33717,10 +33721,6 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'dildo-h3', 'name': 'Solo Dildo (H3)', 'scale': 1.0, 'family': 'h3',
     'trigger': 'piston_dildo_style', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}, {
-    # Civitai model 2835594, v0.2.
-    'id': 'vagina-h3', 'name': 'H3 Vagina v0.2', 'scale': 1.0, 'family': 'h3',
-    'trigger': 'vagina, pussy', 'examples': '',
-    'high': 'https://civitai.com/api/download/models/3200540', 'low': ''}, {
     # Civitai model 2926109, v1.0.
     'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 1.0, 'family': 'h3',
     'trigger': 'masturbating, orgasmic contractions', 'examples': '',
@@ -33732,7 +33732,6 @@ _DEFAULT_VIDEO_LORAS = [{
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
-_VAGINA_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
 _MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|wand|massager)\b', re.I)
 _FINGERING_WORDS = re.compile(r'\b(fingering|fingered|fingers?\s+(deep\s+)?(in|into|inside|herself))\b', re.I)
 
@@ -33745,6 +33744,7 @@ def _auto_lora(picked, lora):
                        'examples': lora.get('examples', '')})
 
 
+_REMOVED_LORAS = ('vagina-h3',)
 _LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
 
 
@@ -33753,7 +33753,7 @@ def _video_loras():
         loras = json.loads(_get_setting('video_loras') or 'null')
     except ValueError:
         loras = None
-    loras = loras if isinstance(loras, list) else []
+    loras = [l for l in loras if l.get('id') not in _REMOVED_LORAS] if isinstance(loras, list) else []
     # The built-in LoRAs are permanent: switched off, never removed.
     have = {l.get('id') for l in loras}
     missing = [dict(d) for d in _DEFAULT_VIDEO_LORAS if d['id'] not in have]
@@ -36689,7 +36689,8 @@ def _gen_start(job_id, slug, spec, workspace):
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
                 spec['sent'] = [dict(_video_sent(call, provider.name),
-                                     start='ref' if spec.get('reference_media') else '')]
+                                     start='ref' if spec.get('reference_media') else '',
+                                     ref_paths=_ref_paths(slug, call))]
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
             logger.warning('generation submit failed job=%s: %s', job_id, e)
@@ -36737,6 +36738,25 @@ def _video_sent(call, provider_name):
         'source_clip': bool(call.get('source_url')),
         'references': len(call.get('reference_urls') or []),
     }
+
+
+def _ref_paths(slug, call):
+    """Where each reference photo of a submit lives, so the video log can show
+    it after its signed link has expired."""
+    import base64
+    from urllib.parse import urlparse, unquote
+    out = []
+    for url in call.get('reference_urls') or []:
+        try:
+            if url.startswith('data:'):
+                header, b64 = url.split(',', 1)
+                out.append(storage.put(slug, base64.b64decode(b64),
+                                       header[5:].split(';')[0] or 'image/jpeg'))
+            elif urlparse(url).netloc == 'storage.googleapis.com':
+                out.append(unquote(urlparse(url).path.lstrip('/').split('/', 1)[1]))
+        except Exception:
+            continue
+    return out
 
 
 def _gen_claim_late(job_id, workspace, result, provider_job):
@@ -37087,7 +37107,7 @@ def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
             if '<Picture 1>' not in call['prompt']:
                 call['prompt'] = imagegen.H3_IDENTITY_LEAD + call['prompt']
     spec.setdefault('sent', []).append(dict(
-        _video_sent(call, provider_name),
+        _video_sent(call, provider_name), ref_paths=_ref_paths(slug, call),
         start='frame%d' % (done - 1) if done - 1 < len(chain.get('frames') or []) else '',
         identity='ref' if call.get('identity_b64') else ''))
     new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
