@@ -8223,17 +8223,24 @@ def admin_register_links():
                                   saved=saved, error=error)
 
 
+# Tracked links that land on a page rather than /register: the click and the
+# account made afterwards both count, like any register link.
+_SITE_LINKS = {'studio-home': ('Homepage: Generation Studio button', '/studio')}
+
+
 def _ensure_tool_links(s):
     """Every free tool's CTA goes through its own register link. The rows are
     made here rather than by hand so a tool's first clicks are never lost, and
     one an admin deletes comes back."""
     from db import RegisterLink
+    notes = dict(free_tools.TRACK_NOTES)
+    notes.update({code: note for code, (note, _) in _SITE_LINKS.items()})
     have = {c for (c,) in s.query(RegisterLink.code)
-            .filter(RegisterLink.code.in_(list(free_tools.TRACK_NOTES)))}
-    for code, note in free_tools.TRACK_NOTES.items():
+            .filter(RegisterLink.code.in_(list(notes)))}
+    for code, note in notes.items():
         if code not in have:
             s.add(RegisterLink(code=code, note=note, created_by='system'))
-    if len(have) < len(free_tools.TRACK_NOTES):
+    if len(have) < len(notes):
         s.commit()
 
 
@@ -8260,7 +8267,7 @@ def register_link_click(code):
     from db import RegisterLink
     s = _db_session()
     try:
-        if code in free_tools.TRACK_NOTES:
+        if code in free_tools.TRACK_NOTES or code in _SITE_LINKS:
             _ensure_tool_links(s)
         link = s.query(RegisterLink).filter(RegisterLink.code == code).first()
         if link:
@@ -8271,7 +8278,7 @@ def register_link_click(code):
         error_logger.error('Register link click not recorded', exc_info=True)
     finally:
         s.close()
-    return redirect('/register')
+    return redirect(_SITE_LINKS[code][1] if code in _SITE_LINKS else '/register')
 
 
 # ── Link in bio: /link-<handle> ─────────────────────────────────────────────

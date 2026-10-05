@@ -1368,6 +1368,10 @@ function setMake(v) {
 }
 
 function setRating(v) {
+  if (v === 'nsfw' && document.documentElement.dataset.guest) {
+    guestGate('Explicit content needs a free account.');
+    return;
+  }
   genRating = v;
   el('rate-sfw').setAttribute('aria-pressed', String(v === 'sfw'));
   el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
