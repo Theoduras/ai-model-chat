@@ -210,6 +210,22 @@
     return out;
   }
 
+  // The page links and the account pill are two fixed bars; on a mid-width
+  // screen the right one slides over the left. Drop page links from the end,
+  // keeping the ones marked data-keep, until they clear.
+  function fitBars() {
+    var links = document.querySelector('.site-nav .sn-links');
+    var acct = document.querySelector('.sn-account');
+    if (!links || !acct) return;
+    var items = [].slice.call(links.children);
+    items.forEach(function (a) { a.style.display = ''; });
+    var limit = acct.getBoundingClientRect().left - 12;
+    for (var i = items.length - 1; i >= 0 && links.getBoundingClientRect().right > limit; i--) {
+      if (!items[i].hasAttribute('data-keep')) items[i].style.display = 'none';
+    }
+  }
+  addEventListener('resize', fitBars);
+
   // Marketing pages get a second pill on the right for the account actions;
   // inline hosts (dashboard, consoles) keep one row and just gain the icons.
   function accountHost() {
@@ -336,6 +352,7 @@
     // Signed-out links go up straight away; a slow /api/me would otherwise leave
     // the bar empty on first paint.
     paint(ACCOUNT_OUT);
+    fitBars();
 
     fetch('/api/me', { credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
@@ -345,6 +362,7 @@
         paint(ACCOUNT_IN);
         var t = me.usage && me.usage.tokens;
         paintTokens(t && 'balance' in t ? t.balance : 0);
+        fitBars();
         document.dispatchEvent(new CustomEvent('sn-me', { detail: me }));
       })
       .catch(function () { /* keep the signed-out menu */ });
