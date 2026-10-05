@@ -654,6 +654,8 @@ def test_wan22_on_runpod():
                   IG2.chain_plan('wan-2-2', 30) == [15, 15]
                   and IG2.chain_plan('wan-2-2', 20) == [10, 10]
                   and IG2.chain_plan('wan-2-2-lora', 24) == [8, 8, 8]
+                  and IG2.chain_plan('wan-2-2-gv', 10) == [5, 5]
+                  and IG2.chain_plan('wan-2-2-gv', 32) == [8, 8, 8, 8]
                   and IG2.chain_plan('wan-2-2', 10) is None
                   and IG2.chain_plan('seedance-2-0-fast', 30) is None)
         check('the payload carries the fields RunPod requires',

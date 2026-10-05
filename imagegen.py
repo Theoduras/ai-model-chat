@@ -531,7 +531,7 @@ MODEL_VIDEO_DURATIONS = {
 # Only lengths that split into whole parts the model serves, so what is
 # generated is exactly what is priced. Needs ffmpeg for the frame and the join.
 CHAIN_DURATIONS = {'wan-2-2': (20, 30), 'wan-2-6-rp': (20, 30),
-                   'wan-2-2-lora': (16, 24, 32)}
+                   'wan-2-2-lora': (16, 24, 32), 'wan-2-2-gv': (10, 16, 24, 32)}
 
 
 def chain_plan(model_key, seconds):
