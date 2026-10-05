@@ -133,14 +133,23 @@ def download(vol, dc):
 # lacks, all five at once, resuming a cut file. Python, because the stock
 # image has no wget, and a missing tool there failed silently.
 GET = r'''
-import json, os, sys, threading, urllib.request
+import json, os, sys, threading, time, urllib.request
 FILES, HF = json.loads(os.environ['H3_FILES']), os.environ['H3_HF']
+done, size = {}, {}
+def report():
+    while True:
+        time.sleep(10)
+        have, total = sum(done.values()), sum(size.values())
+        left = [f'{n} {100 * done[n] // max(1, size[n])}%' for n in size if done[n] < size[n]]
+        print(f'h3 weights: {have / 1e9:.1f} / {total / 1e9:.1f} GB ({100 * have // max(1, total)}%)',
+              ', '.join(left), flush=True)
 def get(folder, src):
     d = f'/comfyui/models/{folder}'
     os.makedirs(d, exist_ok=True)
     path = os.path.join(d, src.split('/')[-1])
     for attempt in range(5):
         if os.path.exists(path): return
+        name = src.split('/')[-1].split('.')[0]
         part = path + '.part'
         have = os.path.getsize(part) if os.path.exists(part) else 0
         try:
@@ -148,11 +157,15 @@ def get(folder, src):
             with urllib.request.urlopen(req, timeout=120) as r:
                 if have and r.status != 206: have = 0
                 total = have + int(r.headers['Content-Length'])
+                size[name], done[name] = total, have
                 with open(part, 'ab' if have else 'wb') as f:
-                    while chunk := r.read(1 << 24): f.write(chunk)
+                    while chunk := r.read(1 << 24):
+                        f.write(chunk)
+                        done[name] += len(chunk)
             if os.path.getsize(part) == total: os.replace(part, path)
         except Exception as e:
             print('h3 weights:', src, repr(e), flush=True)
+threading.Thread(target=report, daemon=True).start()
 ts = [threading.Thread(target=get, args=f) for f in FILES]
 [t.start() for t in ts]; [t.join() for t in ts]
 missing = [s for f, s in FILES if not os.path.exists(f'/comfyui/models/{f}/' + s.split('/')[-1])]
