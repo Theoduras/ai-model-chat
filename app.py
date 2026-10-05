@@ -1343,7 +1343,8 @@ def _x_hash(value):
     return hashlib.sha256(value.strip().lower().encode()).hexdigest()
 
 
-def _x_conversion(event, conversion_id, email=None, twclid=None, ip=None, ua=None, url=None):
+def _x_conversion(event, conversion_id, email=None, twclid=None, ip=None, ua=None, url=None,
+                  pay=None):
     """One server-side conversion to X. Sent off-thread, so a sign-up or a
     payment webhook never waits on X, and silent until the token and the
     event's id are set."""
@@ -1361,6 +1362,13 @@ def _x_conversion(event, conversion_id, email=None, twclid=None, ip=None, ua=Non
             'event_id': event_id, 'conversion_id': conversion_id, 'identifiers': [ids]}
     if url:
         conv['event_source_url'] = url
+    if pay is not None:
+        # What the payment row recorded, so X's revenue matches what was charged.
+        try:
+            conv['value'] = round(float(pay.amount), 2)
+            conv['price_currency'] = (pay.currency or 'USD').upper()
+        except (TypeError, ValueError):
+            pass
 
     def send():
         req = urllib.request.Request(
@@ -6722,7 +6730,7 @@ def _token_payment_paid(session_db, pay):
     posted = token_purchase(session_db, ws, int(pay.tokens or 0), pay.id,
                             note=f'{pay.tokens} token pack')
     if posted:
-        _x_conversion('tokens', f'pay-{pay.order_id}', email=u.email)
+        _x_conversion('tokens', f'pay-{pay.order_id}', email=u.email, pay=pay)
     logger.info('TOKENS %s user=%s amount=%s order=%s',
                 'ADDED' if posted else 'ALREADY RECORDED',
                 u.email, pay.tokens, pay.order_id)
@@ -6833,7 +6841,7 @@ def api_billing_webhook():
                 expires = _activate_plan(s, u, pay.tier)
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
                             u.email, pay.tier, expires, order_id)
-                _x_conversion('subscription', f'pay-{order_id}', email=u.email)
+                _x_conversion('subscription', f'pay-{order_id}', email=u.email, pay=pay)
         s.commit()
     finally:
         s.close()
@@ -6955,7 +6963,7 @@ def _stripe_checkout_completed(obj):
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s sub=%s',
                             u.email, pay.tier, expires, order_id, sub_id)
                 _award_referral(s, u, pay, obj.get('amount_total'))
-                _x_conversion('subscription', f'pay-{order_id}', email=u.email)
+                _x_conversion('subscription', f'pay-{order_id}', email=u.email, pay=pay)
         s.commit()
     finally:
         s.close()
