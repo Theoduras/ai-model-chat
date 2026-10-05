@@ -41,7 +41,7 @@ TOKEN_COST_USD = 0.04
 # it or nothing starts.
 MIN_MARGIN_MULTIPLE = 2.25
 
-IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro')
+IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
