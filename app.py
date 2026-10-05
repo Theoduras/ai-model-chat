@@ -33557,6 +33557,18 @@ def _gen_spec(slug, body, user):
                                'low': lora['low'], 'scale': scale,
                                'trigger': lora.get('trigger', ''),
                                'examples': lora.get('examples', '')})
+        # A toy clip gets the toy LoRA even when none was ticked: close-up
+        # wording picks the close-up pair, anything else the full-body one.
+        text = ' '.join(str(spec.get(k) or '') for k in ('prompt_extra', 'motion'))
+        if (spec['explicit'] and len(picked) < 4 and _TOY_WORDS.search(text)
+                and not any(p['trigger'] == 'piston_dildo_style' for p in picked)):
+            want = 'dildo-22-v2-closeup' if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody'
+            lora = library.get(want)
+            if lora and lora.get('enabled', True) is not False:
+                picked.append({'name': lora['name'], 'high': lora['high'],
+                               'low': lora['low'], 'scale': lora['scale'],
+                               'trigger': lora['trigger'],
+                               'examples': lora.get('examples', '')})
         spec['loras'] = picked
     return spec
 
@@ -33578,7 +33590,14 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'dildo-22-v2-fullbody', 'name': 'Solo Dildo v2 (full body)', 'scale': 1.0,
     'trigger': 'piston_dildo_style', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2405917',
-    'low': 'https://civitai.com/api/download/models/2405930'}]
+    'low': 'https://civitai.com/api/download/models/2405930'}, {
+    'id': 'dildo-22-v2-closeup', 'name': 'Solo Dildo v2 (close-up)', 'scale': 1.0,
+    'trigger': 'piston_dildo_style', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/2405940',
+    'low': 'https://civitai.com/api/download/models/2405949'}]
+
+_TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
+_CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
 
 
 _LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
