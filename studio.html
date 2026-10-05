@@ -481,6 +481,7 @@
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
+        <div class="gen-f" id="gen-presets" style="display:none"><span>Presets</span><div></div></div>
         <div id="gen-chain-motions"></div>
         <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
           <div class="motion-ideas"></div></div>
@@ -3264,6 +3265,63 @@ function renderAnimPhotos() {
   loadMotionIdeas();
   renderLoras();
   renderChainMotions();
+  renderPresets();
+}
+
+// One click: the action, the length and each part's action are filled in and
+// the prompts written. Explicit ones run on Wan 2.2 + LoRA, in its style.
+const MOTION_PRESETS = [
+  { label: 'Slow tease', nsfw: true, seconds: 8,
+    motion: 'she undresses slowly and runs her hands over her body, keeping eye contact with a soft smile' },
+  { label: 'Touching herself', nsfw: true, seconds: 8,
+    motion: 'she touches herself between her legs with one hand, slow at first then faster, eyes closing, mouth open' },
+  { label: 'Toy, steady', nsfw: true, seconds: 8,
+    motion: 'she uses the toy, moving it in and out in a steady rhythm, half-lidded eyes and heavy breathing' },
+  { label: 'Toy, building', nsfw: true, seconds: 16,
+    motion: 'she uses the toy slowly, moving it in and out, breathing deeper',
+    parts: ['she uses the toy faster and harder, building to a peak, her body tensing'] },
+  { label: 'Toy to mouth', nsfw: true, seconds: 8,
+    motion: 'she takes the toy out and brings it slowly to her mouth, keeping eye contact' },
+  { label: 'Toy then mouth', nsfw: true, seconds: 16,
+    motion: 'she uses the toy, moving it in and out in a steady rhythm',
+    parts: ['she takes the toy out and brings it to her mouth, keeping eye contact'] },
+  { label: 'Climax', nsfw: true, seconds: 8,
+    motion: 'she keeps going until she climaxes, her body tensing and trembling, then relaxing' },
+  { label: 'Afterglow', nsfw: true, seconds: 5,
+    motion: 'she lies back catching her breath, relaxed, and smiles at the camera' },
+  { label: 'Hair flip', nsfw: false, seconds: 5,
+    motion: 'she flips her hair over one shoulder and smiles at the camera, then holds the look' },
+  { label: 'Wink & kiss', nsfw: false, seconds: 5,
+    motion: 'she looks into the camera, winks, and blows a slow kiss' },
+  { label: 'Slow turn', nsfw: false, seconds: 5,
+    motion: 'she turns slowly to show her profile, then looks back over her shoulder at the camera' },
+];
+
+function renderPresets() {
+  const box = el('gen-presets');
+  if (!box) return;
+  const nsfw = genRating === 'nsfw';
+  const usable = MOTION_PRESETS.map((p, i) => [p, i]).filter(([p]) => p.nsfw === nsfw
+    && (!p.nsfw || videoModels().includes('wan-2-2-lora')));
+  box.style.display = genJob === 'animate' && usable.length ? '' : 'none';
+  box.querySelector('div').innerHTML = usable.map(([p, i]) =>
+    `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
+      onclick="applyPreset(${i})">${esc(p.label)}${p.parts ? ' · ' + p.seconds + 's' : ''}</button>`).join('');
+}
+
+function applyPreset(i) {
+  const p = MOTION_PRESETS[i];
+  if (p.nsfw && videoModel() !== 'wan-2-2-lora') pickVideoModel('wan-2-2-lora');
+  el('gen-video-motion').value = p.motion;
+  const secs = el('gen-vsecs');
+  if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);
+  genChainMotions.length = 0;
+  genChainPrompts.length = 0;
+  (p.parts || []).forEach(m => genChainMotions.push(m));
+  renderChainMotions();
+  genQuote();
+  writeFromMotion();
+  (p.parts || []).forEach((_, n) => writePartPrompt(n));
 }
 
 // A length past one clip runs as parts, each starting on the last frame of

@@ -33377,10 +33377,16 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'nsfw-22-v008a', 'name': 'General NSFW v0.08a', 'scale': 1.0,
     'trigger': 'nsfwsks', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2073605',
-    'low': 'https://civitai.com/api/download/models/2083303'}]
+    'low': 'https://civitai.com/api/download/models/2083303'}, {
+    # Civitai model 2109996, V2 high and low. Trained on Wan 2.2 T2V, so on
+    # image-to-video it may want a higher strength.
+    'id': 'anatomy-22-v2', 'name': 'Pussy and Anus v2', 'scale': 1.0,
+    'trigger': 'vagina', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3034683',
+    'low': 'https://civitai.com/api/download/models/3034713'}]
 
 
-_LOCKED_LORA = 'nsfw-22-v008a'
+_LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
 
 
 def _video_loras():
@@ -33389,10 +33395,10 @@ def _video_loras():
     except ValueError:
         loras = None
     loras = loras if isinstance(loras, list) else []
-    # The seeded pair is permanent: it can be switched off, never removed.
-    if not any(l.get('id') == _LOCKED_LORA for l in loras):
-        loras.insert(0, dict(_DEFAULT_VIDEO_LORAS[0]))
-    return loras
+    # The built-in LoRAs are permanent: switched off, never removed.
+    have = {l.get('id') for l in loras}
+    missing = [dict(d) for d in _DEFAULT_VIDEO_LORAS if d['id'] not in have]
+    return missing + loras
 
 
 def _lora_view(loras, full):
@@ -33400,7 +33406,7 @@ def _lora_view(loras, full):
     # see a switched-off LoRA, to switch it back on.
     keys = ('id', 'name', 'scale') + (('trigger', 'examples') if full else ())
     return [dict({k: l.get(k, '') for k in keys}, enabled=l.get('enabled', True) is not False,
-                 locked=l.get('id') == _LOCKED_LORA)
+                 locked=l.get('id') in _LOCKED_LORAS)
             for l in loras if full or l.get('enabled', True) is not False]
 
 
@@ -33423,7 +33429,7 @@ def api_admin_video_loras():
     if blocked:
         return blocked
     body = request.get_json(silent=True) or {}
-    if body.get('remove') == _LOCKED_LORA:
+    if body.get('remove') in _LOCKED_LORAS:
         return jsonify({'ok': False, 'error': 'This LoRA can be disabled, not removed.'}), 400
     loras = [l for l in _video_loras() if l['id'] != str(body.get('remove') or '')]
     if body.get('toggle'):
