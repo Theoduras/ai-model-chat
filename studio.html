@@ -1818,9 +1818,11 @@ function renderGenForm() {
   if (swap) renderSwapForm();
 
   const vres = el('gen-vres');
-  if (vres && !vres.options.length) {
-    vres.innerHTML = Object.keys(videoTable(videoModel())).map(r =>
-      opt(r, r, genPrices.defaults.video_resolution)).join('');
+  const rungs = Object.keys(videoTable(videoModel()));
+  if (vres && rungs.length && vres.dataset.model !== videoModel()) {
+    vres.dataset.model = videoModel();
+    const keep = rungs.includes(vres.value) ? vres.value : genPrices.defaults.video_resolution;
+    vres.innerHTML = rungs.map(r => opt(r, r, keep)).join('');
   }
   const vsecs = el('gen-vsecs');
   if (vsecs && vsecs.dataset.model !== videoModel()) {
@@ -2002,13 +2004,21 @@ function audioModes() {
   return (hasSourceClip() ? ['original'] : []).concat(['none', 'upload'], gen);
 }
 
+// The engines that make sound themselves; the rest get no Sound row.
+const SOUND_MODELS = ['seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5', 'kling-3-0-omni',
+  'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
+
 function renderAudioModes() {
   const box = el('gen-audio-modes');
   const note = el('gen-audio-note');
   const field = el('gen-audio-prompt');
   if (!box || !genPrices) return;
   const rowA = el('gen-audio-row');
-  if (rowA) rowA.style.display = genMake === 'image' ? 'none' : '';
+  // An engine that cannot make sound gets no Sound row; a swap still keeps the
+  // uploaded clip's own track.
+  const silent = genMake === 'image' || !SOUND_MODELS.includes(engineModel());
+  if (rowA) rowA.style.display = silent ? 'none' : '';
+  if (silent) { genAudio = { mode: hasSourceClip() ? 'original' : 'none' }; return; }
   const modes = audioModes();
   if (!modes.includes(genAudio.mode)) genAudio = { mode: modes[0] };
   box.innerHTML = modes.map(m =>
@@ -2139,6 +2149,7 @@ function genExplicit() {
 function showEngines() {
   const box = el('gen-engines');
   if (!box || !genEngines) return;
+  box.style.display = genVideoOpen ? '' : 'none';
   if (genMake !== 'image') {
     const chosen = genMake === 'swap' ? swapModel() : videoModel();
     const name = chosen ? videoLabel(chosen) : (genEngines.video || '');
@@ -2210,6 +2221,8 @@ function setProviderCost() {
 function setMoney(tokens) {
   setProviderCost();
   const cash = cashFor(tokens);
+  // Money and engine are admin detail; a creator is quoted in tokens.
+  el('gen-money').parentElement.style.display = genVideoOpen ? '' : 'none';
   el('gen-money-what').textContent = !cash ? ''
     : genTokens === null ? "What a creator's plan pays" : 'In money';
   el('gen-money').textContent = cash;
