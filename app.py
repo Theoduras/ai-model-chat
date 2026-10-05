@@ -33612,7 +33612,8 @@ def _gen_spec(slug, body, user):
             motions.append(last)
         prompts = [str(p or '').strip()[:2000] for p in (body.get('chain_prompts') or [])]
         spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions,
-                         'prompts': (prompts + [''] * len(motions))[:len(motions)]}
+                         'prompts': (prompts + [''] * len(motions))[:len(motions)],
+                         'plain': body.get('chain_identity') is False}
     elif seconds > CR.VIDEO_MAX_SECONDS:
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
