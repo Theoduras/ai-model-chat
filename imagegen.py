@@ -2512,6 +2512,11 @@ class RunPodProvider(Provider):
 H3_STEPS = 8
 
 
+# Names her photo in the prompt; H3 only uses a reference the prompt names.
+H3_IDENTITY_LEAD = ('The woman in <Picture 1>, with exactly her face, hair, body, '
+                    'tattoos and piercings. ')
+
+
 def h3_payload(spec, image, ref=None):
     """An API-format copy of Comfy's video_minimax_h3_i2v template, sent whole
     so the worker is stock worker-comfyui plus a LoRA fetcher. With `ref` (her
@@ -2571,11 +2576,12 @@ def h3_payload(spec, image, ref=None):
             'video': ['video', 0], 'filename_prefix': 'h3', 'format': 'auto', 'codec': 'auto'}},
     })
     images = [{'name': 'still.png', 'image': image}]
+    prompt = spec.get('prompt') or build_video_prompt()
     if ref:
         wf['ref'] = {'class_type': 'LoadImage', 'inputs': {'image': 'ref.png'}}
         wf['cond'] = {'class_type': 'MiniMaxH3ReferenceToVideo', 'inputs': {
             'clip': ['clip', 0], 'vae': ['vae', 0], 'audio_vae': ['avae', 0],
-            'prompt': 'The woman in <Picture 1>. ' + (spec.get('prompt') or build_video_prompt()),
+            'prompt': prompt if '<Picture 1>' in prompt else H3_IDENTITY_LEAD + prompt,
             'width': width, 'height': height, 'length': frames,
             'ref_image_size': 'match', 'ref_images.ref_image_0': ['ref', 0]}}
         wf['guide'] = {'class_type': 'MiniMaxH3AddGuide', 'inputs': {

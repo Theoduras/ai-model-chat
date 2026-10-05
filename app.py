@@ -37084,6 +37084,8 @@ def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
         ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
         if ref_b64:
             call.update({'identity_b64': ref_b64, 'identity_mime': ref_mime})
+            if '<Picture 1>' not in call['prompt']:
+                call['prompt'] = imagegen.H3_IDENTITY_LEAD + call['prompt']
     spec.setdefault('sent', []).append(dict(
         _video_sent(call, provider_name),
         start='frame%d' % (done - 1) if done - 1 < len(chain.get('frames') or []) else '',
