@@ -36626,6 +36626,13 @@ def _gen_advance(row):
         _gen_fail(job_id, workspace, result.error or 'generation failed')
 
 
+def _previous_action(spec, done):
+    chain = spec['chain']
+    before = spec.get('motion', '') if done == 1 else chain['motions'][done - 2]
+    now = chain['motions'][done - 1]
+    return '' if before.strip().lower() == now.strip().lower() else before.strip()[:200]
+
+
 def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, url):
     """One part of a chained clip is done: keep it, then start the next part
     from its last frame, or join them all and deliver the clip."""
@@ -36660,8 +36667,13 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
                          'prompt_extra': '', 'reference_url': '',
                          'reference_b64': base64.b64encode(frame).decode(),
                          'reference_mime': 'image/jpeg',
-                         'negative': imagegen.merge_negative(spec.get('negative_extra'),
-                                                             video=True)})
+                         # The previous part's action is negated when this part's
+                         # differs: its first frame already shows that action, and
+                         # the model otherwise just carries it on.
+                         'negative': imagegen.merge_negative(
+                             ', '.join(x for x in (spec.get('negative_extra'),
+                                                   _previous_action(spec, done)) if x),
+                             video=True)})
             template = imagegen.build_chain_prompt(motion)
             # A part prompt the creator wrote or edited runs as written.
             stored = chain.get('prompts') or []

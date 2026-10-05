@@ -1423,8 +1423,10 @@ def build_video_prompt(motion=''):
 
 
 def build_chain_prompt(motion=''):
-    """A later part of a chained clip: it starts on the previous part's last frame."""
-    return 'Continue the motion seamlessly from the first frame. ' + build_video_prompt(motion)
+    """A later part of a chained clip. It starts on the previous part's last
+    frame, but its action is its own: telling it to continue would make it
+    repeat the part before."""
+    return 'From the first frame, she changes to a new action. ' + build_video_prompt(motion)
 
 
 def build_reel_prompt(prompt='', has_photo=False, character=False):
