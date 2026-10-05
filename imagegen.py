@@ -2514,7 +2514,9 @@ H3_STEPS = 8
 
 # Names her photo in the prompt; H3 only uses a reference the prompt names.
 H3_IDENTITY_LEAD = ('The woman in <Picture 1>, with exactly her face, hair, body, '
-                    'tattoos and piercings. ')
+                    'tattoos and piercings. The video starts exactly on <Picture 2>: '
+                    'the same position, pose, framing, camera angle and background, '
+                    'and continues from there. ')
 
 
 def h3_payload(spec, image, ref=None):
@@ -2583,7 +2585,8 @@ def h3_payload(spec, image, ref=None):
             'clip': ['clip', 0], 'vae': ['vae', 0], 'audio_vae': ['avae', 0],
             'prompt': prompt if '<Picture 1>' in prompt else H3_IDENTITY_LEAD + prompt,
             'width': width, 'height': height, 'length': frames,
-            'ref_image_size': 'match', 'ref_images.ref_image_0': ['ref', 0]}}
+            'ref_image_size': 'match', 'ref_images.ref_image_0': ['ref', 0],
+            'ref_images.ref_image_1': ['fit', 0]}}
         wf['guide'] = {'class_type': 'MiniMaxH3AddGuide', 'inputs': {
             'positive': ['cond', 0], 'latent': ['cond', 1], 'vae': ['vae', 0],
             'image': ['fit', 0], 'frame_idx': 0}}
