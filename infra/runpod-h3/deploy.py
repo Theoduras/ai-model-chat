@@ -129,16 +129,42 @@ def download(vol, dc):
         sys.exit(f'download failed: {status.get("error")}')
 
 
+# Runs on each worker before ComfyUI: fetches any weight the container disk
+# lacks, all five at once, resuming a cut file. Python, because the stock
+# image has no wget, and a missing tool there failed silently.
+GET = r'''
+import json, os, sys, threading, urllib.request
+FILES, HF = json.loads(os.environ['H3_FILES']), os.environ['H3_HF']
+def get(folder, src):
+    d = f'/comfyui/models/{folder}'
+    os.makedirs(d, exist_ok=True)
+    path = os.path.join(d, src.split('/')[-1])
+    for attempt in range(5):
+        if os.path.exists(path): return
+        part = path + '.part'
+        have = os.path.getsize(part) if os.path.exists(part) else 0
+        try:
+            req = urllib.request.Request(f'{HF}/{src}', headers={'Range': f'bytes={have}-'} if have else {})
+            with urllib.request.urlopen(req, timeout=120) as r:
+                if have and r.status != 206: have = 0
+                total = have + int(r.headers['Content-Length'])
+                with open(part, 'ab' if have else 'wb') as f:
+                    while chunk := r.read(1 << 24): f.write(chunk)
+            if os.path.getsize(part) == total: os.replace(part, path)
+        except Exception as e:
+            print('h3 weights:', src, repr(e), flush=True)
+ts = [threading.Thread(target=get, args=f) for f in FILES]
+[t.start() for t in ts]; [t.join() for t in ts]
+missing = [s for f, s in FILES if not os.path.exists(f'/comfyui/models/{f}/' + s.split('/')[-1])]
+print('h3 weights missing:' if missing else 'h3 weights ready', missing or '', flush=True)
+'''
+
+
 def start_cmd():
-    """Install handler.py, fetch any weight the container disk lacks (all of
-    them on a fresh worker), then start worker-comfyui."""
-    gets = ' & '.join(
-        f'(f=/comfyui/models/{folder}/{src.split("/")[-1]}; [ -s "$f" ] || '
-        f'(mkdir -p /comfyui/models/{folder} && wget -q -c -O "$f.part" "{HF}/{src}" '
-        f'&& mv "$f.part" "$f"))' for folder, src in FILES)
+    """Install handler.py, fetch the weights, then start worker-comfyui."""
     return ['bash', '-c', 'mv -n /handler.py /comfy_handler.py; '
-            'echo "$H3_HANDLER" | base64 -d > /handler.py && '
-            f'{gets} & wait; exec /start.sh']
+            'echo "$H3_HANDLER" | base64 -d > /handler.py; '
+            'echo "$H3_GET" | base64 -d > /h3_get.py; python3 -u /h3_get.py; exec /start.sh']
 
 
 def deploy(dc=None):
@@ -147,7 +173,9 @@ def deploy(dc=None):
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py'), 'rb') as f:
         handler = base64.b64encode(f.read()).decode()
     body = {'name': 'h3-worker', 'imageName': IMAGE, 'isServerless': True, 'containerDiskInGb': 80,
-            'env': {'H3_HANDLER': handler}, 'dockerStartCmd': start_cmd()}
+            'env': {'H3_HANDLER': handler, 'H3_FILES': json.dumps(FILES), 'H3_HF': HF,
+                    'H3_GET': base64.b64encode(GET.encode()).decode()},
+            'dockerStartCmd': start_cmd()}
     tpl = find('/templates', 'h3-worker')
     if tpl:
         body.pop('isServerless')
