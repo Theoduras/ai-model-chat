@@ -16,7 +16,8 @@
   <script src="/js/page-wizard.js"></script>
   <script>
     // A guest has no dashboard to sit in, so it gets the studio full page.
-    if (window.self === window.top && !document.documentElement.dataset.guest) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    if (document.documentElement.dataset.guest) {}
+    else if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
     else document.documentElement.classList.add('in-workspace');
   </script>
   <style>
@@ -3849,34 +3850,64 @@ window.addEventListener('pagehide', studioSave);
 init().then(() => { studioRestore(); StudioWizard.auto(); });
 </script>
 <script>
-// Guests can try, not take: no saving, and a watermark over the whole page so a
-// screenshot carries it too. The clean files come with registering.
+// Guests can try, not take: no saving, and a watermark the moment a screenshot
+// looks likely. A page cannot see the capture itself, so it watches what comes
+// before one: the OS key (Win+Shift+S, Cmd+Shift+3/4/5), Print Screen, and the
+// window losing focus to a snipping tool. Print Screen on Windows fires only
+// after the capture, so that one is answered by emptying the clipboard.
 function guestMode() {
   document.body.classList.add('guest');
   const bar = document.createElement('div');
   bar.className = 'guest-bar';
-  bar.innerHTML = '<span><b>Guest mode</b> &middot; safe-for-work only &middot; register to download and keep your work</span>'
+  bar.innerHTML = '<span><b>Guest mode</b> &middot; safe-for-work only &middot; '
+    + 'register free to unlock NSFW and download your work &middot; no credit card needed</span>'
     + '<a href="/register?next=/studio">Register free</a>';
-  document.body.prepend(bar);
+  document.body.appendChild(bar);
   const wm = document.createElement('div');
   wm.className = 'guest-wm';
   document.body.appendChild(wm);
-  const media = e => e.target.closest && e.target.closest('img,video,canvas');
-  ['contextmenu', 'dragstart'].forEach(t => document.addEventListener(t, e => { if (media(e)) e.preventDefault(); }, true));
+  let off = 0;
+  const show = (ms) => {
+    clearTimeout(off);
+    wm.classList.add('on');
+    if (ms) off = setTimeout(() => { if (document.hasFocus()) wm.classList.remove('on'); }, ms);
+  };
+  const shotKey = e => e.key === 'PrintScreen' || e.key === 'Meta' || e.key === 'OS'
+    || (e.metaKey && e.shiftKey) || (e.ctrlKey && e.shiftKey && e.key === 'Shift');
   document.addEventListener('keydown', e => {
+    if (shotKey(e)) show(0);
     if ((e.ctrlKey || e.metaKey) && 'sp'.includes(e.key.toLowerCase())) e.preventDefault();
   }, true);
+  document.addEventListener('keyup', e => {
+    if (e.key === 'PrintScreen') {
+      show(3000);
+      try { navigator.clipboard.writeText('Screenshots of guest previews are disabled. Register free on Velvetfunneler.com.'); } catch (x) {}
+    } else if (shotKey(e) || wm.classList.contains('on')) show(2500);
+  }, true);
+  addEventListener('blur', () => show(0));
+  addEventListener('focus', () => show(1500));
+  document.addEventListener('visibilitychange', () => { if (document.hidden) show(0); });
+  const media = e => e.target.closest && e.target.closest('img,video,canvas');
+  ['contextmenu', 'dragstart'].forEach(t => document.addEventListener(t, e => { if (media(e)) e.preventDefault(); }, true));
   new MutationObserver(() => document.querySelectorAll('video:not([controlslist])').forEach(v => {
     v.setAttribute('controlslist', 'nodownload'); v.disablePictureInPicture = true;
   })).observe(document.body, {childList: true, subtree: true});
 }
 </script>
 <style>
-.guest-bar{position:sticky;top:0;z-index:2147483646;display:flex;gap:12px;align-items:center;justify-content:center;
+html[data-guest] body{padding-top:96px;padding-bottom:64px}
+/* The marketing bar, not the app header this page's dashboard styles expect. */
+html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;left:60px;right:auto;
+  display:inline-flex;justify-content:flex-start;gap:20px;padding:14px 18px;background:transparent;
+  border:0;z-index:1000}
+@media (max-width:760px){html[data-guest] body.page-dashboard header.site-nav{top:16px;left:14px;gap:12px;padding:10px 14px}}
+.guest-bar{position:fixed;left:0;right:0;bottom:0;z-index:2147483646;display:flex;gap:12px;align-items:center;justify-content:center;
   flex-wrap:wrap;padding:10px 16px;background:linear-gradient(120deg,#ff5c38,#ff2d78,#7c3aed);color:#fff;font-size:.9rem}
+@media (max-width:600px){.guest-bar{font-size:.76rem;padding:7px 12px;gap:6px}}
 .guest-bar a{color:#fff;font-weight:700;padding:5px 14px;border-radius:999px;background:rgba(0,0,0,.3);text-decoration:none}
-.guest-wm{position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:.16;
-  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='160'%3E%3Ctext x='10' y='90' transform='rotate(-24 130 80)' font-family='Arial' font-size='22' font-weight='700' fill='%23fff' stroke='%23000' stroke-width='.6'%3EVelvetfunneler.com%3C/text%3E%3C/svg%3E")}
+.guest-wm{position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:0;
+  background:rgba(0,0,0,.35) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='160'%3E%3Ctext x='10' y='90' transform='rotate(-24 130 80)' font-family='Arial' font-size='22' font-weight='700' fill='%23fff' stroke='%23000' stroke-width='.6'%3EVelvetfunneler.com%3C/text%3E%3C/svg%3E")}
+.guest-wm.on{opacity:1}
 .guest img,.guest video{-webkit-user-drag:none;user-select:none;-webkit-touch-callout:none}
 @media print{.guest *{display:none!important}}
 </style>

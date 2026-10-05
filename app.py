@@ -8810,7 +8810,10 @@ def studio():
         return blocked
     if _is_guest(user):
         with open(os.path.join(BASE_DIR, 'studio.html'), encoding='utf-8') as f:
-            return f.read().replace('<html', '<html data-guest="1"', 1)
+            page = f.read().replace('<html', '<html data-guest="1"', 1)
+        # Without the app's own header, site-nav.js mounts the marketing bar.
+        page = page.replace('</head>', '<link rel="stylesheet" href="/css/site-nav.css">\n</head>', 1)
+        return re.sub(r'<header>.*?</header>', '', page, count=1, flags=re.S)
     return send_from_directory(BASE_DIR, 'studio.html')
 
 

@@ -113,6 +113,13 @@
     { href: '/login', label: 'Log in', icon: 'login' },
     { href: '/register', label: 'Register', icon: 'register', cta: true },
   ];
+  // A studio guest has tokens but no account: the count shows, and every way
+  // onward is registering.
+  var ACCOUNT_GUEST = [
+    { href: '/register?next=/studio', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
+    { href: '/login?next=/studio', label: 'Log in', icon: 'login' },
+    { href: '/register?next=/studio', label: 'Register', icon: 'register', cta: true },
+  ];
   var ACCOUNT_IN = [
     { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
@@ -359,7 +366,7 @@
       .then(function (me) {
         if (!me || !me.signed_in) return;
         avatarUrl = me.avatar || '';
-        paint(ACCOUNT_IN);
+        paint(me.guest ? ACCOUNT_GUEST : ACCOUNT_IN);
         var t = me.usage && me.usage.tokens;
         paintTokens(t && 'balance' in t ? t.balance : 0);
         fitBars();
