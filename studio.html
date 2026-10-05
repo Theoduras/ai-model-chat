@@ -3312,6 +3312,15 @@ const MOTION_PRESETS = [
     parts: ['she has an orgasm that makes her body jerk and shake, her pussy and anus contracting rhythmically, then she falls back into a relaxed state, audibly catching her breath'] },
   { label: 'Afterglow', nsfw: true, seconds: 5,
     motion: 'she lies back naked with her legs still open, her pussy wet and flushed, chest heaving as she catches her breath, then smiles lazily at the camera and licks her fingers' },
+  // H3 only: one clip of 10 or 15 seconds, with sound.
+  { label: 'H3 · Fingering', nsfw: true, model: 'h3-gv', seconds: 10,
+    motion: 'she lies back with her legs spread wide, sliding two fingers deep into her wet pussy and pumping them in and out, curling them inside her, her thumb rubbing her clit, her pussy lips glistening around her fingers, her back arching as she moans louder and louder' },
+  { label: 'H3 · Wand to orgasm', nsfw: true, model: 'h3-gv', seconds: 15,
+    motion: 'she is sitting with open legs while masturbating with a wand massager pressed against her clit, grinding her hips into it and moaning; she has an orgasm that causes her to shake and cry out, her pussy and anus having strong orgasmic contractions visibly tightening and releasing rhythmically, then she falls back into a relaxed state, audibly catching her breath' },
+  { label: 'H3 · Fingered orgasm', nsfw: true, model: 'h3-gv', seconds: 15,
+    motion: 'she is fingering her wet pussy with two fingers while rubbing her clit, going faster and harder, her thighs trembling; she has an orgasm that makes her whole body jerk, her pussy and anus contracting rhythmically around her fingers, then she slowly pulls her fingers out and falls back, audibly catching her breath' },
+  { label: 'H3 · Spread & tease', nsfw: true, model: 'h3-gv', seconds: 10,
+    motion: 'she lies back naked and opens her legs toward the camera, spreading her pussy lips with two fingers to show her wet pink vagina, then slowly rubs her clit in circles while whispering and moaning, looking straight into the camera' },
   { label: 'Hair flip', nsfw: false, seconds: 5,
     motion: 'she flips her hair over one shoulder with one hand, tilts her head and smiles at the camera, then holds the look' },
   { label: 'Wink & kiss', nsfw: false, seconds: 5,
@@ -3329,7 +3338,8 @@ function renderPresets() {
   if (!box) return;
   const nsfw = genRating === 'nsfw';
   const usable = MOTION_PRESETS.map((p, i) => [p, i]).filter(([p]) => p.nsfw === nsfw
-    && (!p.nsfw || videoModels().some(m => LORA_VIDEO_MODELS.includes(m))));
+    && (p.model ? videoModels().includes(p.model)
+        : !p.nsfw || videoModels().some(m => LORA_VIDEO_MODELS.includes(m))));
   box.style.display = genJob === 'animate' && usable.length ? '' : 'none';
   box.querySelector('div').innerHTML = usable.map(([p, i]) =>
     `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
@@ -3338,7 +3348,8 @@ function renderPresets() {
 
 async function applyPreset(i) {
   const p = MOTION_PRESETS[i];
-  if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-gv');
+  if (p.model && videoModel() !== p.model) pickVideoModel(p.model);
+  else if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-gv');
   el('gen-video-motion').value = p.motion;
   const secs = el('gen-vsecs');
   if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);
