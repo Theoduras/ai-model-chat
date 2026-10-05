@@ -107,7 +107,7 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
     {% for s in p.sections or [] %}
     <section class="opt" id="{{ s.id }}">
       <h2>{{ s.title }}</h2>
-      {% if s.shot %}<img class="shot" src="/img/docs/studio-{{ s.shot }}.png" alt="{{ s.title }} in the studio" loading="lazy">{% endif %}
+      {% if s.shot %}<img class="shot" src="/img/docs/{{ s.shot }}.png" alt="{{ s.title }}" loading="lazy">{% endif %}
       <p>{{ s.body | safe }}</p>
       {% if s.rows %}<dl class="opts">{% for k, v in s.rows %}<dt>{{ k }}</dt><dd>{{ v | safe }}</dd>{% endfor %}</dl>{% endif %}
       {% if s.tips %}<ul class="tips">{% for t in s.tips %}<li>{{ t | safe }}</li>{% endfor %}</ul>{% endif %}
@@ -138,16 +138,18 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
 // The console's guide registers itself with ConsoleGuide; catch its steps and
 // print them instead of opening the wizard.
 (function () {
+  var SHOTS = {{ shots | tojson }};
   function val(v) { try { return typeof v === 'function' ? v() : v; } catch (e) { return ''; } }
   window.TelegramGuide = window.TelegramGuide || { rerender: function () {} };
   window.ConsoleGuide = { create: function (cfg) {
     var n = (cfg.stages || []).length,
         word = ['no', 'One', 'Two', 'Three', 'Four', 'Five', 'Six', 'Seven', 'Eight'][n] || String(n);
-    var out = (cfg.steps || []).filter(function (s) { return !/operator only/i.test(val(s.title) || ''); })
+    var out = (cfg.steps || []).map(function (s, i) { s._i = i; return s; }).filter(function (s) { return !/operator only/i.test(val(s.title) || ''); })
       .map(function (s) {
         var todo = val(s.do) || [], body = val(s.body) || '', check = val(s.check) || '';
         return '<section class="gstep"><h3>' + val(s.title) + '</h3>' +
           (s.sub ? '<div class="sub">' + val(s.sub) + '</div>' : '') +
+          (SHOTS.indexOf(s._i) > -1 ? '<img class="shot" loading="lazy" alt="" src="/img/docs/{{ p.guide }}-' + s._i + '.png">' : '') +
           (todo.length ? '<ol>' + todo.map(function (d) { return '<li>' + d + '</li>'; }).join('') + '</ol>' : '') +
           (typeof body === 'string' ? body : '') +
           (check ? '<div class="check">✓ ' + check + '</div>' : '') + '</section>';
