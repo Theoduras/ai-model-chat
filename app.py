@@ -8932,7 +8932,13 @@ def help_page(slug=None):
                             if k != DEMO_TIER_KEY],
                   'annual_months': ANNUAL_MONTHS_CHARGED,
                   'packs': [(size, p['eur']) for size, p in CR.PACK_PRICES.items()]}
-    return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug, prices=prices,
+    shots = []
+    guide = (help_pages.PAGES.get(slug) or {}).get('guide')
+    if guide:
+        pre = guide + '-'
+        shots = sorted(int(f[len(pre):-4]) for f in os.listdir(os.path.join(BASE_DIR, 'img', 'docs'))
+                       if f.startswith(pre) and f.endswith('.png') and f[len(pre):-4].isdigit())
+    return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug, prices=prices, shots=shots,
                            pages=help_pages.PAGES, order=help_pages.ORDER, groups=help_pages.GROUPS)
 
 
@@ -19120,7 +19126,6 @@ def api_fanvue_wish():
                    'price_sfw': max(FV_PRICE_FLOOR, int(d.get('price_sfw') or 0)),
                    'price_nsfw': max(FV_PRICE_FLOOR, int(d.get('price_nsfw') or 0)),
                    'test_phrase': str(d.get('test_phrase') or '').strip()[:80],
-                   'lora': str(d.get('lora') or '').strip()[:120],
                    # The Fanvue page saves without these; keep what is there.
                    'provider': 'exclu' if d.get('provider', old.get('provider')) == 'exclu'
                                else 'fanvue',
@@ -33395,8 +33400,6 @@ def _gen_spec(slug, body, user):
         # Seedream conditions on the reference inside the call it already bills.
         spec['explicit'] = imagegen.SHOT_LEVEL.get(shot, 'sfw') != 'sfw'
         _gen_identity_source(slug, body, spec)
-        if model == 'z-image-turbo':
-            spec['lora'] = _fv_wish_cfg(slug).get('lora') or ''
         return spec
 
     # ── Video ────────────────────────────────────────────────────────────────
