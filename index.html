@@ -89,6 +89,14 @@ body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--t
 .left{background:var(--panel);padding:136px 60px 56px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh;transition:padding .35s ease}
 .brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em;transition:font-size .35s ease}
 .brand i{color:var(--accent);font-style:normal}
+.brand-stack{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.studio-cta{display:inline-flex;align-items:center;gap:8px;padding:9px 16px;border-radius:999px;color:#fff;
+  font-weight:700;font-size:.9rem;text-decoration:none;background:var(--grad);background-size:300% 100%;
+  animation:studio-cta-shift 6s linear infinite;box-shadow:0 0 0 2px rgba(255,92,56,.35),0 8px 28px rgba(255,45,120,.45)}
+.studio-cta small{font-weight:600;font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.28)}
+.studio-cta:hover{transform:translateY(-2px);box-shadow:0 0 0 3px rgba(255,92,56,.5),0 12px 34px rgba(255,45,120,.6)}
+@keyframes studio-cta-shift{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.studio-cta{animation:none}}
 .auth{display:flex;align-items:center;gap:10px}
 .auth a{font-size:13px;font-weight:600;text-decoration:none;padding:9px 14px;border-radius:9999px;transition:all .2s;white-space:nowrap}
 .auth-ghost{color:var(--text-soft);border:1px solid var(--hair)}
@@ -326,7 +334,10 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 </head>
 <body data-page="home">
 <header class="site-nav" id="site-nav">
-  <div class="brand"><span data-sn-brand data-edit-id="brand-name">Velvetfunneler</span><i data-sn-suffix>.com</i></div>
+  <div class="brand-stack">
+    <div class="brand"><span data-sn-brand data-edit-id="brand-name">Velvetfunneler</span><i data-sn-suffix>.com</i></div>
+    <a class="studio-cta" href="/studio">&#10022; Generation Studio <small>15 free tokens</small></a>
+  </div>
   <nav class="auth sn-links">
     <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
       <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>

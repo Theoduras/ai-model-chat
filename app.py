@@ -2341,6 +2341,10 @@ def _grant_monthly_tokens(session_db, user):
     """Post this period's allowance if it has not been posted. Keyed on the
     period, so it runs off the first token read of the month and there is no
     cron that can miss it."""
+    # A guest's tokens come from /api/guest/start alone, which is where the
+    # one-per-device check lives.
+    if _is_guest(user):
+        return
     if user.get('tier') == FREE_TIER_KEY and user.get('status') == 'active':
         _grant_free_credits(session_db, _workspace_id(user))
         return
@@ -2445,7 +2449,7 @@ _OPEN_PATHS = (
                # consoles (/telegram-ai-chatbot vs /telegram), and _PAID_PAGES
                # matches on prefix, so they have to be named before it.
                tuple('/' + s for s in platform_pages.PAGES) +
-               ('/login', '/register', '/logout', '/pricing', '/billing',
+               ('/login', '/register', '/logout', '/pricing', '/billing', '/api/guest/',
                '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
@@ -2657,6 +2661,8 @@ def _require_paid_account():
         return None
     user = _current_user()
     wants_json = path.startswith('/api/')
+    if not user and path == '/studio':
+        return None
     if not user:
         if wants_json:
             return jsonify({'error': 'Sign in required'}), 401
@@ -5595,7 +5601,7 @@ def api_me():
                     'status': user.get('status'),
                     'is_admin': bool(user.get('is_admin')),
                     'is_super_admin': bool(user.get('is_super_admin')),
-                    'is_operator': _is_operator(),
+                    'is_operator': _is_operator(), 'guest': _is_guest(user),
                     'seat_role': user.get('seat_role') or 'owner',
                     'hidden_areas': hidden_areas_for(user),
                     'hidden_platforms': hidden_platforms_for(user),
@@ -5798,7 +5804,8 @@ def auth_google_callback():
     try:
         u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
         if u is None:
-            u = create_user(s, email, '', info.get('name') or '', google_sub=sub)
+            u = (_claim_guest(s, email, '', info.get('name') or '', google_sub=sub)
+                 or create_user(s, email, '', info.get('name') or '', google_sub=sub))
             _credit_signup_link(s)
         # Links an existing password account to the Google account on first use.
         if not u.google_sub:
@@ -5822,7 +5829,7 @@ def register():
     from werkzeug.security import generate_password_hash
     from db import create_user, get_user_by_email
     if request.method == 'GET':
-        if _current_user():
+        if _current_user() and not _is_guest(_current_user()):
             return redirect('/billing')
         return render_template_string(REGISTER_HTML)
     email = (request.form.get('email') or '').strip().lower()
@@ -5841,7 +5848,8 @@ def register():
             return render_template_string(
                 REGISTER_HTML, error='That email is already registered.',
                 email=email, name=name)
-        u = create_user(s, email, generate_password_hash(password), name)
+        claimed = _claim_guest(s, email, generate_password_hash(password), name)
+        u = claimed or create_user(s, email, generate_password_hash(password), name)
         _credit_signup_link(s)
         s.commit()
         session['user_id'] = u.id
@@ -5852,6 +5860,8 @@ def register():
     pending = session.pop('pending_invite', '')
     if pending:
         return redirect('/join/' + pending)
+    if claimed:
+        return redirect('/studio')
     trial = session.get('trial_code', '')
     return redirect('/trial/' + trial if trial else '/billing?signup=1')
 
@@ -5875,7 +5885,7 @@ def login():
     from db import get_user_by_email
     nxt = request.args.get('next') or ''
     if request.method == 'GET':
-        if _current_user():
+        if _current_user() and not _is_guest(_current_user()):
             return redirect(nxt or '/billing')
         return render_template_string(SIGNIN_HTML)
     email = (request.form.get('email') or '').strip().lower()
@@ -8792,10 +8802,159 @@ def landing():
 def studio():
     """Generation studio. Every active plan generates photos and explicit Photo
     to Video on its tokens; other video stays admin-only while in testing."""
+    if not _current_user():
+        return render_template_string(GUEST_START_HTML)
     blocked = _require_active()
     if blocked:
         return blocked
     return send_from_directory(BASE_DIR, 'studio.html')
+
+
+# Signed-out visitors try the studio as a guest: a real, hidden account so the
+# studio, ledger and vault need no second code path. Registering claims that
+# same row, so nothing they made is lost.
+GUEST_DOMAIN = '@guest.invalid'
+GUEST_IP_DAYS = 30
+
+_GUEST_API = ('/api/generate/', '/api/personas', '/api/studio/', '/api/me',
+              '/api/tokens', '/api/credits', '/api/guest/', '/api/support',
+              '/api/media/upload')
+_GUEST_API_DENY = ('/api/generate/undress', '/api/generate/persona',
+                   '/api/generate/speech-style', '/api/generate/backstory',
+                   '/api/generate/conversion-triggers', '/api/generate/interests',
+                   '/api/generate/image', '/api/credits/checkout')
+_GUEST_PAGES_DENY = ('/billing', '/account', '/tokens', '/dashboard', '/characters',
+                     '/admin', '/embed-setup', '/undress')
+
+
+def _is_guest(user):
+    return bool(user) and (user.get('email') or '').endswith(GUEST_DOMAIN)
+
+
+def _guest_key(kind, raw):
+    return 'g%s:%s' % (kind, hashlib.sha256(
+        (str(app.secret_key) + '|' + raw).encode()).hexdigest()[:40])
+
+
+@app.before_request
+def _guest_guard():
+    """A guest is an active Free account by construction, so everything the
+    plan gates would let it through. This is the narrower fence: the studio,
+    and nothing that downloads, pays or touches the chatbot."""
+    path = request.path or '/'
+    if '.' in path.rsplit('/', 1)[-1] or not session.get('user_id'):
+        return None
+    user = _current_user()
+    if not _is_guest(user):
+        return None
+    if path.startswith('/api/'):
+        ok = (path.startswith(_GUEST_API) and not path.startswith(_GUEST_API_DENY)
+              and not path.endswith('/download'))
+        if path.startswith('/api/characters') and request.method in ('GET', 'HEAD'):
+            ok = True
+        return None if ok else (jsonify({'error': 'Register to use this',
+                                         'guest': True}), 403)
+    if path.startswith(_GUEST_PAGES_DENY) or (
+            path != '/studio' and _path_needs_plan(path, request.method)):
+        return redirect('/register?next=/studio')
+    return None
+
+
+@app.route('/api/guest/start', methods=['POST'])
+def api_guest_start():
+    """Open a guest studio session. Free tokens go once per device: the
+    fingerprint survives incognito, and the IP covers a second browser on the
+    same connection. A device seen before gets its old guest back."""
+    from db import User, create_user, get_app_setting, set_app_setting
+    if _current_user():
+        return jsonify({'ok': True})
+    fp = str((request.get_json(silent=True) or {}).get('fp') or '')[:200]
+    ip = _client_ip()
+    fp_key = _guest_key('fp', fp) if len(fp) >= 16 else ''
+    ip_key = _guest_key('ip', ip) if ip else ''
+    now = time.time()
+    s = _db_session()
+    try:
+        if fp_key:
+            prior = s.get(User, get_app_setting(s, fp_key) or '')
+            if prior is not None:
+                if not prior.email.endswith(GUEST_DOMAIN):
+                    return jsonify({'ok': False, 'login': True})
+                session['user_id'] = prior.id
+                session.permanent = True
+                return jsonify({'ok': True})
+        ip_seen = ip_key and get_app_setting(s, ip_key)
+        ip_used = bool(ip_seen) and now - float(ip_seen) < GUEST_IP_DAYS * 86400
+        u = create_user(s, 'guest-%s%s' % (secrets.token_hex(8), GUEST_DOMAIN), '', '')
+        _activate_plan(s, u, FREE_TIER_KEY)
+        if fp_key:
+            set_app_setting(s, fp_key, u.id)
+        if ip_key and not ip_used:
+            set_app_setting(s, ip_key, str(now))
+        s.commit()
+        uid = u.id
+    finally:
+        s.close()
+    session['user_id'] = uid
+    session['login_at'] = time.time()
+    session.permanent = True
+    granted = not ip_used and bool(fp_key)
+    if granted:
+        s = _db_session()
+        try:
+            _grant_free_credits(s, _workspace_id(_current_user()))
+        finally:
+            s.close()
+    logger.info('GUEST STARTED user=%s tokens=%s', uid, granted)
+    return jsonify({'ok': True, 'tokens': granted})
+
+
+def _claim_guest(s, email, password_hash, name, google_sub=None):
+    """Turn the signed-in guest into the account being registered, keeping its
+    workspace, vault and remaining tokens. None when there is no guest."""
+    from db import User
+    if not _is_guest(_current_user()):
+        return None
+    u = s.get(User, session.get('user_id'))
+    if u is None:
+        return None
+    u.email, u.password_hash, u.name = email, password_hash or '', name or ''
+    if google_sub:
+        u.google_sub = google_sub
+    s.flush()
+    return u
+
+
+GUEST_START_HTML = """<!doctype html><html><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Generation Studio</title>
+<style>body{margin:0;min-height:100vh;display:grid;place-items:center;background:#0b0b10;
+color:#eee;font:16px system-ui,sans-serif}</style></head>
+<body><p id="m">Opening the studio…</p>
+<script>
+async function fp(){
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  x.textBaseline = 'top'; x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(10, 1, 60, 20);
+  x.fillStyle = '#069'; x.fillText('Velvet\\u2665studio', 2, 15);
+  let gl = '';
+  try { const g = document.createElement('canvas').getContext('webgl'),
+        d = g.getExtension('WEBGL_debug_renderer_info');
+        gl = d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); } catch (e) {}
+  const raw = [c.toDataURL(), gl, screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+    Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.hardwareConcurrency,
+    navigator.deviceMemory, navigator.platform, navigator.language].join('|');
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+(async () => {
+  try {
+    const r = await fetch('/api/guest/start', {method: 'POST',
+      headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fp: await fp()})});
+    const d = await r.json();
+    location.replace(d.login ? '/login?next=/studio' : '/studio');
+  } catch (e) { document.getElementById('m').textContent = 'Could not open the studio. Refresh to try again.'; }
+})();
+</script></body></html>"""
 
 
 # Inline text/image editing for the plain marketing pages (not the persona
@@ -36314,6 +36473,9 @@ def api_generate_job():
         price = CR.quote(spec)
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    if _is_guest(user) and spec.get('explicit'):
+        return jsonify({'ok': False, 'guest': True,
+                        'error': 'Register to generate explicit content.'}), 403
     if (spec['kind'] != 'image' and not user.get('is_admin')
             and not imagegen.job_open(spec.get('job'), 'explicit' if spec.get('explicit') else 'sfw')):
         return jsonify({'ok': False, 'error': 'Video generation is coming soon.'}), 403

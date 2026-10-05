@@ -854,6 +854,7 @@ async function init() {
   try {
     const me = await (await fetch('/api/me')).json();
     chatbotOff = (me.capabilities || {}).chatbot === false;
+    if (me.guest) guestMode();
     el('fv-sub-only').hidden = !chatbotOff;
   } catch (e) {}
   try {
@@ -3846,5 +3847,37 @@ window.addEventListener('pagehide', studioSave);
 
 init().then(() => { studioRestore(); StudioWizard.auto(); });
 </script>
+<script>
+// Guests can try, not take: no saving, and a watermark over the whole page so a
+// screenshot carries it too. The clean files come with registering.
+function guestMode() {
+  document.body.classList.add('guest');
+  const bar = document.createElement('div');
+  bar.className = 'guest-bar';
+  bar.innerHTML = '<span><b>Guest mode</b> &middot; safe-for-work only &middot; register to download and keep your work</span>'
+    + '<a href="/register?next=/studio">Register free</a>';
+  document.body.prepend(bar);
+  const wm = document.createElement('div');
+  wm.className = 'guest-wm';
+  document.body.appendChild(wm);
+  const media = e => e.target.closest && e.target.closest('img,video,canvas');
+  ['contextmenu', 'dragstart'].forEach(t => document.addEventListener(t, e => { if (media(e)) e.preventDefault(); }, true));
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && 'sp'.includes(e.key.toLowerCase())) e.preventDefault();
+  }, true);
+  new MutationObserver(() => document.querySelectorAll('video:not([controlslist])').forEach(v => {
+    v.setAttribute('controlslist', 'nodownload'); v.disablePictureInPicture = true;
+  })).observe(document.body, {childList: true, subtree: true});
+}
+</script>
+<style>
+.guest-bar{position:sticky;top:0;z-index:2147483646;display:flex;gap:12px;align-items:center;justify-content:center;
+  flex-wrap:wrap;padding:10px 16px;background:linear-gradient(120deg,#ff5c38,#ff2d78,#7c3aed);color:#fff;font-size:.9rem}
+.guest-bar a{color:#fff;font-weight:700;padding:5px 14px;border-radius:999px;background:rgba(0,0,0,.3);text-decoration:none}
+.guest-wm{position:fixed;inset:0;z-index:2147483647;pointer-events:none;opacity:.16;
+  background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='260' height='160'%3E%3Ctext x='10' y='90' transform='rotate(-24 130 80)' font-family='Arial' font-size='22' font-weight='700' fill='%23fff' stroke='%23000' stroke-width='.6'%3EVelvetfunneler.com%3C/text%3E%3C/svg%3E")}
+.guest img,.guest video{-webkit-user-drag:none;user-select:none;-webkit-touch-callout:none}
+@media print{.guest *{display:none!important}}
+</style>
 </body>
 </html>
