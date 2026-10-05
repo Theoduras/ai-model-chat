@@ -18,10 +18,15 @@
 body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text);line-height:1.6}
 a{color:var(--accent)}
 .wrap{max-width:1100px;margin:0 auto;padding:130px 24px 80px;display:grid;grid-template-columns:220px 1fr;gap:48px}
-nav.toc{position:sticky;top:110px;align-self:start;font-size:14px}
+nav.toc{position:sticky;top:110px;align-self:start;font-size:14px;max-height:calc(100vh - 130px);overflow-y:auto}
 nav.toc h4{font-size:11px;letter-spacing:.18em;text-transform:uppercase;color:var(--text-dim);margin:18px 0 6px}
 nav.toc a{display:block;color:var(--text-soft);text-decoration:none;padding:4px 10px;border-radius:8px}
 nav.toc a:hover{background:var(--hover);color:var(--text)}
+nav.toc a.sub{padding-left:24px;font-size:13px;color:var(--text-dim)}
+section.opt{scroll-margin-top:100px}
+section.opt>p{margin:0 0 14px;color:var(--text-soft)}
+section.opt .tips{margin-top:14px}
+img.shot{display:block;max-width:100%;height:auto;border:1px solid var(--hair);border-radius:12px;margin:0 0 14px}
 nav.toc a.on{color:var(--text);background:var(--hover);font-weight:600}
 h1{font-family:'Sora',system-ui,sans-serif;font-size:40px;line-height:1.1;letter-spacing:-.02em;margin-bottom:12px}
 h2{font-family:'Sora',system-ui,sans-serif;font-size:22px;margin:40px 0 14px}
@@ -62,6 +67,9 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
     <h4>{{ g }}</h4>
     {% for slug in order if pages[slug].group == g %}
     <a href="/docs/{{ slug }}"{% if p and slug == slug_on %} class="on"{% endif %}>{{ pages[slug].title }}</a>
+    {% for s in pages[slug].sections or [] %}
+    <a class="sub" href="/docs/{{ slug }}#{{ s.id }}">{{ s.title }}</a>
+    {% endfor %}
     {% endfor %}
     {% endfor %}
   </nav>
@@ -96,6 +104,15 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
     <dl class="opts">{% for k, v in rows %}<dt>{{ k }}</dt><dd>{{ v | safe }}</dd>{% endfor %}</dl>
     {% endfor %}
     {% endif %}
+    {% for s in p.sections or [] %}
+    <section class="opt" id="{{ s.id }}">
+      <h2>{{ s.title }}</h2>
+      {% if s.shot %}<img class="shot" src="/img/docs/studio-{{ s.shot }}.png" alt="{{ s.title }} in the studio" loading="lazy">{% endif %}
+      <p>{{ s.body | safe }}</p>
+      {% if s.rows %}<dl class="opts">{% for k, v in s.rows %}<dt>{{ k }}</dt><dd>{{ v | safe }}</dd>{% endfor %}</dl>{% endif %}
+      {% if s.tips %}<ul class="tips">{% for t in s.tips %}<li>{{ t | safe }}</li>{% endfor %}</ul>{% endif %}
+    </section>
+    {% endfor %}
     {% if prices %}
     <h2>Prices</h2>
     <h3>Plans, per month</h3>
