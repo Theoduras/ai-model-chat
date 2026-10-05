@@ -33728,7 +33728,11 @@ _DEFAULT_VIDEO_LORAS = [{
     # Civitai model 2887438, V1.
     'id': 'fingering-h3', 'name': 'H3 Fingering', 'scale': 1.0, 'family': 'h3',
     'trigger': 'fingering', 'examples': '',
-    'high': 'https://civitai.com/api/download/models/3264127', 'low': ''}]
+    'high': 'https://civitai.com/api/download/models/3264127', 'low': ''}, {
+    # Civitai model 2846342, v0.5 (stills + motion).
+    'id': 'hmpussy-h3', 'name': 'HMPussy v0.5 (H3)', 'scale': 1.0, 'family': 'h3',
+    'trigger': 'hmpussy, Vagina', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3215304', 'low': ''}]
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)

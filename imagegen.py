@@ -2511,6 +2511,12 @@ class RunPodProvider(Provider):
 
 # H3 at 24 fps wants 17n+5 frames; turbo LoRA at 8 steps, as Comfy's template.
 H3_STEPS = 8
+# Above 1 the negative prompt counts, at the price of a second model pass per
+# step (about twice the GPU time). 1 is Comfy's turbo template: no negative.
+try:
+    H3_CFG = float(os.getenv('H3_CFG') or 2.0)
+except ValueError:
+    H3_CFG = 2.0
 
 
 # H3 prompts are fixed locks around one written action, so nothing but the
@@ -2612,6 +2618,20 @@ def h3_payload(spec, image, ref=None):
             'image': ['fit', 0], 'frame_idx': 0}}
         wf['guider']['inputs']['conditioning'] = ['guide', 0]
         images.append({'name': 'ref.png', 'image': ref})
+    negative = negative_for(spec)
+    if H3_CFG > 1 and negative:
+        # The negative is conditioned exactly like the positive -- same frame,
+        # same references -- so the two passes differ only in the words.
+        wf['ncond'] = {'class_type': wf['cond']['class_type'],
+                       'inputs': dict(wf['cond']['inputs'], prompt=negative)}
+        neg = ['ncond', 0]
+        if 'guide' in wf:
+            wf['nguide'] = {'class_type': 'MiniMaxH3AddGuide',
+                            'inputs': dict(wf['guide']['inputs'], positive=['ncond', 0])}
+            neg = ['nguide', 0]
+        wf['guider'] = {'class_type': 'CFGGuider', 'inputs': {
+            'model': model, 'positive': wf['guider']['inputs']['conditioning'],
+            'negative': neg, 'cfg': H3_CFG}}
     return {'input': {'workflow': wf, 'images': images}}
 
 

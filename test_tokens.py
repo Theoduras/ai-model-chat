@@ -666,11 +666,16 @@ def test_wan22_on_runpod():
               'exact tattoos' in one and 'she rubs' in one and one.endswith('Camera stays fixed.')
               and '<Picture 2> (frame0)' not in one and '<Picture 2> (frame0)' in two
               and '<Picture 1> (ref)' in two)
+        cfg = IG2.h3_payload({'aspect': '9:16', 'seconds': 5, 'prompt': 'p', 'negative': 'blurry'}, 'A', 'B')['input']['workflow']
+        check('an H3 clip runs its negative through CFG, conditioned like the positive',
+              cfg['guider']['class_type'] == 'CFGGuider' and cfg['guider']['inputs']['negative'] == ['nguide', 0]
+              and cfg['ncond']['inputs']['prompt'] == 'blurry'
+              and cfg['ncond']['inputs']['ref_images.ref_image_0'] == ['ref', 0])
         h3 = IG2.h3_payload({'aspect': '9:16', 'seconds': 15}, 'A', 'B')['input']
         check('a later H3 part starts on the last frame and holds her photo as <Picture 1>',
               [i['name'] for i in h3['images']] == ['still.png', 'ref.png']
               and h3['workflow']['guide']['inputs']['frame_idx'] == 0
-              and h3['workflow']['guider']['inputs']['conditioning'] == ['guide', 0])
+              and h3['workflow']['guider']['inputs']['positive'] == ['guide', 0])
         if IG2.HAS_FFMPEG:
             check('a long clip splits into whole parts the model serves',
                   IG2.chain_plan('wan-2-2', 30) == [15, 15]
