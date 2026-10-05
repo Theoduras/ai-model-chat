@@ -124,11 +124,14 @@ VIDEO_COST_USD_PER_SECOND = {
     # each burst also pays up to 5 idle minutes (~$0.15) no clip is charged for.
     # The price is set well above that on purpose (raised 1.5x on a full card
     # that cost twice as much). 480p is unmeasured; 1080p is not offered.
-    'wan-2-2-gv': {'480p': 0.0675, '720p': 0.105, '1080p': 0.27},
+    # Repriced to public Wan 2.2 A14B rates: fal $0.04/s 480p, $0.08/s 720p;
+    # RunPod's public endpoint $0.06/s.
+    'wan-2-2-gv': {'480p': 0.04, '720p': 0.06, '1080p': 0.27},
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
-    'h3-gv': {'480p': 0.10, '720p': 0.14, '1080p': 0.14},
+    # Repriced to MiniMax's own H3 API ($0.08/s 768p, $0.13/s 2K), kept above Wan 2.2.
+    'h3-gv': {'480p': 0.06, '720p': 0.08, '1080p': 0.13},
 }
 
 PROVIDER_COST_MEASURED = {
