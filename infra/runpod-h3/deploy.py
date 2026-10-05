@@ -25,14 +25,19 @@ HF = 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main'
 # worker-comfyui reads /runpod-volume/models/{unet,clip,vae,loras}; ComfyUI
 # maps unet and clip onto diffusion_models and text_encoders.
 FILES = [
-    ('unet', 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors'),
-    ('clip', 'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors'),
+    ('unet', 'diffusion_models/minimax_h3_fl2va_pruned_w6a8.safetensors'),
+    ('clip', 'text_encoders/qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors'),
     ('vae', 'vae/minimax_h3_video_vae_int8_convrot.safetensors'),
     ('vae', 'vae/minimax_h3_audio_vae_fp32.safetensors'),
     ('loras', 'loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'),
 ]
-GPUS = ['NVIDIA H100 80GB HBM3', 'NVIDIA H100 PCIe', 'NVIDIA H100 NVL',
-        'NVIDIA A100-SXM4-80GB', 'NVIDIA A100 80GB PCIe']
+# nvfp4 and w6a8 are the smallest files (~35 GB against ~52) and run on
+# Blackwell alone, so the endpoint is RTX PRO 6000s only.
+GPUS = ['NVIDIA RTX PRO 6000 Blackwell Workstation Edition',
+        'NVIDIA RTX PRO 6000 Blackwell Server Edition']
+# One data centre, so a new worker more often lands on a host that already has
+# the image and its weights.
+DC = 'EU-RO-1'
 
 # Runs on the download pod. The pod is never left to exit: RunPod restarts an
 # exited container, so a finished or failed download would start over forever.
@@ -256,4 +261,4 @@ if __name__ == '__main__':
     if sys.argv[1:2] == ['test']:
         test(sys.argv[2])
     else:
-        deploy(sys.argv[1] if len(sys.argv) > 1 else None)
+        deploy(sys.argv[1] if len(sys.argv) > 1 else DC)

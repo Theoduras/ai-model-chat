@@ -152,8 +152,9 @@ _GV = os.getenv('RUNPOD_GV_ENDPOINT', 'ys8km1d7sayxtz').strip().rstrip('/')
 if _GV:
     RUNPOD_ENDPOINTS['wan-2-2-gv'] = _GV if '/' in _GV else f'https://api.runpod.ai/v2/{_GV}'
 # Our MiniMax H3 endpoint (infra/runpod-h3): image to video with its own audio.
-# Off until the endpoint exists; set RUNPOD_H3_ENDPOINT to its id.
-_H3 = os.getenv('RUNPOD_H3_ENDPOINT', '').strip().rstrip('/')
+# Its weights are Blackwell-only (nvfp4, w6a8), so the endpoint runs RTX PRO 6000s.
+# The id is the default so no host needs config; set the variable empty to drop it.
+_H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'szk0bfj0wywyyv').strip().rstrip('/')
 if _H3:
     RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
@@ -2514,25 +2515,29 @@ H3_STEPS = 8
 
 # H3 prompts are fixed locks around one written action, so nothing but the
 # action varies from clip to clip and her identity never rides on wording.
-H3_LOCKS = ('exact face, exact hair, exact body, exact tattoos, exact piercings, '
-            'exact clothes, exact background')
+# Never names tattoos or piercings: H3 has no negative input, so any word in
+# the prompt is something to draw, and "no new tattoos" adds tattoos.
+H3_LOCKS = 'her exact face, hair, body, skin, clothes and background'
 H3_START = ('Video starts exactly on <Picture 2> (frame0): same position, pose, framing, '
             'and background, and continues from there.')
 H3_CAMERA = ('Camera locked to reference: same framing, same angle, same distance, no zoom, '
              'no pan, no tilt, no dolly, no orbit, no shake.')
-H3_CLOSE = ('Identity never changes. No new tattoos. No missing tattoos. No extra piercings. '
-            'No missing piercings. Camera stays fixed.')
+H3_CLOSE = ('She stays exactly as she looks in the reference image, with nothing added to '
+            'or removed from her skin or body. Camera stays fixed.')
 
 
-# Age words never go into the positive: naming them there invites them.
+# Words that never go into the positive, even as "avoid": naming them there
+# invites them.
 _H3_NO_AVOID = {'child', 'teen', 'underage'}
+_H3_NO_AVOID_WORDS = ('tattoo', 'piercing')
 
 
 def h3_avoid(negative=None):
     """The negative prompt as a sentence: H3 has no negative input, so what
     it must not do is said in the prompt itself."""
     terms = [t.strip() for t in (negative or merge_negative('', video=True)).split(',')]
-    terms = [t for t in terms if t and t.lower() not in _H3_NO_AVOID]
+    terms = [t for t in terms if t and t.lower() not in _H3_NO_AVOID
+             and not any(w in t.lower() for w in _H3_NO_AVOID_WORDS)]
     return ('Avoid: ' + ', '.join(terms) + '.') if terms else ''
 
 
@@ -2564,7 +2569,7 @@ def h3_payload(spec, image, ref=None):
     model = ['unet', 0]
     wf = {
         'unet': {'class_type': 'UNETLoader', 'inputs': {
-            'unet_name': 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'weight_dtype': 'default'}},
+            'unet_name': 'minimax_h3_fl2va_pruned_w6a8.safetensors', 'weight_dtype': 'default'}},
         'turbo': {'class_type': 'LoraLoaderModelOnly', 'inputs': {
             'model': model, 'lora_name': 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
             'strength_model': 1.0}},
@@ -2578,7 +2583,7 @@ def h3_payload(spec, image, ref=None):
             model = [f'lora{i}', 0]
     wf.update({
         'clip': {'class_type': 'CLIPLoader', 'inputs': {
-            'clip_name': 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+            'clip_name': 'qwen3vl_32b_minimax_h3_nvfp4_awq.safetensors',
             'type': 'minimax', 'device': 'default'}},
         'vae': {'class_type': 'VAELoader', 'inputs': {
             'vae_name': 'minimax_h3_video_vae_int8_convrot.safetensors'}},

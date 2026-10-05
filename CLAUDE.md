@@ -471,6 +471,9 @@ live on the Cloud Run service, not in this repository; change them with
   `RUNPOD_GV_ENDPOINT`; it only needs `RUNPOD_API_KEY` on the host (and `CIVITAI_TOKEN` for
   Civitai LoRAs). Its template's start command runs `infra/runpod-gv-patch.py`, which makes the
   stock worker take LoRA links, our seed and our steps; re-install it if the template is rebuilt.
+- Explicit video with sound, "Explicit Video + Sound (H3)" (`h3-gv`), runs on our RunPod endpoint
+  `szk0bfj0wywyyv`, set up by `infra/runpod-h3/deploy.py` (the code default for
+  `RUNPOD_H3_ENDPOINT`). Its weights are nvfp4/w6a8, so it must stay on Blackwell (RTX PRO 6000), RO.
 
 ---
 
