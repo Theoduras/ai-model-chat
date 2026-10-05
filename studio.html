@@ -3055,6 +3055,7 @@ async function runGeneration() {
       }),
     });
     const d = await res.json();
+    if (!d.ok && d.guest) { setGenStatus('', null); return; }
     if (!d.ok) throw new Error(d.error || 'Generation failed');
     setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}`, null);
     loadCredits();
@@ -3142,6 +3143,7 @@ async function runVideoJob() {
       body: JSON.stringify(body),
     });
     const d = await res.json();
+    if (!d.ok && d.guest) { setGenStatus('', null); return; }
     if (!d.ok) throw new Error(d.error || 'Generation failed');
     setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It takes a few minutes.`, null);
     loadCredits();
@@ -3894,12 +3896,82 @@ function guestMode() {
   }, true);
   const media = e => e.target.closest && e.target.closest('img,video,canvas');
   ['contextmenu', 'dragstart'].forEach(t => document.addEventListener(t, e => { if (media(e)) e.preventDefault(); }, true));
+  // Anything a guest may not do comes back with `guest: true`; it opens the
+  // register offer instead of an error line.
+  const fetch0 = window.fetch;
+  window.fetch = function () {
+    return fetch0.apply(this, arguments).then(r => {
+      if (r.status === 403) r.clone().json().then(d => { if (d && d.guest) guestGate(d.error); }, () => {});
+      return r;
+    });
+  };
   new MutationObserver(() => document.querySelectorAll('video:not([controlslist])').forEach(v => {
     v.setAttribute('controlslist', 'nodownload'); v.disablePictureInPicture = true;
   })).observe(document.body, {childList: true, subtree: true});
 }
+
+function guestGate(reason) {
+  let g = document.querySelector('.guest-gate');
+  if (!g) {
+    g = document.createElement('div');
+    g.className = 'guest-gate';
+    g.innerHTML = `
+      <div class="gg-card" role="dialog" aria-modal="true" aria-labelledby="gg-title">
+        <button type="button" class="gg-x" aria-label="Close">&times;</button>
+        <div class="gg-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg></div>
+        <h2 id="gg-title">Unlock explicit content</h2>
+        <p class="gg-reason"></p>
+        <p class="gg-sub">As a guest you can make safe-for-work photos and clips. A free account opens up the rest.</p>
+        <ul class="gg-list">
+          <li><b>Explicit photos and Photo to Video</b></li>
+          <li><b>Download</b> everything you make, without limits</li>
+          <li><b>Keep your work</b> &mdash; this studio, your settings and every generation come with you</li>
+        </ul>
+        <a class="gg-cta" href="/register?next=/studio">Register free</a>
+        <p class="gg-fine">No credit card needed<br>Already have an account? <a href="/login?next=/studio">Log in</a></p>
+      </div>`;
+    document.body.appendChild(g);
+    const close = () => g.classList.remove('open');
+    g.addEventListener('click', e => { if (e.target === g || e.target.closest('.gg-x')) close(); });
+    document.addEventListener('keydown', e => { if (e.key === 'Escape') close(); });
+    g.querySelectorAll('a').forEach(a => a.addEventListener('click', () => { try { studioSave(); } catch (x) {} }));
+  }
+  g.querySelector('.gg-reason').textContent = reason || 'Register to use this.';
+  g.classList.add('open');
+  setTimeout(() => g.querySelector('.gg-cta').focus(), 50);
+}
 </script>
 <style>
+.guest-gate{position:fixed;inset:0;z-index:5000;display:none;align-items:center;justify-content:center;padding:16px;
+  background:rgba(8,8,12,.62);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px)}
+.guest-gate.open{display:flex;animation:gg-fade .18s ease}
+.gg-card{position:relative;width:100%;max-width:420px;padding:32px 30px 26px;border-radius:20px;text-align:center;
+  background:var(--panel);color:var(--text);border:1px solid var(--border);
+  box-shadow:0 24px 64px rgba(0,0,0,.35),0 2px 8px rgba(0,0,0,.12);animation:gg-pop .22s cubic-bezier(.34,1.56,.64,1)}
+.gg-x{position:absolute;top:12px;right:12px;width:32px;height:32px;border-radius:999px;border:0;background:transparent;
+  color:var(--text-3);font-size:22px;line-height:1;cursor:pointer}
+.gg-x:hover{background:var(--surface-2);color:var(--text)}
+.gg-badge{width:56px;height:56px;margin:0 auto 16px;border-radius:16px;display:grid;place-items:center;color:#fff;
+  background:linear-gradient(135deg,#ff5c38,#ff2d78 55%,#7c3aed);box-shadow:0 10px 26px rgba(255,45,120,.35)}
+.gg-badge svg{width:26px;height:26px}
+.gg-card h2{margin:0 0 6px;font-family:var(--display,var(--font));font-size:22px;font-weight:800;letter-spacing:-.01em}
+.gg-reason{margin:0 0 14px;font-size:14px;font-weight:600;color:var(--accent)}
+.gg-sub{margin:0 0 16px;font-size:14px;line-height:1.5;color:var(--text-2)}
+.gg-list{list-style:none;margin:0 0 22px;padding:14px 16px;text-align:left;border-radius:14px;background:var(--surface-2);
+  display:grid;gap:10px;font-size:13.5px;line-height:1.45;color:var(--text-2)}
+.gg-list li{position:relative;padding-left:26px}
+.gg-list li::before{content:'';position:absolute;left:0;top:1px;width:18px;height:18px;border-radius:999px;
+  background:var(--accent) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='3' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 12.5l4.5 4.5L19 7.5'/%3E%3C/svg%3E") center/12px no-repeat}
+.gg-list b{color:var(--text);font-weight:700}
+.gg-cta{display:block;padding:13px 18px;border-radius:12px;color:#fff;font-weight:700;font-size:15px;text-decoration:none;
+  background:linear-gradient(120deg,#ff5c38,#ff2d78);box-shadow:0 8px 22px rgba(255,45,120,.32);transition:transform .15s,box-shadow .15s}
+.gg-cta:hover{transform:translateY(-1px);box-shadow:0 12px 28px rgba(255,45,120,.42)}
+.gg-cta:focus-visible{outline:3px solid rgba(255,92,56,.45);outline-offset:3px}
+.gg-fine{margin:14px 0 0;font-size:12.5px;line-height:1.6;color:var(--text-3)}
+.gg-fine a{color:var(--accent);font-weight:600;text-decoration:none}
+@keyframes gg-fade{from{opacity:0}}
+@keyframes gg-pop{from{opacity:0;transform:translateY(8px) scale(.97)}}
+@media (max-width:480px){.gg-card{padding:28px 20px 22px}.gg-card h2{font-size:20px}}
 html[data-guest] body{padding-top:96px}
 /* The marketing bar, not the app header this page's dashboard styles expect. */
 html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;left:60px;right:auto;

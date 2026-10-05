@@ -5803,9 +5803,10 @@ def auth_google_callback():
     s = _db_session()
     try:
         u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
+        claimed = None
         if u is None:
-            u = (_claim_guest(s, email, '', info.get('name') or '', google_sub=sub)
-                 or create_user(s, email, '', info.get('name') or '', google_sub=sub))
+            claimed = _claim_guest(s, email, '', info.get('name') or '', google_sub=sub)
+            u = claimed or create_user(s, email, '', info.get('name') or '', google_sub=sub)
             _credit_signup_link(s)
         # Links an existing password account to the Google account on first use.
         if not u.google_sub:
@@ -5819,6 +5820,8 @@ def auth_google_callback():
         active = u.status == 'active' or (u.role or 'user') == 'admin'
     finally:
         s.close()
+    if claimed:
+        return redirect('/studio')
     if nxt and active:
         return redirect(nxt)
     return _post_signin_redirect(active)
