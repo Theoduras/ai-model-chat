@@ -2397,7 +2397,9 @@ class RunPodProvider(Provider):
         if model == 'h3-gv':
             # worker-comfyui decodes every input image as base64 and fetches no
             # links, so a URL arrives as an unreadable still.png.
-            if not spec.get('reference_b64'):
+            if spec.get('reference_b64'):
+                image = _data_uri(spec['reference_b64'], spec.get('reference_mime'))
+            else:
                 data, mime = fetch_result(image)
                 image = _data_uri(base64.b64encode(data).decode(), mime)
             return h3_payload(spec, image)
