@@ -33685,7 +33685,7 @@ def _gen_spec(slug, body, user):
                     if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
             _auto_lora(picked, library.get(want))
         if spec['explicit'] and family == 'h3':
-            for words, want in ((_FINGERING_WORDS, 'fingering-h3'),
+            for words, want in ((_PUSSY_WORDS, 'hmpussy-h3'), (_FINGERING_WORDS, 'fingering-h3'),
                                 (_MASTURBATION_WORDS, 'masturbation-h3')):
                 lora = library.get(want)
                 if (len(picked) < 4 and words.search(text) and lora
@@ -33737,6 +33737,7 @@ _DEFAULT_VIDEO_LORAS = [{
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
 _MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|wand|massager)\b', re.I)
+_PUSSY_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
 _FINGERING_WORDS = re.compile(r'\b(fingering|fingered|fingers?\s+(deep\s+)?(in|into|inside|herself))\b', re.I)
 
 
