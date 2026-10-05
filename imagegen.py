@@ -146,6 +146,11 @@ RUNPOD_ENDPOINTS = {
     'wan-2-2-lora': os.getenv('RUNPOD_WAN22_LORA_ENDPOINT',
                               'https://api.runpod.ai/v2/wan-2-2-t2v-720-lora'),
 }
+# Our own serverless endpoint from the hub's wlsdml1114/generate_video (Wan 2.2
+# I2V on ComfyUI, no safety checker at all). Billed per GPU-second, not per clip.
+_GV = (os.getenv('RUNPOD_GV_ENDPOINT') or '').strip().rstrip('/')
+if _GV:
+    RUNPOD_ENDPOINTS['wan-2-2-gv'] = _GV if '/' in _GV else f'https://api.runpod.ai/v2/{_GV}'
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
@@ -511,6 +516,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-2': (5, 8, 10, 15),
     'wan-2-6-rp': (5, 10, 15),
     'wan-2-2-lora': (5, 8),
+    'wan-2-2-gv': (5, 8),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -551,6 +557,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-2': (5, 15),
     'wan-2-6-rp': (5, 15),
     'wan-2-2-lora': (5, 8),
+    'wan-2-2-gv': (5, 8),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2342,7 +2349,11 @@ class RunPodProvider(Provider):
     def _read(body):
         status = (body.get('status') or '').upper()
         if status == 'COMPLETED':
-            url = _first_url(body.get('output'))
+            out = body.get('output')
+            url = _first_url(out)
+            if not url and isinstance(out, dict) and isinstance(out.get('video'), str):
+                # generate_video hands the clip back inline as base64.
+                url = 'data:video/mp4;base64,' + out['video']
             if url:
                 return Result('done', [url])
             return Result('failed', error='RunPod finished without a video')
@@ -2357,6 +2368,22 @@ class RunPodProvider(Provider):
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
+        if model == 'wan-2-2-gv':
+            width, height = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
+            body = {
+                'prompt': spec.get('prompt') or build_video_prompt(),
+                'negative_prompt': negative_for(spec),
+                'width': width, 'height': height,
+                # 16 fps, and Wan wants 4n+1 frames.
+                'length': video_seconds(model, spec.get('seconds')) * 16 + 1,
+                'steps': 10, 'cfg': 2.0,
+                'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1),
+            }
+            if spec.get('reference_url'):
+                body['image_url'] = spec['reference_url']
+            else:
+                body['image_base64'] = spec['reference_b64']
+            return {'input': body}
         if model == 'wan-2-6-rp':
             return {'input': {
                 'prompt': spec.get('prompt') or build_video_prompt(),
@@ -2696,6 +2723,9 @@ def fetch_result(url):
     """Pull a finished generation off the provider's CDN. Their URLs are short
     lived, so nothing downstream may hold one — the bytes go to our storage."""
     import requests
+    if url.startswith('data:'):
+        mime, b64 = url[5:].split(';base64,', 1)
+        return base64.b64decode(b64), mime
     try:
         resp = requests.get(url, timeout=TIMEOUT * 3)
         resp.raise_for_status()

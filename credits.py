@@ -58,7 +58,7 @@ DEFAULT_VIDEO_DURATION = 5
 
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora')
+                'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -121,6 +121,9 @@ VIDEO_COST_USD_PER_SECOND = {
     'wan-2-6-rp': {'480p': 0.10, '720p': 0.10, '1080p': 0.15},
     # RunPod's Wan 2.2 LoRA page: $0.35 for 5s, $0.56 for 8s -- $0.07 a second.
     'wan-2-2-lora': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
+    # Our generate_video endpoint on an RTX 6000 Ada: ~$0.00053/GPU-s and
+    # roughly 2-3 GPU-minutes for a 5s 720p clip at 10 steps, cold starts aside.
+    'wan-2-2-gv': {'480p': 0.012, '720p': 0.02, '1080p': 0.04},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -260,6 +263,7 @@ MODEL_LABELS = {
     'wan-2-2': 'Wan 2.2',
     'wan-2-6-rp': 'Wan 2.6 (Runpod)',
     'wan-2-2-lora': 'Wan 2.2 + LoRA',
+    'wan-2-2-gv': 'Wan 2.2 (own endpoint)',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -299,6 +303,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-2': ('sfw', 'nsfw'),
     'wan-2-6-rp': ('sfw', 'nsfw'),
     'wan-2-2-lora': ('sfw', 'nsfw'),
+    'wan-2-2-gv': ('sfw', 'nsfw'),
     'p-video-animate': ('sfw', 'nsfw'),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a
