@@ -33345,7 +33345,9 @@ def _gen_spec(slug, body, user):
         for i in range(1, len(plan)):
             last = (wanted[i - 1] if i - 1 < len(wanted) and wanted[i - 1] else last)
             motions.append(last)
-        spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions}
+        prompts = [str(p or '').strip()[:2000] for p in (body.get('chain_prompts') or [])]
+        spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions,
+                         'prompts': (prompts + [''] * len(motions))[:len(motions)]}
     elif seconds > CR.VIDEO_MAX_SECONDS:
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
@@ -35787,17 +35789,27 @@ def api_generate_video_prompt():
         spec = _gen_spec(slug, body, _current_user())
         if spec.get('identity') == 'character' and not spec.get('character'):
             spec['character'] = _character_snapshot(slug)
-        prompt = _gen_video_prompt(slug, spec)
+        # `part` (2, 3, ...) asks for a later part of a chained clip.
+        part = int(body.get('part') or 0)
+        chain = spec.get('chain') or {}
+        if part >= 2 and part - 2 < len(chain.get('motions') or []):
+            motion = chain['motions'][part - 2]
+            prompt = imagegen.build_chain_prompt(motion)
+        else:
+            motion = spec.get('prompt_extra') or spec.get('motion', '')
+            prompt = _gen_video_prompt(slug, spec)
+        note = ''
         if body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
+            why = {}
             written = imagegen.write_motion_prompt(
-                spec.get('prompt_extra') or spec.get('motion', ''), prompt,
-                spec.get('explicit'), style=imagegen.lora_style(spec))
+                motion, prompt, spec.get('explicit'), style=imagegen.lora_style(spec), why=why)
             if written:
                 logger.info('motion prompt written: %s', written)
                 prompt = written
             else:
-                logger.warning('motion prompt: Qwen gave nothing, kept the template')
-        return jsonify({'ok': True, 'prompt': prompt})
+                note = f"Qwen did not write it — {why.get('reason', 'no answer')}. Kept the template."
+                logger.warning('motion prompt: %s', note)
+        return jsonify({'ok': True, 'prompt': prompt, 'note': note})
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
 
@@ -36650,11 +36662,12 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
                          'reference_mime': 'image/jpeg',
                          'negative': imagegen.merge_negative(spec.get('negative_extra'),
                                                              video=True)})
-            template = ('Continue the motion seamlessly from the first frame. '
-                        + imagegen.build_video_prompt(motion))
-            call['prompt'] = (imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
-                                                           style=imagegen.lora_style(spec))
-                              or template)
+            template = imagegen.build_chain_prompt(motion)
+            # A part prompt the creator wrote or edited runs as written.
+            stored = chain.get('prompts') or []
+            call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
+                imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
+                                             style=imagegen.lora_style(spec)) or template)
             logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
                         len(chain['plan']), call['prompt'])
             new_job, _ = imagegen.get_provider(provider_name).submit_video(call)

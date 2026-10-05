@@ -1422,6 +1422,11 @@ def build_video_prompt(motion=''):
             f'through the whole clip, her expression matching it. {hold}')
 
 
+def build_chain_prompt(motion=''):
+    """A later part of a chained clip: it starts on the previous part's last frame."""
+    return 'Continue the motion seamlessly from the first frame. ' + build_video_prompt(motion)
+
+
 def build_reel_prompt(prompt='', has_photo=False, character=False):
     """A safe-work reel. Without a character it may run from a prompt alone and
     makes no claim to be anybody -- so nothing in this wording describes a
@@ -2425,12 +2430,15 @@ def lora_url(url):
     return url
 
 
-def _runpod_chat(endpoint, model, messages, max_tokens=300):
+def _runpod_chat(endpoint, model, messages, max_tokens=300, why=None):
     """One chat completion on a RunPod public endpoint, or '' -- a prompt
-    helper that fails must never stop the clip it was helping."""
+    helper that fails must never stop the clip it was helping. `why`, when
+    given, is told the reason for an empty answer, for the studio to show."""
     import requests
+    why = why if why is not None else {}
     key = (RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
     if not key:
+        why['reason'] = 'RUNPOD_API_KEY is not set'
         return ''
     try:
         resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
@@ -2445,19 +2453,23 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300):
         body = resp.json()
         text = body['choices'][0]['message']['content'] or ''
     except Exception as e:
+        status = getattr(locals().get('resp'), 'status_code', '-')
+        excerpt = getattr(locals().get('resp'), 'text', '') or str(e)
         logger.warning('runpod chat %s failed: %s; status=%s body=%.500s', model, e,
-                       getattr(locals().get('resp'), 'status_code', '-'),
-                       getattr(locals().get('resp'), 'text', ''))
+                       status, excerpt)
+        why['reason'] = f'error {status}: {excerpt[:150]}'
         return ''
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
     if not text:
-        logger.warning('runpod chat %s: empty answer; finish=%s', model,
-                       (body.get('choices') or [{}])[0].get('finish_reason'))
+        finish = (body.get('choices') or [{}])[0].get('finish_reason')
+        logger.warning('runpod chat %s: empty answer; finish=%s', model, finish)
+        why['reason'] = f'empty answer (finish={finish})'
         return ''
     # A refusal is not a prompt; sent to the video model it would be one.
     if re.match(r"(?i)(i('m| am) sorry|i can(no|')t|i won't|sorry,|as an ai)", text):
         logger.warning('runpod chat %s refused: %.200s', model, text)
+        why['reason'] = 'refused: ' + text[:120]
         return ''
     return text
 
@@ -2502,7 +2514,7 @@ def lora_style(spec):
     return {'triggers': triggers, 'examples': examples[:3000]} if (triggers or examples) else None
 
 
-def _styled_prompt(idea, base, explicit, style):
+def _styled_prompt(idea, base, explicit, style, why=None):
     examples = style.get('examples') or ''
     triggers = style.get('triggers') or []
     text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
@@ -2519,19 +2531,21 @@ def _styled_prompt(idea, base, explicit, style):
             'background. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
         {'role': 'user', 'content': (f'Examples:\n{examples}\n\n' if examples else '')
             + f'Action: {idea.strip()}\n\nBase prompt, for the fixed details: {base} /no_think'},
-    ], max_tokens=600)
+    ], max_tokens=600, why=why)
     missing = [t for t in triggers if t.lower() not in text.lower()]
     return (', '.join(missing) + ', ' + text) if text and missing else text
 
 
-def write_motion_prompt(idea, base='', explicit=False, style=None):
+def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
     """The clip's prompt with the chosen action written out: the template's
     fixed clauses kept, its generic movement replaced by what she does. With
     a LoRA's style, written the way that LoRA's prompts are written."""
     if not (idea or '').strip():
+        if why is not None:
+            why['reason'] = 'no motion typed'
         return ''
     if style:
-        return _styled_prompt(idea, base, explicit, style)
+        return _styled_prompt(idea, base, explicit, style, why)
     return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
             'You rewrite prompts for an image-to-video model that animates an existing photo. '
@@ -2542,7 +2556,7 @@ def write_motion_prompt(idea, base='', explicit=False, style=None):
             'repeats through the clip, then her expression. Do not add new details about how she '
             'looks. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
         {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base} /no_think'},
-    ], max_tokens=600)
+    ], max_tokens=600, why=why)
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────

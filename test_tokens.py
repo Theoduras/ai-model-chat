@@ -685,6 +685,11 @@ def test_wan22_on_runpod():
         _rq.post = lambda *a, **k: _Resp('xyz, she waves slowly')
         check('a styled prompt gets the trigger words it left out',
               IG.write_motion_prompt('wave', style=style) == 'abc, xyz, she waves slowly')
+        _rq.post = lambda *a, **k: _Resp("I'm sorry, I can't help with that.")
+        why = {}
+        check('a refusal is reported, not used as the prompt',
+              IG.write_motion_prompt('wave', why=why) == ''
+              and why.get('reason', '').startswith('refused'))
         _rq.post = lambda *a, **k: (_ for _ in ()).throw(OSError('down'))
         check('a failed helper gives nothing rather than failing the clip',
               IG.write_motion_prompt('wave') == '' and IG.suggest_motions('u') == [])

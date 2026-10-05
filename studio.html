@@ -2727,7 +2727,8 @@ async function autoWriteVideoPrompt(force) {
     if (!force && videoPromptEdited()) return;
     ta.value = d.prompt;
     genVWritten = { choices, prompt: d.prompt };
-    note.textContent = 'Follows your choices. Edit it and it stays as you wrote it.';
+    note.textContent = (force && d.note) ? '✗ ' + d.note
+      : 'Follows your choices. Edit it and it stays as you wrote it.';
   } catch (e) { if (force) { genVPromptForcing = false; note.textContent = '✗ could not write it'; } }
 }
 
@@ -3038,6 +3039,7 @@ async function jobPayload() {
     negative: el('gen-vnegative').value.trim(),
     loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })),
     chain_motions: chainPlan() ? genChainMotions.slice(0, chainPlan().length - 1) : [],
+    chain_prompts: chainPlan() ? genChainPrompts.slice(0, chainPlan().length - 1) : [],
   };
   if (genJob === 'swap') {
     return Object.assign(base, {
@@ -3286,10 +3288,36 @@ function renderChainMotions() {
   box.innerHTML = `<span class="hint">Runs as ${plan.length} parts of ${plan[0]}s. The Motion above is part 1 (0–${plan[0]}s); leave a part empty to carry on with the one before.</span>`
     + plan.slice(1).map((p, i) => {
       const from = at; at += p;
-      return `<label class="gen-f"><span>Part ${i + 2} — ${from}–${at}s</span>
+      return `<div class="gen-f"><span>Part ${i + 2} — ${from}–${at}s</span>
         <input type="text" maxlength="300" value="${esc(genChainMotions[i] || '')}"
-          placeholder="same as the part before" oninput="genChainMotions[${i}] = this.value"></label>`;
+          placeholder="same as the part before" oninput="genChainMotions[${i}] = this.value">
+        <div style="margin:6px 0"><button type="button" class="btn-ai btn-ai-secondary"
+          onclick="writePartPrompt(${i})">Write prompt for part ${i + 2}</button>
+          <span class="hint" id="gen-part-note-${i}"></span></div>
+        <textarea rows="4" maxlength="2000" id="gen-part-prompt-${i}"
+          placeholder="Empty = written when the clip runs"
+          oninput="genChainPrompts[${i}] = this.value">${esc(genChainPrompts[i] || '')}</textarea></div>`;
     }).join('');
+}
+
+// Part n's prompt, written ahead so it can be read and edited. What is in the
+// box when the clip runs is used as written; an empty box is written then.
+const genChainPrompts = [];
+async function writePartPrompt(i) {
+  const note = el('gen-part-note-' + i);
+  note.textContent = 'Writing…';
+  try {
+    const payload = await videoPromptChoices();
+    Object.assign(payload, { write: true, part: i + 2 });
+    const d = await (await fetch('/api/generate/video-prompt', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })).json();
+    if (!d.ok) { note.textContent = '✗ ' + (d.error || 'could not write it'); return; }
+    genChainPrompts[i] = d.prompt;
+    el('gen-part-prompt-' + i).value = d.prompt;
+    note.textContent = d.note ? '✗ ' + d.note : 'Edit it and it runs as written.';
+  } catch (e) { note.textContent = '✗ could not write it'; }
 }
 
 function pickAnimPhoto(id) {
