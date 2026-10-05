@@ -709,6 +709,7 @@ def price_table():
                                     for m in IMAGE_MODELS},
         'default_image_aspect': _IG.DEFAULT_IMAGE_ASPECT,
         'audio_modes': list(AUDIO_MODES),
+        'silent_models': list(_IG.SILENT_MODELS),
         'extend_modes': list(EXTEND_MODES),
         # What each model lets the operator choose. A model that runs the length
         # and the frame of the clip it is given has neither to offer. Still

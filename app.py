@@ -33424,6 +33424,9 @@ def _gen_spec(slug, body, user):
             if not track or not track['mime'].startswith('audio/'):
                 raise imagegen.GenerationError('Upload the audio first.')
             spec['audio_path'] = track['path']
+    elif audio and model in imagegen.SILENT_MODELS:
+        raise imagegen.GenerationError(
+            f'{CR.MODEL_LABELS.get(model, model)} makes silent clips. Upload a track for its sound.')
     elif audio:
         spec['audio'] = audio
         spec['voice'] = audio.get('voice') or ''

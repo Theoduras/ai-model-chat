@@ -1989,6 +1989,7 @@ function hasSourceClip() {
 }
 
 function audioModes() {
+  if ((genPrices.silent_models || []).includes(engineModel())) return ['none', 'upload'];
   const gen = soundOffered() ? (genPrices.audio_modes || []).filter(m => m !== 'speech'
     && (m !== 'moaning' || genRating !== 'sfw')) : ['lipsync'];
   return (hasSourceClip() ? ['original'] : []).concat(['none', 'upload'], gen);

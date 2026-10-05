@@ -156,6 +156,9 @@ if _GV:
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
+# RunPod's Wan workers return silent clips and nothing follows up on them, so
+# they take an uploaded track or none, never a generated one.
+SILENT_MODELS = RUNPOD_MODELS
 # Models that run the studio's LoRA library (`spec['loras']`).
 LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv')
 # The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
