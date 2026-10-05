@@ -151,15 +151,26 @@ RUNPOD_ENDPOINTS = {
 _GV = os.getenv('RUNPOD_GV_ENDPOINT', 'ys8km1d7sayxtz').strip().rstrip('/')
 if _GV:
     RUNPOD_ENDPOINTS['wan-2-2-gv'] = _GV if '/' in _GV else f'https://api.runpod.ai/v2/{_GV}'
+# Our MiniMax H3 endpoint (infra/runpod-h3): image to video with its own audio.
+# Off until the endpoint exists; set RUNPOD_H3_ENDPOINT to its id.
+_H3 = os.getenv('RUNPOD_H3_ENDPOINT', '').strip().rstrip('/')
+if _H3:
+    RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
 # they take an uploaded track or none, never a generated one.
-SILENT_MODELS = RUNPOD_MODELS
+SILENT_MODELS = tuple(m for m in RUNPOD_MODELS if m != 'h3-gv')
 # Models that run the studio's LoRA library (`spec['loras']`).
-LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv')
+LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv')
+
+
+def lora_family(model_key):
+    """Which LoRA library a model loads: H3's files are one file each and do not
+    fit Wan's high/low pairs, nor the other way round."""
+    return 'h3' if model_key == 'h3-gv' else 'wan'
 # The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
 # reads what the still shows and suggests what it could do, then writes the
 # clip's prompt. Qwen reads text only, so the still arrives as its description.
@@ -350,6 +361,7 @@ MODEL_RESOLUTION_VALUES = {
     'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
     # 1080p at 81 frames was never run on the endpoint.
     'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
+    'h3-gv': (('480p', '480p'), ('720p', '720p')),
 }
 
 
@@ -527,6 +539,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-6-rp': (5, 10, 15),
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
+    'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -568,6 +581,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-6-rp': (5, 15),
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
+    'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
     'ml-face-swap': (1, 60),
@@ -2359,6 +2373,13 @@ class RunPodProvider(Provider):
             if not url and isinstance(out, dict) and isinstance(out.get('video'), str):
                 # generate_video hands the clip back inline as base64.
                 url = 'data:video/mp4;base64,' + out['video']
+            if not url and isinstance(out, dict):
+                # worker-comfyui: [{'type': 'base64' | 's3_url', 'data': ...}].
+                for f in out.get('images') or ():
+                    if f.get('type') == 's3_url':
+                        url = f.get('data')
+                    elif f.get('type') == 'base64' and f.get('data'):
+                        url = 'data:video/mp4;base64,' + f['data']
             if url:
                 return Result('done', [url])
             return Result('failed', error='RunPod finished without a video')
@@ -2373,6 +2394,8 @@ class RunPodProvider(Provider):
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
+        if model == 'h3-gv':
+            return h3_payload(spec, image)
         if model == 'wan-2-2-gv':
             width, height = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
             body = {
@@ -2462,6 +2485,62 @@ class RunPodProvider(Provider):
             raise GenerationError(f'RunPod status {resp.status_code}',
                                   fatal=resp.status_code in (401, 403))
         return self._read(resp.json())
+
+
+# H3 at 24 fps wants 17n+5 frames; turbo LoRA at 8 steps, as Comfy's template.
+H3_STEPS = 8
+
+
+def h3_payload(spec, image):
+    """An API-format copy of Comfy's video_minimax_h3_i2v template, sent whole
+    so the worker is stock worker-comfyui plus a LoRA fetcher."""
+    width, height = (n // 32 * 32 for n in video_px(spec.get('aspect'), spec.get('resolution') or '720p'))
+    frames = max(5, video_seconds('h3-gv', spec.get('seconds')) * 24)
+    frames += (5 - frames % 17) % 17
+    seed = int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)
+    model = ['unet', 0]
+    wf = {
+        'unet': {'class_type': 'UNETLoader', 'inputs': {
+            'unet_name': 'minimax_h3_fl2va_pruned_int8_convrot.safetensors', 'weight_dtype': 'default'}},
+        'turbo': {'class_type': 'LoraLoaderModelOnly', 'inputs': {
+            'model': model, 'lora_name': 'minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors',
+            'strength_model': 1.0}},
+    }
+    model = ['turbo', 0]
+    for i, l in enumerate((spec.get('loras') or [])[:4]):
+        url = l.get('high') or l.get('low')
+        if url:
+            wf[f'lora{i}'] = {'class_type': 'LoraLoaderModelOnly', 'inputs': {
+                'model': model, 'lora_name': lora_url(url), 'strength_model': float(l['scale'])}}
+            model = [f'lora{i}', 0]
+    wf.update({
+        'clip': {'class_type': 'CLIPLoader', 'inputs': {
+            'clip_name': 'qwen3vl_32b_minimax_h3_int8_convrot.safetensors',
+            'type': 'minimax', 'device': 'default'}},
+        'vae': {'class_type': 'VAELoader', 'inputs': {
+            'vae_name': 'minimax_h3_video_vae_int8_convrot.safetensors'}},
+        'avae': {'class_type': 'VAELoader', 'inputs': {'vae_name': 'minimax_h3_audio_vae_fp32.safetensors'}},
+        'still': {'class_type': 'LoadImage', 'inputs': {'image': 'still.png'}},
+        'cond': {'class_type': 'MiniMaxH3ImageToVideo', 'inputs': {
+            'clip': ['clip', 0], 'vae': ['vae', 0], 'first_frame': ['still', 0],
+            'prompt': spec.get('prompt') or build_video_prompt(),
+            'width': width, 'height': height, 'length': frames}},
+        'noise': {'class_type': 'RandomNoise', 'inputs': {'noise_seed': seed}},
+        'guider': {'class_type': 'BasicGuider', 'inputs': {'model': model, 'conditioning': ['cond', 0]}},
+        'sampler': {'class_type': 'KSamplerSelect', 'inputs': {'sampler_name': 'res_multistep'}},
+        'sigmas': {'class_type': 'BasicScheduler', 'inputs': {
+            'model': model, 'scheduler': 'simple', 'steps': H3_STEPS, 'denoise': 1.0}},
+        'sample': {'class_type': 'SamplerCustomAdvanced', 'inputs': {
+            'noise': ['noise', 0], 'guider': ['guider', 0], 'sampler': ['sampler', 0],
+            'sigmas': ['sigmas', 0], 'latent_image': ['cond', 1]}},
+        'frames': {'class_type': 'VAEDecode', 'inputs': {'samples': ['sample', 0], 'vae': ['vae', 0]}},
+        'audio': {'class_type': 'VAEDecodeAudio', 'inputs': {'samples': ['sample', 0], 'vae': ['avae', 0]}},
+        'video': {'class_type': 'CreateVideo', 'inputs': {
+            'images': ['frames', 0], 'audio': ['audio', 0], 'fps': 24}},
+        'save': {'class_type': 'SaveVideo', 'inputs': {
+            'video': ['video', 0], 'filename_prefix': 'h3', 'format': 'auto', 'codec': 'auto'}},
+    })
+    return {'input': {'workflow': wf, 'images': [{'name': 'still.png', 'image': image}]}}
 
 
 def lora_url(url):

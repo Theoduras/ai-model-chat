@@ -33619,7 +33619,8 @@ def _gen_spec(slug, body, user):
     if model in imagegen.LORA_VIDEO_MODELS:
         # Resolved now and stored on the job, so editing the library later
         # never changes what a past job ran with.
-        library = {l['id']: l for l in _video_loras()}
+        family = imagegen.lora_family(model)
+        library = {l['id']: l for l in _video_loras() if l.get('family', 'wan') == family}
         picked = []
         for item in (body.get('loras') or [])[:4]:
             lora = library.get(str((item or {}).get('id') or ''))
@@ -33637,7 +33638,8 @@ def _gen_spec(slug, body, user):
         text = ' '.join(str(spec.get(k) or '') for k in ('prompt_extra', 'motion'))
         if (spec['explicit'] and len(picked) < 4 and _TOY_WORDS.search(text)
                 and not any(p['trigger'] == 'piston_dildo_style' for p in picked)):
-            want = 'dildo-22-v2-closeup' if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody'
+            want = ('dildo-h3' if family == 'h3' else 'dildo-22-v2-closeup'
+                    if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
             lora = library.get(want)
             if lora and lora.get('enabled', True) is not False:
                 picked.append({'name': lora['name'], 'high': lora['high'],
@@ -33669,7 +33671,11 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'dildo-22-v2-closeup', 'name': 'Solo Dildo v2 (close-up)', 'scale': 1.0,
     'trigger': 'piston_dildo_style', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2405940',
-    'low': 'https://civitai.com/api/download/models/2405949'}]
+    'low': 'https://civitai.com/api/download/models/2405949'}, {
+    # The same Civitai model's MiniMax H3 version: one file, for h3-gv only.
+    'id': 'dildo-h3', 'name': 'Solo Dildo (H3)', 'scale': 1.0, 'family': 'h3',
+    'trigger': 'piston_dildo_style', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}]
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
@@ -33693,8 +33699,8 @@ def _video_loras():
 def _lora_view(loras, full):
     # Links are never sent: a link can carry a download token. Only admins
     # see a switched-off LoRA, to switch it back on.
-    keys = ('id', 'name', 'scale') + (('trigger', 'examples') if full else ())
-    return [dict({k: l.get(k, '') for k in keys}, enabled=l.get('enabled', True) is not False,
+    keys = ('id', 'name', 'scale', 'family') + (('trigger', 'examples') if full else ())
+    return [dict({k: l.get(k, '') for k in keys}, family=l.get('family', 'wan'), enabled=l.get('enabled', True) is not False,
                  locked=l.get('id') in _LOCKED_LORAS)
             for l in loras if full or l.get('enabled', True) is not False]
 
@@ -33744,6 +33750,7 @@ def api_admin_video_loras():
                  'high': high, 'low': low, 'scale': scale,
                  'trigger': str(body.get('trigger') or '').strip()[:200],
                  'examples': str(body.get('examples') or '').strip()[:3000],
+                 'family': 'h3' if (old or body).get('family') == 'h3' else 'wan',
                  'enabled': (old or {}).get('enabled', True)}
         if old:
             loras[loras.index(old)] = entry

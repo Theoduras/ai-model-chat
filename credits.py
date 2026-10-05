@@ -56,7 +56,8 @@ DEFAULT_VIDEO_DURATION = 5
 
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
-                'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv')
+                'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv',
+                'h3-gv')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -124,6 +125,9 @@ VIDEO_COST_USD_PER_SECOND = {
     # The price is set well above that on purpose (raised 1.5x on a full card
     # that cost twice as much). 480p is unmeasured; 1080p is not offered.
     'wan-2-2-gv': {'480p': 0.0675, '720p': 0.105, '1080p': 0.27},
+    # Our H3 endpoint (infra/runpod-h3). Unmeasured: set above Wan's on purpose
+    # (twice the weights, an 80 GB card) until a clip is timed.
+    'h3-gv': {'480p': 0.15, '720p': 0.20, '1080p': 0.20},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -264,6 +268,7 @@ MODEL_LABELS = {
     'wan-2-6-rp': 'Wan 2.6 (Runpod)',
     'wan-2-2-lora': 'Wan 2.2 + LoRA',
     'wan-2-2-gv': 'Explicit Video Realism Pro',
+    'h3-gv': 'Explicit Video + Sound (H3)',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -303,6 +308,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-6-rp': ('sfw',),
     'wan-2-2-lora': ('sfw',),
     'wan-2-2-gv': ('sfw', 'nsfw'),
+    'h3-gv': ('sfw', 'nsfw'),
     'p-video-animate': ('sfw',),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a

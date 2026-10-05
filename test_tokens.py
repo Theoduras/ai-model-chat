@@ -643,7 +643,19 @@ def test_wan22_on_runpod():
               gv['lora_pairs'] == [{'high': 'https://h/a.safetensors', 'low': 'https://h/b.safetensors',
                                     'high_weight': 0.8, 'low_weight': 0.8}]
               and gv['seed'] == 7 and gv['length'] == 81
-              and IG2.LORA_VIDEO_MODELS == ('wan-2-2-lora', 'wan-2-2-gv'))
+              and IG2.LORA_VIDEO_MODELS == ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv'))
+        h3 = IG2.h3_payload(dict(spec, model='h3-gv', seconds=5, seed=7, loras=[
+            {'name': 'n', 'high': 'https://h/c.safetensors', 'low': '', 'scale': 0.6}]), 'img')['input']
+        wf = h3['workflow']
+        check('H3 gets a whole workflow: its LoRA after turbo, 17n+5 frames, audio in the clip',
+              wf['lora0']['inputs'] == {'model': ['turbo', 0], 'lora_name': 'https://h/c.safetensors',
+                                        'strength_model': 0.6}
+              and wf['guider']['inputs']['model'] == ['lora0', 0]
+              and wf['cond']['inputs']['length'] == 124 and wf['noise']['inputs']['noise_seed'] == 7
+              and wf['cond']['inputs']['width'] % 32 == 0 and wf['cond']['inputs']['height'] % 32 == 0
+              and wf['video']['inputs']['audio'] == ['audio', 0]
+              and h3['images'] == [{'name': 'still.png', 'image': 'img'}]
+              and 'h3-gv' not in IG2.SILENT_MODELS)
         IG2.CIVITAI_TOKEN = 'tok'
         check('a Civitai link carries the token, any other link does not',
               IG2.lora_url('https://civitai.com/api/download/models/1') ==
