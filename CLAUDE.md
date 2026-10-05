@@ -17,8 +17,9 @@ This is an **OnlyFans-style AI chatbot platform** where content creators (models
 3. Deploy that persona to convert fans → engaged chatters → content buyers.
 
 The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. The site runs on
-**Vercel** (Neon Postgres, Vercel Blob); the always-on loops and the sign-in browser run on
-**Railway** from the `Dockerfile`s (see Deployment Rules below). Google Cloud is retired.
+**Google Cloud Run** (`ai-model-chat-dev`, `europe-west4`, built by Cloud Build from `develop`),
+loops and sign-in browser included. Vercel and Railway are **on hold**: keep their files working,
+but nothing deploys there (see Deployment Rules below).
 
 ---
 
@@ -218,12 +219,13 @@ Stay completely in character. Never mention being an AI.
   the database.
 - Static assets served directly from root via Flask `static_folder=BASE_DIR`.
 - Test locally with `python app.py` before pushing.
-- Vercel serves the site through `api/index.py`; Railway builds the `Dockerfile`.
+- Cloud Run serves everything (`cloudbuild.app.yaml`, `cloudbuild.browser.yaml`).
+  On hold: Vercel serves the site through `api/index.py`; Railway builds the `Dockerfile`.
   Keep both working when adding routes — everything already routes through
   Flask, so a new `@app.route` needs no config change on either host. A file the
   site reads at runtime must match `includeFiles` in `vercel.json`. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
-  they run on Railway and stay off on Vercel (`IS_VERCEL` in `app.py`).
+  they run on Cloud Run (Railway while on hold) and stay off on Vercel (`IS_VERCEL` in `app.py`).
 - **Free is the content-creation plan: characters, the studio and token
   top-ups and one link-in-bio page on the account, nothing chatbot.** Its `chatbot` capability is False (True on every
   other plan, admins and grandfathered accounts included) and `personas` is 0.
@@ -450,14 +452,17 @@ Stay completely in character. Never mention being an AI.
 
 ## Deployment Rules
 
-Push to `develop`. Vercel (production branch `develop`) deploys the site and
-Railway redeploys the bot and browser services from the same push. Env vars
-live on each host's dashboard, not in this repository. See `DEPLOY.md`.
+Push to `develop`. Cloud Build deploys the app and browser services to Cloud
+Run from that push (`cloudbuild.*.yaml`, `infra/`, `ENVIRONMENTS.md`). Env vars
+live on the Cloud Run service, not in this repository; change them with
+`gcloud run services update ai-model-chat-dev --region europe-west4
+--update-env-vars ...` (never `--set-env-vars`, which wipes the rest).
 
-- Never turn the loops on on Vercel: two hosts running them means two bots
-  answering the same fan. They run only on the Railway bot service.
-- The Cloud Run / Cloud Build files (`cloudbuild.*.yaml`, `infra/`,
-  `ENVIRONMENTS.md`) describe the retired Google Cloud setup.
+- Vercel and Railway are on hold. Never run the loops on more than one host:
+  two hosts means two bots answering the same fan.
+- `RUNPOD_GV_ENDPOINT` points the explicit Animate option at our own RunPod
+  serverless endpoint (hub listing `wlsdml1114/generate_video`, RTX 6000 Ada,
+  0 active workers).
 
 ---
 
