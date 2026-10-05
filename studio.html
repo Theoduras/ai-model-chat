@@ -1311,9 +1311,7 @@ function jobRow(key) {
            note: ((genPrices && genPrices.job_notes) || {})[key] || '' };
 }
 
-// A job the rating does not serve is shown disabled rather than removed: the
-// tile is the map of what this surface does, and a map that changes shape
-// under you is worse than one with a greyed-out road.
+// A job the rating does not serve is hidden at that rating, not removed.
 function jobServes(key) {
   if (key === 'image') return true;
   const r = ((genPrices && genPrices.job_ratings) || {})[key] || ['sfw', 'nsfw'];
@@ -1322,6 +1320,12 @@ function jobServes(key) {
 
 function jobKeys() {
   return ['image'].concat(((genPrices && genPrices.jobs) || []));
+}
+
+// Every plan may run this job at the rating on screen; other video is admin-only.
+function jobOpen(key) {
+  if (genVideoOpen || jobKind(key) === 'image') return true;
+  return (((genPrices && genPrices.job_open) || {})[key] || []).includes(genRating === 'nsfw' ? 'nsfw' : 'sfw');
 }
 
 function jobKind(key) {
@@ -1334,17 +1338,15 @@ function renderJobTiles() {
   if (!box) return;
   const tile = key => {
     const row = jobRow(key);
-    if (jobKind(key) !== 'image' && !genVideoOpen) {
+    if (!jobOpen(key)) {
       return `<button type="button" class="gen-job" disabled title="Coming soon">
         <span class="gen-soon">Soon</span><b>${esc(row.label)}</b><small>${esc(row.note || '')}</small></button>`;
     }
-    const ok = jobServes(key);
     return `<button type="button" class="gen-job" aria-pressed="${key === genJob}"
-      ${ok ? '' : 'disabled title="Not offered at this rating"'}
       onclick="setJob('${key}')"><b>${esc(row.label)}</b>
       <small>${esc(row.note)}</small></button>`;
   };
-  const keys = jobKeys();
+  const keys = jobKeys().filter(jobServes);
   const photo = keys.filter(k => jobKind(k) === 'image');
   const video = keys.filter(k => jobKind(k) !== 'image');
   box.innerHTML = `<h3 class="gen-jobs-h">Photo</h3><div class="gen-jobs-row">${photo.map(tile).join('')}</div>`
@@ -1368,6 +1370,8 @@ function setRating(v) {
   el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
   el('rate-sfw').classList.toggle('active', v === 'sfw');
   el('rate-nsfw').classList.toggle('active', v === 'nsfw');
+  // Explicit Photo to Video takes no motion clip.
+  if (v === 'nsfw') genDrive = null;
   // A job this rating does not serve cannot stay selected, or the panel would
   // be quoting something the server is about to refuse.
   if (!jobServes(genJob)) return setJob(jobKeys().find(jobServes) || 'image');
@@ -1774,7 +1778,7 @@ function renderGenForm() {
   // of the clip it was handed, and that panel has a seconds row of its own.
   el('gen-video-out').style.display = video ? '' : 'none';
   el('gen-shape-out').style.display = video || swap ? 'flex' : 'none';
-  el('gen-video-drive').style.display = animate || genJob === 'reel' ? 'flex' : 'none';
+  el('gen-video-drive').style.display = (animate && genRating !== 'nsfw') || genJob === 'reel' ? 'flex' : 'none';
   el('gen-vadvanced').style.display = genMake === 'image' ? 'none' : '';
   queueVideoPrompt();
   syncIdentity();
@@ -2873,7 +2877,7 @@ function jobBlocker() {
 }
 
 const JOB_VERBS = {
-  reel: 'Make the reel', swap: 'Swap her in', animate: 'Animate her',
+  reel: 'Make the reel', swap: 'Swap her in', animate: 'Make the video',
   extend: 'Extend it', multiref: 'Generate',
 };
 
@@ -3120,7 +3124,7 @@ async function runVideoJob() {
 function animateMedia(id) {
   genAnimPick = id;
   setJob('animate');
-  setGenStatus('Ready — check the price and press Animate her.', null);
+  setGenStatus('Ready — check the price and press Make the video.', null);
   el('gen-run-btn').scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
@@ -3311,7 +3315,7 @@ function renderPresets() {
 
 async function applyPreset(i) {
   const p = MOTION_PRESETS[i];
-  if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-lora');
+  if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-gv');
   el('gen-video-motion').value = p.motion;
   const secs = el('gen-vsecs');
   if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);

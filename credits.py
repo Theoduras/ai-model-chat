@@ -179,6 +179,7 @@ JOB_NOTES = {job: row.get('note') or ''
              for job, row in _IG.VIDEO_JOBS.items()}
 JOB_NEEDS = {job: tuple(row.get('needs') or ())
              for job, row in _IG.VIDEO_JOBS.items()}
+JOB_OPEN = {job: tuple(row.get('open') or ()) for job, row in _IG.VIDEO_JOBS.items()}
 DEFAULT_JOB = 'reel'
 
 # Frame shape is free: a 9:16 reel and a 16:9 cut of the same scene run the same
@@ -266,7 +267,7 @@ MODEL_LABELS = {
     'wan-2-2': 'Wan 2.2',
     'wan-2-6-rp': 'Wan 2.6 (Runpod)',
     'wan-2-2-lora': 'Wan 2.2 + LoRA',
-    'wan-2-2-gv': 'Wan 2.2 (own endpoint)',
+    'wan-2-2-gv': 'Explicit Video Realism Pro',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -303,11 +304,13 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-5': ('sfw',),
     'wan-2-7': ('sfw', 'nsfw'),
     'wan-2-2-animate': ('sfw', 'nsfw'),
-    'wan-2-2': ('sfw', 'nsfw'),
-    'wan-2-6-rp': ('sfw', 'nsfw'),
-    'wan-2-2-lora': ('sfw', 'nsfw'),
+    # Hidden from explicit work, not removed: explicit Photo to Video runs on
+    # our own endpoint (wan-2-2-gv) alone.
+    'wan-2-2': ('sfw',),
+    'wan-2-6-rp': ('sfw',),
+    'wan-2-2-lora': ('sfw',),
     'wan-2-2-gv': ('sfw', 'nsfw'),
-    'p-video-animate': ('sfw', 'nsfw'),
+    'p-video-animate': ('sfw',),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a
     # crash whose own traceback could not be deserialized because the safety
@@ -691,6 +694,7 @@ def price_table():
         'job_labels': dict(JOB_LABELS),
         'job_notes': dict(JOB_NOTES),
         'job_needs': {j: list(n) for j, n in JOB_NEEDS.items()},
+        'job_open': {j: list(r) for j, r in JOB_OPEN.items()},
         'default_job': DEFAULT_JOB,
         'aspects': list(ASPECTS),
         'default_aspect': DEFAULT_ASPECT,

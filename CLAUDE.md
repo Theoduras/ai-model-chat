@@ -244,9 +244,10 @@ Stay completely in character. Never mention being an AI.
   `_char_json` reports `persona` as '' while a character has only its home.
 - **Generation and characters are open to every active plan; video is not.**
   `/studio`, `/characters` and the `/api/generate/*` and `/api/characters*`
-  routes go through `_require_active` (404 for an inactive account). Only
-  image jobs run for a non-admin: `/api/generate/job` refuses any video job,
-  and the studio shows the video tiles grayed out as Coming soon. Every plan
+  routes go through `_require_active` (404 for an inactive account). A
+  non-admin runs image jobs and explicit **Photo to Video** (the `animate` job,
+  `open` in `imagegen.VIDEO_JOBS`); `/api/generate/job` refuses any other video
+  job, and the studio shows those tiles grayed out as Coming soon. Every plan
   spends from the ledger — Demo 25, Starter 150, Pro 800, Agency 2500 tokens a
   month (`credits.MONTHLY_TOKENS`), grandfathered accounts included; only an
   admin (`UNLIMITED_CAPS`) generates without being charged. The allowance is
@@ -303,6 +304,10 @@ Stay completely in character. Never mention being an AI.
   only) or the vault references, and it then runs on a model in
   `imagegen.REFERENCE_VIDEO_MODELS`. An uploaded video makes it a replace —
   Kling 3.0 Omni edit by default (`p-video-replace` is no longer offered). An explicit
+  **Explicit video is Photo to Video alone, on "Explicit Video Realism Pro" (`wan-2-2-gv`, no
+  motion clip).** Swap, Extend and Multi-reference, and the Wan 2.2, Wan 2.6, Wan 2.2 + LoRA and
+  P-Video models, are hidden from explicit work by their ratings, not removed. What follows is how
+  the hidden paths worked. An explicit
   Animate with a motion clip runs on P-Video-Animate (`imagegen.EXPLICIT_MOTION_MODEL`): Wan 2.2
   Animate is not in Runware's catalogue, and P-Video-Animate's safety check has crashed the provider
   worker before, which fails and refunds the job. An explicit Animate from a still runs on
@@ -460,10 +465,12 @@ live on the Cloud Run service, not in this repository; change them with
 
 - Vercel and Railway are on hold. Never run the loops on more than one host:
   two hosts means two bots answering the same fan.
-- The explicit Animate option "Wan 2.2 (own endpoint)" runs on our own RunPod
+- Explicit Photo to Video, "Explicit Video Realism Pro" (`wan-2-2-gv`), runs on our own RunPod
   serverless endpoint `ys8km1d7sayxtz` (hub listing `wlsdml1114/generate_video`,
-  RTX PRO 6000 Blackwell, 0 active, max 2, FlashBoot, 10 min idle). It is the code default for
-  `RUNPOD_GV_ENDPOINT`; it only needs `RUNPOD_API_KEY` on the host.
+  RTX PRO 6000 Blackwell, 0 active, max 2, FlashBoot, 2 min idle). It is the code default for
+  `RUNPOD_GV_ENDPOINT`; it only needs `RUNPOD_API_KEY` on the host (and `CIVITAI_TOKEN` for
+  Civitai LoRAs). Its template's start command runs `infra/runpod-gv-patch.py`, which makes the
+  stock worker take LoRA links, our seed and our steps; re-install it if the template is rebuilt.
 
 ---
 

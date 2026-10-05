@@ -8678,8 +8678,8 @@ def landing():
 
 @app.route('/studio')
 def studio():
-    """Generation studio. Every active plan generates photos on its tokens;
-    video stays admin-only until it leaves testing."""
+    """Generation studio. Every active plan generates photos and explicit Photo
+    to Video on its tokens; other video stays admin-only while in testing."""
     blocked = _require_active()
     if blocked:
         return blocked
@@ -33216,6 +33216,8 @@ def _gen_spec(slug, body, user):
     # persona's nsfw_level is a chat setting -- how far she flirts with a fan --
     # and has no business gating what her operator may produce.
     level = 'sfw' if (body.get('rating') or '').strip().lower() == 'sfw' else 'explicit'
+    if job and level != 'sfw' and 'nsfw' not in imagegen.job_ratings(job):
+        raise imagegen.GenerationError('That video job is not offered for explicit work.')
     spec = {'kind': kind, 'slug': slug, 'job': job,
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[
@@ -33451,6 +33453,9 @@ def _gen_spec(slug, body, user):
         # An optional clip turns an Animate into motion transfer: her
         # photo stays the subject and the upload only supplies movement.
         drive_id = str(body.get('source') or '').strip()
+        if drive_id and level != 'sfw':
+            # Its one explicit model, P-Video-Animate, is hidden from explicit work.
+            raise imagegen.GenerationError('Explicit Photo to Video does not take a motion clip.')
         if drive_id:
             src = _video_source_row(slug, drive_id)
             if not src:
@@ -36086,7 +36091,8 @@ def api_generate_job():
         price = CR.quote(spec)
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
-    if spec['kind'] != 'image' and not user.get('is_admin'):
+    if (spec['kind'] != 'image' and not user.get('is_admin')
+            and not imagegen.job_open(spec.get('job'), 'explicit' if spec.get('explicit') else 'sfw')):
         return jsonify({'ok': False, 'error': 'Video generation is coming soon.'}), 403
     return _gen_submit(user, slug, spec, price)
 

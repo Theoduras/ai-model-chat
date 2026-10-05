@@ -196,8 +196,10 @@ VIDEO_JOBS = {
              'kind': 'video', 'ratings': ('sfw',),
              'label': 'Reel',
              'note': 'A prompt, a photo, or both, as a short clip.'},
+    # Swap, Extend and Multi-reference are hidden from explicit work, not
+    # removed: explicit video is Photo to Video alone for now.
     'swap': {'models': ('kling-3-0-mc', 'ml-face-swap', 'kling-3-0-omni'),
-             'needs': ('source', 'refs'), 'kind': 'swap',
+             'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw',),
              'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
@@ -207,13 +209,16 @@ VIDEO_JOBS = {
                           + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
-                'label': 'Animate',
-                'note': 'An approved still becomes a clip.'},
+                # Every plan may run it at these ratings; other video stays
+                # admin-only while it is in testing.
+                'open': ('nsfw',),
+                'label': 'Photo to Video',
+                'note': 'One of her approved photos, brought to life as a clip.'},
     'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
-               'kind': 'video', 'modes': ('continue', 'longer', 'loop'),
+               'kind': 'video', 'ratings': ('sfw',), 'modes': ('continue', 'longer', 'loop'),
                'label': 'Extend',
                'note': 'Carry on from a clip you already have.'},
-    'multiref': {'models': ('wan-2-7',), 'needs': ('refs',), 'kind': 'video',
+    'multiref': {'models': ('wan-2-7',), 'needs': ('refs',), 'kind': 'video', 'ratings': ('sfw',),
                  'label': 'Multi-reference',
                  'note': 'Her identity refs plus a separate scene or outfit.'},
 }
@@ -244,6 +249,12 @@ def job_kind(job):
 
 def job_ratings(job):
     return list((VIDEO_JOBS.get(job) or {}).get('ratings') or ('sfw', 'nsfw'))
+
+
+def job_open(job, rating):
+    """Whether every plan may run this job at this rating, not only an admin."""
+    want = 'nsfw' if rating in ('nsfw', 'explicit') else 'sfw'
+    return want in ((VIDEO_JOBS.get(job) or {}).get('open') or ())
 
 
 def jobs_for_rating(rating):
