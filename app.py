@@ -6363,6 +6363,10 @@ def api_tokens():
     if not user:
         return jsonify({'error': 'Sign in required'}), 401
     balance = _token_balance(user)
+    prices = CR.price_table()
+    # A guest's 15 tokens buy a 5s clip at 480p, not at the usual 720p.
+    if _is_guest(user):
+        prices['defaults'] = dict(prices['defaults'], video_resolution='480p')
     return jsonify({
         'balance': balance,
         'unlimited': balance is None,
@@ -6378,7 +6382,7 @@ def api_tokens():
         'sales_open': _token_sales_open(),
         'can_buy': bool(_token_sales_open()
                         and (_user_is_active(user) or user.get('is_admin'))),
-        'prices': CR.price_table(),
+        'prices': prices,
         # The cheapest photo and clip per preset length, so a pack can say
         # "up to" what it buys without the page knowing which models exist.
         'cheapest': {
