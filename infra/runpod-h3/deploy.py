@@ -18,6 +18,8 @@ import zlib
 
 API = 'https://rest.runpod.io/v1'
 KEY = os.environ['RUNPOD_API_KEY']
+# Cloudflare in front of rest.runpod.io refuses urllib's default User-Agent (1010).
+UA = {'User-Agent': 'ai-model-chat-deploy/1.0'}
 IMAGE = 'runpod/worker-comfyui:5.10.0-base'
 HF = 'https://huggingface.co/Comfy-Org/MiniMax-H3/resolve/main'
 # worker-comfyui reads /runpod-volume/models/{unet,clip,vae,loras}; ComfyUI
@@ -82,7 +84,7 @@ def call(method, path, body=None):
     req = urllib.request.Request(API + path, method=method,
                                  data=json.dumps(body).encode() if body is not None else None,
                                  headers={'Authorization': f'Bearer {KEY}',
-                                          'Content-Type': 'application/json'})
+                                          'Content-Type': 'application/json', **UA})
     try:
         with urllib.request.urlopen(req, timeout=60) as r:
             raw = r.read()
@@ -111,8 +113,9 @@ def download(vol, dc):
                 sys.exit('download did not finish in 4 hours')
             time.sleep(30)
             try:
-                with urllib.request.urlopen(f'https://{pod["id"]}-8000.proxy.runpod.net/status.json',
-                                            timeout=20) as r:
+                with urllib.request.urlopen(urllib.request.Request(
+                        f'https://{pod["id"]}-8000.proxy.runpod.net/status.json', headers=UA),
+                        timeout=20) as r:
                     status = json.loads(r.read())
             except Exception:
                 continue
@@ -187,12 +190,12 @@ def test(endpoint):
         sys.exit(f'test failed: {res.error}')
     url = res.urls[0]
     data = base64.b64decode(url.split(',', 1)[1]) if url.startswith('data:') else \
-        urllib.request.urlopen(url, timeout=120).read()
+        urllib.request.urlopen(urllib.request.Request(url, headers=UA), timeout=120).read()
     out = os.path.abspath('h3-test.mp4')
     with open(out, 'wb') as f:
         f.write(data)
     req = urllib.request.Request('{}/status/{}'.format(*rp._endpoint(job)),
-                                 headers={'Authorization': f'Bearer {KEY}'})
+                                 headers={'Authorization': f'Bearer {KEY}', **UA})
     with urllib.request.urlopen(req, timeout=30) as r:
         t = json.loads(r.read())
     print(f'clip {out} ({len(data) >> 10} KB) in {time.time() - start:.0f}s: '
