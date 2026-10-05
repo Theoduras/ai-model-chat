@@ -11439,8 +11439,10 @@ def api_platforms_overview():
                   'username': xt.get('username', '')},
             'fanvue': {'connected': bool(_fanvue_tokens(slug).get('access_token')),
                        'username': ''},
-            'threads': {'connected': bool(th.get('access_token')),
-                        'username': th.get('username', '')},
+            'threads': {'connected': bool(th.get('access_token'))
+                                     or bool(_ig_account(slug).get('session')),
+                        'username': th.get('username', '')
+                                    or _ig_account(slug).get('username', '')},
             # Read off the stored account rather than the session blob: this is
             # "is one connected", which the envelope already answers, and
             # decrypting every persona's session to ask it would not.
@@ -29628,6 +29630,9 @@ def _th_post_rows(persona, text, rows, reply_control='everyone'):
                     items.append((jpeg, 'photo', width, height, 0))
             result = rest.post_carousel(items, text, reply_control)
     except THR.ThreadsApiError as e:
+        if e.code >= 500 and not getattr(rest, 'has_own_session', True):
+            raise ValueError('Threads needs its own sign-in: reconnect Instagram once '
+                             'and Threads is captured with it.')
         if e.code in (401, 403):
             raise ValueError('Threads refused the Instagram session '
                              f'(HTTP {e.code}). Reconnect Instagram and try again.')

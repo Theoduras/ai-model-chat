@@ -314,6 +314,21 @@ check('a configure call carries the account id off the cookie',
 check('and the fields every client sends',
       all(k in BODIES[-1][1] for k in ('source_type', 'timezone_offset', 'audience')))
 check('and says which step it is', BODIES[-1][2].get('step') == 'post text')
+own = threads_rest.Rest({'cookie': 'sessionid=ig', 'csrftoken': 'igc',
+                         'threads': {'cookie': 'sessionid=th', 'csrftoken': 'thc'}})
+check('threads.com cookies win over instagram ones',
+      own.cookie == 'sessionid=th' and own.csrftoken == 'thc' and own.has_own_session)
+check('instagram cookies are only the fallback', not rest.has_own_session)
+
+
+class IgOnly(Refusing):
+    has_own_session = False
+
+
+app._th_rest = lambda persona: IgOnly(500)
+check('a 500 on the instagram cookie says to reconnect',
+      'its own sign-in' in fails(lambda: app._th_post_rows('lilith', 'hi', [ROW_IMG])))
+app._th_rest = lambda persona: FAKE
 rest.post_carousel([(b'a', 'photo', 1, 1, 0), (b'b', 'photo', 1, 1, 0)])
 ids = [c['upload_id'] for c in BODIES[-1][1]['children_metadata']]
 check('carousel children never share an upload id', len(set(ids)) == 2, ids)

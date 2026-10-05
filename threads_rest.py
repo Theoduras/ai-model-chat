@@ -155,8 +155,13 @@ class Rest:
 
     def __init__(self, session, base=THREADS_API):
         session = session or {}
-        self.cookie = session.get('cookie') or ''
-        self.csrftoken = session.get('csrftoken') or ''
+        # threads.com's own cookies when the sign-in captured them; the
+        # Instagram ones are only a fallback, and threads.com refuses writes
+        # made with them.
+        own = session.get('threads') or {}
+        self.has_own_session = bool(own.get('cookie'))
+        self.cookie = own.get('cookie') or session.get('cookie') or ''
+        self.csrftoken = own.get('csrftoken') or session.get('csrftoken') or ''
         self.user_agent = session.get('user_agent') or DEFAULT_UA
         self.proxy = session.get('proxy') or ''
         self.user_id = (_cookie_value(self.cookie, 'ds_user_id')

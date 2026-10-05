@@ -967,6 +967,11 @@ class Attempt:
                    'cookie': cookie_header, 'csrftoken': csrftoken, 'app_id': app_id,
                    'user_agent': agent or self.user_agent, 'proxy': self.proxy,
                    'verified': self.capture_note == 'captured'}
+        threads = self._capture_threads(page, context)
+        if threads:
+            session['threads'] = threads
+        else:
+            self.capture_note = 'threads_missing'
         self.result = {'user_id': session['user_id'], 'username': session['username']}
         if _sink:
             _sink(self.account, session)
@@ -974,6 +979,36 @@ class Attempt:
             self._pending_session = session
         self.state = 'connected'
         self._done.set()
+
+    def _capture_threads(self, page, context, wait_s=45):
+        """threads.com issues its own sessionid through "Continue with
+        Instagram"; the instagram.com cookies alone get a bare 500 on every
+        write there. Best effort: Instagram stays connected without it."""
+        origin = 'https://www.threads.com'
+        try:
+            page.goto(origin + '/login', wait_until='domcontentloaded', timeout=30000)
+        except Exception:
+            return {}
+        deadline = time.time() + wait_s
+        clicked = False
+        while time.time() < deadline:
+            try:
+                cookies = context.cookies(origin)
+            except Exception:
+                cookies = []
+            if any(c['name'] == 'sessionid' for c in cookies):
+                return {'cookie': '; '.join(f"{c['name']}={c['value']}" for c in cookies),
+                        'csrftoken': next((c['value'] for c in cookies
+                                           if c['name'] == 'csrftoken'), '')}
+            if not clicked:
+                try:
+                    page.get_by_text(re.compile(r'(Continue|Log in) with Instagram', re.I)
+                                     ).first.click(timeout=3000)
+                    clicked = True
+                except Exception:
+                    pass
+            page.wait_for_timeout(1000)
+        return {}
 
     def _watch_reddit(self, page):
         """Take Reddit's own bearer token and chat handshake off the page.
