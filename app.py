@@ -8811,9 +8811,11 @@ def studio():
     if _is_guest(user):
         with open(os.path.join(BASE_DIR, 'studio.html'), encoding='utf-8') as f:
             page = f.read().replace('<html', '<html data-guest="1"', 1)
-        # Without the app's own header, site-nav.js mounts the marketing bar.
+        # The marketing bar in place of the app header; site-nav.js fills it
+        # and moves the theme toggle into the account pill.
         page = page.replace('</head>', '<link rel="stylesheet" href="/css/site-nav.css">\n</head>', 1)
-        return re.sub(r'<header>.*?</header>', '', page, count=1, flags=re.S)
+        return re.sub(r'<header>.*?</header>', lambda _: GUEST_HEADER_HTML, page,
+                      count=1, flags=re.S)
     return send_from_directory(BASE_DIR, 'studio.html')
 
 
@@ -8930,6 +8932,25 @@ def _claim_guest(s, email, password_hash, name, google_sub=None):
         u.google_sub = google_sub
     s.flush()
     return u
+
+
+GUEST_HEADER_HTML = """<header class="site-nav" id="site-nav">
+  <a href="/" class="brand"><span data-sn-brand>Velvetfunneler</span><i data-sn-suffix>.com</i></a>
+  <nav class="sn-links">
+    <button class="theme-toggle" onclick="toggleTheme()" title="Light mode" aria-label="Switch to light mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"/></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"/></svg>
+    </button>
+  </nav>
+</header>
+<style>
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9999px;
+  border:1px solid rgba(127,127,127,.3);background:transparent;color:inherit;cursor:pointer;transition:all .2s}
+.theme-toggle:hover{color:#ff5c38;border-color:rgba(127,127,127,.5)}
+.theme-toggle svg{width:18px;height:18px}
+.theme-toggle .ico-moon,:root[data-theme="light"] .theme-toggle .ico-sun{display:none}
+:root[data-theme="light"] .theme-toggle .ico-moon{display:block}
+</style>"""
 
 
 GUEST_START_HTML = """<!doctype html><html><head><meta charset="utf-8">
