@@ -33642,7 +33642,8 @@ def _gen_spec(slug, body, user):
                     if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
             _auto_lora(picked, library.get(want))
         if spec['explicit'] and family == 'h3':
-            for words, want in ((_VAGINA_WORDS, 'vagina-h3'), (_MASTURBATION_WORDS, 'masturbation-h3')):
+            for words, want in ((_VAGINA_WORDS, 'vagina-h3'), (_FINGERING_WORDS, 'fingering-h3'),
+                               (_MASTURBATION_WORDS, 'masturbation-h3')):
                 lora = library.get(want)
                 if (len(picked) < 4 and words.search(text) and lora
                         and not any(p['high'] == lora['high'] for p in picked)):
@@ -33684,12 +33685,17 @@ _DEFAULT_VIDEO_LORAS = [{
     # Civitai model 2926109, v1.0.
     'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 1.0, 'family': 'h3',
     'trigger': 'masturbating, orgasmic contractions', 'examples': '',
-    'high': 'https://civitai.com/api/download/models/3311155', 'low': ''}]
+    'high': 'https://civitai.com/api/download/models/3311155', 'low': ''}, {
+    # Civitai model 2887438, V1.
+    'id': 'fingering-h3', 'name': 'H3 Fingering', 'scale': 1.0, 'family': 'h3',
+    'trigger': 'fingering', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3264127', 'low': ''}]
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
 _VAGINA_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
-_MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|fingering|wand|massager)\b', re.I)
+_MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|wand|massager)\b', re.I)
+_FINGERING_WORDS = re.compile(r'\b(fingering|fingered|fingers?\s+(deep\s+)?(in|into|inside|herself))\b', re.I)
 
 
 def _auto_lora(picked, lora):
