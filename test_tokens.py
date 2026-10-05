@@ -664,6 +664,8 @@ def test_wan22_on_runpod():
     real_post = _rq.post
 
     class _Resp:
+        status_code = 200
+
         def __init__(self, text):
             self.text = text
 
@@ -700,6 +702,27 @@ def test_wan22_on_runpod():
         _rq.post = _slow_then_ok
         check('a cold-start timeout is retried once',
               IG.write_motion_prompt('wave') == 'She waves slowly.' and len(calls) == 2)
+        class _Err:
+            status_code, text = 500, '{"status":500}'
+
+        class _Native:
+            status_code, text = 200, ''
+
+            def json(self):
+                return {'output': [{'choices': [{'tokens': ['She ', 'waves.']}]}]}
+
+        seen = []
+
+        def _flaky(url, *a, **k):
+            seen.append(url)
+            return _Native() if url.endswith('/runsync') else _Err()
+        _rq.post = _flaky
+        check('two server errors fall back to the native route',
+              IG.write_motion_prompt('wave') == 'She waves.'
+              and len(seen) == 3 and seen[-1].endswith('/runsync'))
+        check('the native prompt carries the system and user text',
+              '<|im_start|>system' in IG._qwen_chat_text([{'role': 'system', 'content': 'S'},
+                                                          {'role': 'user', 'content': 'U'}]))
         _rq.post = lambda *a, **k: (_ for _ in ()).throw(OSError('down'))
         check('a failed helper gives nothing rather than failing the clip',
               IG.write_motion_prompt('wave') == '' and IG.suggest_motions('u') == [])

@@ -2432,46 +2432,89 @@ def lora_url(url):
     return url
 
 
+def _qwen_chat_text(messages):
+    """Messages in Qwen's chat format, for the native route that takes one
+    prompt string. The empty think block makes it answer without reasoning."""
+    out = ''
+    for m in messages:
+        content = m['content'] if isinstance(m['content'], str) else ' '.join(
+            c.get('text', '') for c in m['content'] if isinstance(c, dict))
+        out += f"<|im_start|>{m['role']}\n{content}<|im_end|>\n"
+    return out + '<|im_start|>assistant\n<think>\n\n</think>\n\n'
+
+
+def _runsync_text(output):
+    """The text in a native-route answer, list or dict, choices or tokens."""
+    if isinstance(output, list):
+        return ''.join(_runsync_text(o) for o in output)
+    if isinstance(output, dict):
+        for c in output.get('choices') or []:
+            if isinstance(c, dict):
+                return ''.join(c.get('tokens') or []) or c.get('text', '') or (
+                    (c.get('message') or {}).get('content', ''))
+        return output.get('text', '') or ''
+    return output if isinstance(output, str) else ''
+
+
 def _runpod_chat(endpoint, model, messages, max_tokens=300, why=None):
     """One chat completion on a RunPod public endpoint, or '' -- a prompt
     helper that fails must never stop the clip it was helping. `why`, when
-    given, is told the reason for an empty answer, for the studio to show."""
+    given, is told the reason for an empty answer, for the studio to show.
+
+    The endpoint scales to zero and answers 500 now and then, so a timeout or
+    a server error is retried once, then the native /runsync route is tried."""
     import requests
+    import time as _time
     why = why if why is not None else {}
     key = (RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
     if not key:
         why['reason'] = 'RUNPOD_API_KEY is not set'
         return ''
-    try:
-        # The endpoint scales to zero: the first call after a quiet spell waits
-        # for a worker to start, so a timeout is retried once rather than given up.
-        for attempt in (1, 2):
-            try:
-                resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
-                                     headers={'Authorization': f'Bearer {key}',
-                                              'Content-Type': 'application/json'},
-                                     # Qwen3 thinks first by default, and the thinking
-                                     # alone can fill max_tokens and leave no answer.
-                                     json={'model': model, 'messages': messages,
-                                           'max_tokens': max_tokens, 'temperature': 0.7,
-                                           'chat_template_kwargs': {'enable_thinking': False}},
-                                     timeout=(10, 120))
-                break
-            except requests.exceptions.Timeout:
-                if attempt == 2:
-                    why['reason'] = ("Runpod's Qwen worker was starting up (timed out twice)"
-                                     ' — try again in a minute')
-                    logger.warning('runpod chat %s timed out twice', model)
-                    return ''
-        body = resp.json()
-        text = body['choices'][0]['message']['content'] or ''
-    except Exception as e:
-        status = getattr(locals().get('resp'), 'status_code', '-')
-        excerpt = getattr(locals().get('resp'), 'text', '') or str(e)
-        logger.warning('runpod chat %s failed: %s; status=%s body=%.500s', model, e,
-                       status, excerpt)
-        why['reason'] = f'error {status}: {excerpt[:150]}'
+    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+    failures = []
+    body, text = None, None
+    for attempt in (1, 2):
+        try:
+            resp = requests.post(f'{endpoint}/openai/v1/chat/completions', headers=headers,
+                                 # Qwen3 thinks first by default, and the thinking
+                                 # alone can fill max_tokens and leave no answer.
+                                 json={'model': model, 'messages': messages,
+                                       'max_tokens': max_tokens, 'temperature': 0.7,
+                                       'chat_template_kwargs': {'enable_thinking': False}},
+                                 timeout=(10, 120))
+        except requests.exceptions.Timeout:
+            failures.append('timed out')
+            continue
+        except Exception as e:
+            failures.append(str(e)[:100])
+            break
+        if resp.status_code >= 500 or resp.status_code == 429:
+            failures.append(f'error {resp.status_code}: {resp.text[:100]}')
+            if attempt == 1:
+                _time.sleep(2)
+            continue
+        try:
+            body = resp.json()
+            text = body['choices'][0]['message']['content'] or ''
+        except Exception:
+            failures.append(f'error {resp.status_code}: {resp.text[:100]}')
+        break
+    if text is None and 'Qwen' in model:
+        try:
+            resp = requests.post(f'{endpoint}/runsync', headers=headers, timeout=(10, 120),
+                                 json={'input': {'prompt': _qwen_chat_text(messages),
+                                                 'max_tokens': max_tokens, 'temperature': 0.7}})
+            body = resp.json()
+            text = _runsync_text(body.get('output')) if resp.status_code < 400 else None
+            if text is None:
+                failures.append(f'runsync {resp.status_code}: {resp.text[:100]}')
+        except Exception as e:
+            failures.append(f'runsync: {str(e)[:100]}')
+    if text is None:
+        logger.warning('runpod chat %s failed: %s', model, ' | '.join(failures))
+        why['reason'] = ' / '.join(failures) or 'no answer'
         return ''
+    body = body if isinstance(body, dict) else {}
     text = re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL)
     text = re.sub(r'<think>.*', '', text, flags=re.DOTALL).strip()
     if not text:

@@ -3309,7 +3309,7 @@ function renderPresets() {
       onclick="applyPreset(${i})">${esc(p.label)}${p.parts ? ' · ' + p.seconds + 's' : ''}</button>`).join('');
 }
 
-function applyPreset(i) {
+async function applyPreset(i) {
   const p = MOTION_PRESETS[i];
   if (p.nsfw && videoModel() !== 'wan-2-2-lora') pickVideoModel('wan-2-2-lora');
   el('gen-video-motion').value = p.motion;
@@ -3320,8 +3320,12 @@ function applyPreset(i) {
   (p.parts || []).forEach(m => genChainMotions.push(m));
   renderChainMotions();
   genQuote();
-  writeFromMotion();
-  (p.parts || []).forEach((_, n) => writePartPrompt(n));
+  // One at a time: the prompt writer is a single endpoint that falls over
+  // when it is sent several at once.
+  el('gen-vadvanced').open = true;
+  el('gen-vwrite-note').textContent = 'Writing… (the first try after a pause can take up to a minute)';
+  await autoWriteVideoPrompt(true);
+  for (let n = 0; n < (p.parts || []).length; n++) await writePartPrompt(n);
 }
 
 // A length past one clip runs as parts, each starting on the last frame of
