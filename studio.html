@@ -3432,8 +3432,7 @@ function useMotionIdea(i) {
 // Wan 2.2 + LoRA: the library is the server's; what is ticked, and how
 // strongly, is this page's.
 let genLoras = null;
-// Add 'wan-2-2-gv' once its endpoint runs infra/runpod-gv-patch.py at boot.
-const LORA_VIDEO_MODELS = ['wan-2-2-lora'];
+const LORA_VIDEO_MODELS = ['wan-2-2-lora', 'wan-2-2-gv'];
 const genLoraPick = {};
 async function loadLoras() {
   try {
