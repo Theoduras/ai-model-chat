@@ -2395,6 +2395,11 @@ class RunPodProvider(Provider):
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
         if model == 'h3-gv':
+            # worker-comfyui decodes every input image as base64 and fetches no
+            # links, so a URL arrives as an unreadable still.png.
+            if not spec.get('reference_b64'):
+                data, mime = fetch_result(image)
+                image = _data_uri(base64.b64encode(data).decode(), mime)
             return h3_payload(spec, image)
         if model == 'wan-2-2-gv':
             width, height = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
