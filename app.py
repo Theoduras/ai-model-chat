@@ -2445,7 +2445,7 @@ _OPEN_PATHS = (
                # consoles (/telegram-ai-chatbot vs /telegram), and _PAID_PAGES
                # matches on prefix, so they have to be named before it.
                tuple('/' + s for s in platform_pages.PAGES) +
-               ('/help', '/login', '/register', '/logout', '/pricing', '/billing',
+               ('/login', '/register', '/logout', '/pricing', '/billing',
                '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
@@ -8847,10 +8847,12 @@ def _platform_marketing_page(slug):
 @app.route('/help', methods=['GET'])
 @app.route('/help/<slug>', methods=['GET'])
 def help_page(slug=None):
+    if not _current_user():
+        return redirect('/login?next=' + urllib.parse.quote(request.path))
     if slug is not None and slug not in help_pages.PAGES:
         return 'Not found', 404
     prices = None
-    if slug == 'plans-and-tokens' and _current_user():
+    if slug == 'plans-and-tokens':
         prices = {'plans': [(t['name'], t['price']) for k, t in _BASE_TIERS.items()
                             if k != DEMO_TIER_KEY],
                   'annual_months': ANNUAL_MONTHS_CHARGED,

@@ -107,7 +107,6 @@
     { menu: 'Features', groups: FEATURES },
     { href: '/#pricing', label: 'Pricing' },
     { href: '/blog', label: 'Blog', keep: true },
-    { href: '/help', label: 'Help', keep: true },
     { href: '/free-link-in-bio', label: 'Free Link Builder', hot: true },
   ];
   var ACCOUNT_OUT = [
@@ -117,6 +116,7 @@
   var ACCOUNT_IN = [
     { href: '/tokens', label: 'Tokens', icon: 'tokens', cta: true, keep: true, tokens: true },
     { href: '/billing', label: 'Upgrade', icon: 'upgrade', cta: true, keep: true },
+    { href: '/help', label: 'Help', keep: true },
     { href: '/dashboard?view=personas', label: 'Dashboard', icon: 'dashboard', cta: true },
     { href: '/logout', label: 'Log out', icon: 'logout' },
     { href: '/account', label: 'Account', icon: 'account', avatar: true },
