@@ -336,7 +336,7 @@ MAX_VIDEO_REFERENCES = 30
 MODEL_RESOLUTION_VALUES = {
     'p-video-replace': (('720p', '720p'), ('1080p', '1080p')),
     'p-video-animate': (('720p', '720p'), ('1080p', '1080p')),
-    # 1080p at 81 frames was never run on the endpoint's 48 GB card.
+    # 1080p at 81 frames was never run on the endpoint.
     'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
 }
 
