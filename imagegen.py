@@ -2501,7 +2501,10 @@ H3_STEPS = 8
 def h3_payload(spec, image):
     """An API-format copy of Comfy's video_minimax_h3_i2v template, sent whole
     so the worker is stock worker-comfyui plus a LoRA fetcher."""
-    width, height = (n // 32 * 32 for n in video_px(spec.get('aspect'), spec.get('resolution') or '720p'))
+    # Height follows the rounded width, so the clip keeps the asked-for shape.
+    w, h = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
+    width = max(32, round(w / 32) * 32)
+    height = max(32, round(width * h / w / 32) * 32)
     frames = max(5, video_seconds('h3-gv', spec.get('seconds')) * 24)
     frames += (5 - frames % 17) % 17
     seed = int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)
@@ -2528,8 +2531,12 @@ def h3_payload(spec, image):
             'vae_name': 'minimax_h3_video_vae_int8_convrot.safetensors'}},
         'avae': {'class_type': 'VAELoader', 'inputs': {'vae_name': 'minimax_h3_audio_vae_fp32.safetensors'}},
         'still': {'class_type': 'LoadImage', 'inputs': {'image': 'still.png'}},
+        # Cropped, not stretched: a 2:3 still squeezed into 9:16 distorts her.
+        'fit': {'class_type': 'ImageScale', 'inputs': {
+            'image': ['still', 0], 'upscale_method': 'lanczos',
+            'width': width, 'height': height, 'crop': 'center'}},
         'cond': {'class_type': 'MiniMaxH3ImageToVideo', 'inputs': {
-            'clip': ['clip', 0], 'vae': ['vae', 0], 'first_frame': ['still', 0],
+            'clip': ['clip', 0], 'vae': ['vae', 0], 'first_frame': ['fit', 0],
             'prompt': spec.get('prompt') or build_video_prompt(),
             'width': width, 'height': height, 'length': frames}},
         'noise': {'class_type': 'RandomNoise', 'inputs': {'noise_seed': seed}},

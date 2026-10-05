@@ -33679,7 +33679,7 @@ _DEFAULT_VIDEO_LORAS = [{
     'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}, {
     # Civitai model 2835594, v0.2.
     'id': 'vagina-h3', 'name': 'H3 Vagina v0.2', 'scale': 1.0, 'family': 'h3',
-    'trigger': '', 'examples': '',
+    'trigger': 'vagina, pussy', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3200540', 'low': ''}, {
     # Civitai model 2926109, v1.0.
     'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 1.0, 'family': 'h3',
@@ -33688,7 +33688,7 @@ _DEFAULT_VIDEO_LORAS = [{
 
 _TOY_WORDS = re.compile(r'\b(dildos?|toys?|vibrators?)\b', re.I)
 _CLOSEUP_WORDS = re.compile(r'\b(close[- ]?ups?|closeups?|macro)\b', re.I)
-_VAGINA_WORDS = re.compile(r'\b(pussy|vagina|labia|spread)\b', re.I)
+_VAGINA_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
 _MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|fingering|wand|massager)\b', re.I)
 
 
