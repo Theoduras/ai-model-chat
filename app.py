@@ -33356,7 +33356,7 @@ def _gen_spec(slug, body, user):
         picked = []
         for item in (body.get('loras') or [])[:4]:
             lora = library.get(str((item or {}).get('id') or ''))
-            if lora:
+            if lora and lora.get('enabled', True) is not False:
                 try:
                     scale = max(0.0, min(2.0, float(item.get('scale', lora['scale']))))
                 except (TypeError, ValueError):
@@ -33378,18 +33378,28 @@ _DEFAULT_VIDEO_LORAS = [{
     'low': 'https://civitai.com/api/download/models/2083303'}]
 
 
+_LOCKED_LORA = 'nsfw-22-v008a'
+
+
 def _video_loras():
     try:
         loras = json.loads(_get_setting('video_loras') or 'null')
     except ValueError:
         loras = None
-    return loras if isinstance(loras, list) else list(_DEFAULT_VIDEO_LORAS)
+    loras = loras if isinstance(loras, list) else []
+    # The seeded pair is permanent: it can be switched off, never removed.
+    if not any(l.get('id') == _LOCKED_LORA for l in loras):
+        loras.insert(0, dict(_DEFAULT_VIDEO_LORAS[0]))
+    return loras
 
 
 def _lora_view(loras, full):
-    # Links are never sent: a link can carry a download token.
+    # Links are never sent: a link can carry a download token. Only admins
+    # see a switched-off LoRA, to switch it back on.
     keys = ('id', 'name', 'scale') + (('trigger', 'examples') if full else ())
-    return [{k: l.get(k, '') for k in keys} for l in loras]
+    return [dict({k: l.get(k, '') for k in keys}, enabled=l.get('enabled', True) is not False,
+                 locked=l.get('id') == _LOCKED_LORA)
+            for l in loras if full or l.get('enabled', True) is not False]
 
 
 @app.route('/api/generate/loras', methods=['GET'])
@@ -33411,8 +33421,14 @@ def api_admin_video_loras():
     if blocked:
         return blocked
     body = request.get_json(silent=True) or {}
+    if body.get('remove') == _LOCKED_LORA:
+        return jsonify({'ok': False, 'error': 'This LoRA can be disabled, not removed.'}), 400
     loras = [l for l in _video_loras() if l['id'] != str(body.get('remove') or '')]
-    if not body.get('remove'):
+    if body.get('toggle'):
+        for l in loras:
+            if l['id'] == str(body['toggle']):
+                l['enabled'] = bool(body.get('enabled'))
+    elif not body.get('remove'):
         old = next((l for l in loras if l['id'] == str(body.get('update') or '')), None)
         if body.get('update') and not old:
             return jsonify({'ok': False, 'error': 'That LoRA is gone.'}), 404
@@ -33430,7 +33446,8 @@ def api_admin_video_loras():
         entry = {'id': (old or {}).get('id') or secrets.token_hex(6), 'name': name,
                  'high': high, 'low': low, 'scale': scale,
                  'trigger': str(body.get('trigger') or '').strip()[:200],
-                 'examples': str(body.get('examples') or '').strip()[:3000]}
+                 'examples': str(body.get('examples') or '').strip()[:3000],
+                 'enabled': (old or {}).get('enabled', True)}
         if old:
             loras[loras.index(old)] = entry
         else:
