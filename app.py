@@ -1302,6 +1302,87 @@ def _admin_sortable(resp):
     return resp
 
 
+X_PIXEL_ID = 'rgikk'
+X_PIXEL_HTML = """<!-- X conversion tracking base code -->
+<script>
+!function(e,t,n,s,u,a){e.twq||(s=e.twq=function(){s.exe?s.exe.apply(s,arguments):s.queue.push(arguments);
+},s.version='1.1',s.queue=[],u=t.createElement(n),u.async=!0,u.src='https://static.ads-twitter.com/uwt.js',
+a=t.getElementsByTagName(n)[0],a.parentNode.insertBefore(u,a))}(window,document,'script');
+twq('config','rgikk');
+</script>
+<!-- End X conversion tracking base code -->
+"""
+X_CLICK_COOKIE = 'twclid'
+X_EVENTS = {'signup': 'X_EVENT_SIGNUP', 'subscription': 'X_EVENT_SUBSCRIPTION',
+            'tokens': 'X_EVENT_TOKENS'}
+
+
+@app.after_request
+def _x_pixel(resp):
+    """The X pixel on every page, once, from here rather than in each of the
+    pages and template strings. Never on the bio domain, which must not trace
+    back to the platform."""
+    try:
+        if request.method == 'GET' and request.args.get('twclid'):
+            resp.set_cookie(X_CLICK_COOKIE, request.args['twclid'][:200],
+                            max_age=90 * 86400, samesite='Lax', httponly=True,
+                            secure=request.is_secure)
+        if (resp.status_code != 200 or resp.mimetype != 'text/html'
+                or resp.headers.get('Content-Encoding') or _on_bio_domain()):
+            return resp
+        resp.direct_passthrough = False
+        body = resp.get_data(as_text=True)
+        if 'twq(' not in body and '</head>' in body:
+            resp.set_data(body.replace('</head>', X_PIXEL_HTML + '</head>', 1))
+    except Exception:
+        error_logger.error('X pixel not added', exc_info=True)
+    return resp
+
+
+def _x_hash(value):
+    return hashlib.sha256(value.strip().lower().encode()).hexdigest()
+
+
+def _x_conversion(event, conversion_id, email=None, twclid=None, ip=None, ua=None, url=None):
+    """One server-side conversion to X. Sent off-thread, so a sign-up or a
+    payment webhook never waits on X, and silent until the token and the
+    event's id are set."""
+    token = (os.environ.get('X_PIXEL_TOKEN') or '').strip()
+    event_id = (os.environ.get(X_EVENTS[event]) or '').strip()
+    ids = {k: v for k, v in (('twclid', twclid), ('ip_address', ip), ('user_agent', ua)) if v}
+    if email:
+        ids['hashed_email'] = _x_hash(email)
+    if not ('ip_address' in ids and 'user_agent' in ids):
+        ids.pop('ip_address', None), ids.pop('user_agent', None)
+    if not token or not event_id or not ids:
+        return
+    now = datetime.now(timezone.utc)
+    conv = {'conversion_time': now.strftime('%Y-%m-%dT%H:%M:%S.') + f'{now.microsecond // 1000:03d}Z',
+            'event_id': event_id, 'conversion_id': conversion_id, 'identifiers': [ids]}
+    if url:
+        conv['event_source_url'] = url
+
+    def send():
+        req = urllib.request.Request(
+            f'https://ads-api.x.com/12/measurement/conversions/{X_PIXEL_ID}',
+            data=json.dumps({'conversions': [conv]}).encode(), method='POST',
+            headers={'X-Pixel-Token': token, 'Content-Type': 'application/json'})
+        try:
+            with urllib.request.urlopen(req, timeout=15) as r:
+                if r.status != 200:
+                    logger.warning('X conversion %s %s: %s', event, conversion_id, r.status)
+        except Exception as e:
+            logger.warning('X conversion %s %s failed: %s', event, conversion_id, e)
+
+    threading.Thread(target=send, daemon=True).start()
+
+
+def _x_signup(user_row):
+    _x_conversion('signup', f'signup-{user_row.id}', email=user_row.email,
+                  twclid=request.cookies.get(X_CLICK_COOKIE), ip=_client_ip(),
+                  ua=request.headers.get('User-Agent'), url=request.url)
+
+
 @app.after_request
 def _noindex_fan_pages(resp):
     if _seo_noindex_all() or (request.path or '/').lower().startswith(_NOINDEX_PATHS):
@@ -5815,6 +5896,7 @@ def auth_google_callback():
     try:
         u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
         claimed = None
+        new = u is None
         if u is None:
             claimed = _claim_guest(s, email, '', info.get('name') or '', google_sub=sub)
             u = claimed or create_user(s, email, '', info.get('name') or '', google_sub=sub)
@@ -5825,6 +5907,8 @@ def auth_google_callback():
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
         _note_demo_signin(s, u, 'google')
         s.commit()
+        if claimed or new:
+            _x_signup(u)
         session['user_id'] = u.id
         session['login_at'] = time.time()
         session.permanent = True
@@ -5866,6 +5950,7 @@ def register():
         u = claimed or create_user(s, email, generate_password_hash(password), name)
         _credit_signup_link(s)
         s.commit()
+        _x_signup(u)
         session['user_id'] = u.id
         session['login_at'] = time.time()
         session.permanent = True
@@ -6636,6 +6721,8 @@ def _token_payment_paid(session_db, pay):
     ws = row.id if row else u.id
     posted = token_purchase(session_db, ws, int(pay.tokens or 0), pay.id,
                             note=f'{pay.tokens} token pack')
+    if posted:
+        _x_conversion('tokens', f'pay-{pay.order_id}', email=u.email)
     logger.info('TOKENS %s user=%s amount=%s order=%s',
                 'ADDED' if posted else 'ALREADY RECORDED',
                 u.email, pay.tokens, pay.order_id)
@@ -6746,6 +6833,7 @@ def api_billing_webhook():
                 expires = _activate_plan(s, u, pay.tier)
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s',
                             u.email, pay.tier, expires, order_id)
+                _x_conversion('subscription', f'pay-{order_id}', email=u.email)
         s.commit()
     finally:
         s.close()
@@ -6867,6 +6955,7 @@ def _stripe_checkout_completed(obj):
                 logger.info('PLAN ACTIVATED user=%s tier=%s until=%s order=%s sub=%s',
                             u.email, pay.tier, expires, order_id, sub_id)
                 _award_referral(s, u, pay, obj.get('amount_total'))
+                _x_conversion('subscription', f'pay-{order_id}', email=u.email)
         s.commit()
     finally:
         s.close()
