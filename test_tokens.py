@@ -690,6 +690,16 @@ def test_wan22_on_runpod():
         check('a refusal is reported, not used as the prompt',
               IG.write_motion_prompt('wave', why=why) == ''
               and why.get('reason', '').startswith('refused'))
+        calls = []
+
+        def _slow_then_ok(*a, **k):
+            calls.append(1)
+            if len(calls) == 1:
+                raise _rq.exceptions.ReadTimeout('cold start')
+            return _Resp('She waves slowly.')
+        _rq.post = _slow_then_ok
+        check('a cold-start timeout is retried once',
+              IG.write_motion_prompt('wave') == 'She waves slowly.' and len(calls) == 2)
         _rq.post = lambda *a, **k: (_ for _ in ()).throw(OSError('down'))
         check('a failed helper gives nothing rather than failing the clip',
               IG.write_motion_prompt('wave') == '' and IG.suggest_motions('u') == [])

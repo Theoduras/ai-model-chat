@@ -2441,15 +2441,26 @@ def _runpod_chat(endpoint, model, messages, max_tokens=300, why=None):
         why['reason'] = 'RUNPOD_API_KEY is not set'
         return ''
     try:
-        resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
-                             headers={'Authorization': f'Bearer {key}',
-                                      'Content-Type': 'application/json'},
-                             # Qwen3 thinks first by default, and the thinking
-                             # alone can fill max_tokens and leave no answer.
-                             json={'model': model, 'messages': messages,
-                                   'max_tokens': max_tokens, 'temperature': 0.7,
-                                   'chat_template_kwargs': {'enable_thinking': False}},
-                             timeout=60)
+        # The endpoint scales to zero: the first call after a quiet spell waits
+        # for a worker to start, so a timeout is retried once rather than given up.
+        for attempt in (1, 2):
+            try:
+                resp = requests.post(f'{endpoint}/openai/v1/chat/completions',
+                                     headers={'Authorization': f'Bearer {key}',
+                                              'Content-Type': 'application/json'},
+                                     # Qwen3 thinks first by default, and the thinking
+                                     # alone can fill max_tokens and leave no answer.
+                                     json={'model': model, 'messages': messages,
+                                           'max_tokens': max_tokens, 'temperature': 0.7,
+                                           'chat_template_kwargs': {'enable_thinking': False}},
+                                     timeout=(10, 120))
+                break
+            except requests.exceptions.Timeout:
+                if attempt == 2:
+                    why['reason'] = ("Runpod's Qwen worker was starting up (timed out twice)"
+                                     ' — try again in a minute')
+                    logger.warning('runpod chat %s timed out twice', model)
+                    return ''
         body = resp.json()
         text = body['choices'][0]['message']['content'] or ''
     except Exception as e:

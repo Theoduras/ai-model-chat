@@ -2621,7 +2621,7 @@ async function writePrompt() {
   if (!el('gen-direction').value.trim()) await autoDirection();
   const choices = promptChoices();
   btn.disabled = true;
-  note.textContent = 'Writing…';
+  note.textContent = 'Writing… (the first try after a pause can take up to a minute)';
   try {
     const res = await fetch('/api/generate/prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3305,7 +3305,7 @@ function renderChainMotions() {
 const genChainPrompts = [];
 async function writePartPrompt(i) {
   const note = el('gen-part-note-' + i);
-  note.textContent = 'Writing…';
+  note.textContent = 'Writing… (the first try after a pause can take up to a minute)';
   try {
     const payload = await videoPromptChoices();
     Object.assign(payload, { write: true, part: i + 2 });
@@ -3452,7 +3452,7 @@ function removeLora(id) {
 function writeFromMotion() {
   if (!el('gen-video-motion').value.trim()) { el('gen-video-motion').focus(); return; }
   el('gen-vadvanced').open = true;
-  el('gen-vwrite-note').textContent = 'Writing…';
+  el('gen-vwrite-note').textContent = 'Writing… (the first try after a pause can take up to a minute)';
   autoWriteVideoPrompt(true);
 }
 
