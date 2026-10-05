@@ -8802,11 +8802,15 @@ def landing():
 def studio():
     """Generation studio. Every active plan generates photos and explicit Photo
     to Video on its tokens; other video stays admin-only while in testing."""
-    if not _current_user():
+    user = _current_user()
+    if not user:
         return render_template_string(GUEST_START_HTML)
     blocked = _require_active()
     if blocked:
         return blocked
+    if _is_guest(user):
+        with open(os.path.join(BASE_DIR, 'studio.html'), encoding='utf-8') as f:
+            return f.read().replace('<html', '<html data-guest="1"', 1)
     return send_from_directory(BASE_DIR, 'studio.html')
 
 

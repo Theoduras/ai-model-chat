@@ -15,7 +15,8 @@
   <script src="/js/devnav.js" defer></script>
   <script src="/js/page-wizard.js"></script>
   <script>
-    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    // A guest has no dashboard to sit in, so it gets the studio full page.
+    if (window.self === window.top && !document.documentElement.dataset.guest) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
     else document.documentElement.classList.add('in-workspace');
   </script>
   <style>
