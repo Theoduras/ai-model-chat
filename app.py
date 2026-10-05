@@ -33512,7 +33512,7 @@ def _gen_spec(slug, body, user):
     elif seconds > CR.VIDEO_MAX_SECONDS:
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
-    if model == 'wan-2-2-lora':
+    if model in imagegen.LORA_VIDEO_MODELS:
         # Resolved now and stored on the job, so editing the library later
         # never changes what a past job ran with.
         library = {l['id']: l for l in _video_loras()}

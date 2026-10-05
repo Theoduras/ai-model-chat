@@ -3302,7 +3302,7 @@ function renderPresets() {
   if (!box) return;
   const nsfw = genRating === 'nsfw';
   const usable = MOTION_PRESETS.map((p, i) => [p, i]).filter(([p]) => p.nsfw === nsfw
-    && (!p.nsfw || videoModels().includes('wan-2-2-lora')));
+    && (!p.nsfw || videoModels().some(m => LORA_VIDEO_MODELS.includes(m))));
   box.style.display = genJob === 'animate' && usable.length ? '' : 'none';
   box.querySelector('div').innerHTML = usable.map(([p, i]) =>
     `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
@@ -3311,7 +3311,7 @@ function renderPresets() {
 
 async function applyPreset(i) {
   const p = MOTION_PRESETS[i];
-  if (p.nsfw && videoModel() !== 'wan-2-2-lora') pickVideoModel('wan-2-2-lora');
+  if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-lora');
   el('gen-video-motion').value = p.motion;
   const secs = el('gen-vsecs');
   if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);
@@ -3432,6 +3432,8 @@ function useMotionIdea(i) {
 // Wan 2.2 + LoRA: the library is the server's; what is ticked, and how
 // strongly, is this page's.
 let genLoras = null;
+// Add 'wan-2-2-gv' once its endpoint runs infra/runpod-gv-patch.py at boot.
+const LORA_VIDEO_MODELS = ['wan-2-2-lora'];
 const genLoraPick = {};
 async function loadLoras() {
   try {
@@ -3444,7 +3446,7 @@ async function loadLoras() {
 function renderLoras() {
   const row = el('gen-lora-row');
   if (!row) return;
-  const on = genJob === 'animate' && videoModel() === 'wan-2-2-lora';
+  const on = genJob === 'animate' && LORA_VIDEO_MODELS.includes(videoModel());
   row.style.display = on ? '' : 'none';
   if (!on) return;
   if (genLoras === null) { loadLoras(); return; }

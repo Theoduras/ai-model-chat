@@ -636,6 +636,14 @@ def test_wan22_on_runpod():
         check('a LoRA clip sends each LoRA to its own noise stage at its strength',
               lo['high_noise_loras'] == [{'path': 'https://h/a.safetensors', 'scale': 0.8}]
               and lo['low_noise_loras'] == [] and lo['duration'] == 8)
+        gv = prov.payload(dict(spec, model='wan-2-2-gv', seconds=5, seed=7, loras=[
+            {'name': 'n', 'high': 'https://h/a.safetensors', 'low': 'https://h/b.safetensors',
+             'scale': 0.8}]))['input']
+        check('our own endpoint gets the same LoRA links, one pair per LoRA',
+              gv['lora_pairs'] == [{'high': 'https://h/a.safetensors', 'low': 'https://h/b.safetensors',
+                                    'high_weight': 0.8, 'low_weight': 0.8}]
+              and gv['seed'] == 7 and gv['length'] == 81
+              and IG2.LORA_VIDEO_MODELS == ('wan-2-2-lora', 'wan-2-2-gv'))
         IG2.CIVITAI_TOKEN = 'tok'
         check('a Civitai link carries the token, any other link does not',
               IG2.lora_url('https://civitai.com/api/download/models/1') ==

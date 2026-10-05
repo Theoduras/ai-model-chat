@@ -156,6 +156,8 @@ if _GV:
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
+# Models that run the studio's LoRA library (`spec['loras']`).
+LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv')
 # The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
 # reads what the still shows and suggests what it could do, then writes the
 # clip's prompt. Qwen reads text only, so the still arrives as its description.
@@ -2379,8 +2381,14 @@ class RunPodProvider(Provider):
                 'width': width, 'height': height,
                 # 16 fps, and Wan wants 4n+1 frames.
                 'length': video_seconds(model, spec.get('seconds')) * 16 + 1,
-                'steps': 10, 'cfg': 2.0,
+                # The stock image ignores these; infra/runpod-gv-patch.py applies them.
+                'steps': 8,
                 'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1),
+                # Downloaded by the worker on first use, by the same links
+                # wan-2-2-lora hands its endpoint.
+                'lora_pairs': [{'high': lora_url(l['high']), 'low': lora_url(l['low']),
+                                'high_weight': float(l['scale']), 'low_weight': float(l['scale'])}
+                               for l in (spec.get('loras') or [])[:4] if l.get('high') or l.get('low')],
             }
             if spec.get('reference_url'):
                 body['image_url'] = spec['reference_url']
