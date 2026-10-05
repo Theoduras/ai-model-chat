@@ -1471,7 +1471,7 @@ function videoModelChips(box, note) {
     const label = videoLabel(m);
     return `<button type="button" class="gen-chip" aria-pressed="${m === chosen}"
       onclick="pickVideoModel('${m}')"><span>${esc(label)}</span>` +
-      (rate ? `<small>${Math.round(rate)} tokens/s</small>` : '') + `</button>`;
+      (rate ? `<small>${rate.toFixed(1)} tokens/s</small>` : '') + `</button>`;
   }).join('');
   if (note) {
     note.textContent = offered.length === 1

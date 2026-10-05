@@ -539,7 +539,8 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-6-rp': (5, 10, 15),
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
-    'h3-gv': (5, 10, 15),
+    # 10s is two 5s parts, not one clip, to test chaining cheaply.
+    'h3-gv': (5, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
 }
@@ -550,7 +551,7 @@ MODEL_VIDEO_DURATIONS = {
 # generated is exactly what is priced. Needs ffmpeg for the frame and the join.
 CHAIN_DURATIONS = {'wan-2-2': (20, 30), 'wan-2-6-rp': (20, 30),
                    'wan-2-2-lora': (16, 24, 32), 'wan-2-2-gv': (10, 16, 24, 32),
-                   'h3-gv': (30, 45, 60, 90, 120)}
+                   'h3-gv': (10, 30, 45, 60, 90, 120)}
 
 
 def chain_plan(model_key, seconds):
@@ -569,7 +570,7 @@ def model_durations(model_key):
     single = list(MODEL_VIDEO_DURATIONS.get(model_key) or ())
     if single and HAS_FFMPEG:
         single += list(CHAIN_DURATIONS.get(model_key, ()))
-    return single or None
+    return sorted(set(single)) or None
 
 
 # ModelsLab's face swap is not a Runware model, so it carries no entry in

@@ -128,7 +128,7 @@ VIDEO_COST_USD_PER_SECOND = {
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
-    'h3-gv': {'480p': 0.05, '720p': 0.09, '1080p': 0.10},
+    'h3-gv': {'480p': 0.10, '720p': 0.14, '1080p': 0.14},
 }
 
 PROVIDER_COST_MEASURED = {
