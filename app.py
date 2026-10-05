@@ -8849,7 +8849,12 @@ def _platform_marketing_page(slug):
 def help_page(slug=None):
     if slug is not None and slug not in help_pages.PAGES:
         return 'Not found', 404
-    return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug,
+    prices = None
+    if slug == 'plans-and-tokens' and _current_user():
+        prices = {'plans': [(t['name'], t['price']) for t in _BASE_TIERS.values()],
+                  'annual_months': ANNUAL_MONTHS_CHARGED,
+                  'packs': [(size, p['eur']) for size, p in CR.PACK_PRICES.items()]}
+    return render_template('help.html', p=help_pages.PAGES.get(slug), slug_on=slug, prices=prices,
                            pages=help_pages.PAGES, order=help_pages.ORDER, groups=help_pages.GROUPS)
 
 

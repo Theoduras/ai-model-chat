@@ -47,8 +47,7 @@
         dl([
           ['It keeps running with this tab closed',
            'Posting on a schedule and auto-reply both run on the server, not in your browser. ' +
-           'Close the tab and she carries on. That needs a host that stays awake, which is why ' +
-           'these loops run on Cloud Run and are off on Vercel.'],
+           'Close the tab and she carries on.'],
           ['Public is not private',
            'A reply under one of her posts never carries a link, a CTA or an offer — it is a ' +
            'public thread and the fastest way to get an account limited. The funnel runs in ' +
@@ -88,9 +87,7 @@
            'a <b>media URL</b> or receive a <b>webhook</b>, because both need Threads to fetch ' +
            'from us rather than us pushing to Threads.']
         ]) +
-        '<p>If you are an operator the app fields are visible here; a creator sees only ' +
-        '<b>Authorize on Threads</b>, because the app credentials are not theirs to hold. ' +
-        'Either way each model connects its own account — connecting one never touches ' +
+        '<p>Press <b>Authorize on Threads</b> to connect. Each model connects its own account — connecting one never touches ' +
         'another.</p>' +
         '<p class="fg-note">Threads has no separate password. If the Instagram session dies, ' +
         'this dies with it — fix it on the Instagram console, not here.</p>'

@@ -241,8 +241,8 @@
         '<p><b>Run a round now</b> does immediately what the background loop would do on its ' +
         'own schedule: read what is waiting, answer what qualifies, stop at the reply cap. It ' +
         'is the honest test, because it uses the real account and the real settings.</p>' +
-        '<p class="fg-note">The always-on loop needs a host that stays awake, so it runs on ' +
-        'Cloud Run and is off on Vercel. On Vercel, this button is how a round happens at all.</p>'
+        '<p class="fg-note">The background loop runs on our servers, so she keeps answering ' +
+        'with this tab closed.</p>'
     },
 
     {

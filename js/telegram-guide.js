@@ -94,9 +94,8 @@
         'first, the other looks like a person and can.</p>' +
         '<p>Everything after the connect stage is shared: the voice settings, the media and ' +
         'the fan list apply to whichever of the two a conversation is on.</p>' +
-        '<p class="fg-note">The reply loop runs on the server, so she keeps answering with ' +
-        'this tab closed. That needs a host that stays awake — it runs on Cloud Run and is ' +
-        'off on Vercel.</p>'
+        '<p class="fg-note">The reply loop runs on our servers, so she keeps answering with ' +
+        'this tab closed.</p>'
     },
     {
       stage: 'connect', nav: 'Bot or account?',

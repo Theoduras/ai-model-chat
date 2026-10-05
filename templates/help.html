@@ -96,6 +96,14 @@ dl.opts dd,.fg-dl dd{color:var(--text-soft)}
     <dl class="opts">{% for k, v in rows %}<dt>{{ k }}</dt><dd>{{ v | safe }}</dd>{% endfor %}</dl>
     {% endfor %}
     {% endif %}
+    {% if prices %}
+    <h2>Prices</h2>
+    <h3>Plans, per month</h3>
+    <dl class="opts">{% for name, price in prices.plans %}<dt>{{ name }}</dt><dd>{{ '€%d' % price if price else 'Free' }}</dd>{% endfor %}</dl>
+    <p class="lede" style="font-size:15px;margin-top:10px">Pay yearly and you are charged {{ prices.annual_months }} months for 12.</p>
+    <h3>Token packs</h3>
+    <dl class="opts">{% for size, eur in prices.packs %}<dt>{{ '{:,}'.format(size) }} tokens</dt><dd>€{{ eur }}</dd>{% endfor %}</dl>
+    {% endif %}
     {% if p.guide %}
     <h2>Step by step</h2>
     <p class="lede">The same steps the console's own <b>Guide</b> walks you through.</p>
