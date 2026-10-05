@@ -661,6 +661,11 @@ def test_wan22_on_runpod():
               IG2.lora_url('https://civitai.com/api/download/models/1') ==
               'https://civitai.com/api/download/models/1?token=tok'
               and IG2.lora_url('https://h/a') == 'https://h/a')
+        h3 = IG2.h3_payload({'aspect': '9:16', 'seconds': 15}, 'A', 'B')['input']
+        check('a later H3 part starts on the last frame and holds her photo as <Picture 1>',
+              [i['name'] for i in h3['images']] == ['still.png', 'ref.png']
+              and h3['workflow']['guide']['inputs']['frame_idx'] == 0
+              and h3['workflow']['guider']['inputs']['conditioning'] == ['guide', 0])
         if IG2.HAS_FFMPEG:
             check('a long clip splits into whole parts the model serves',
                   IG2.chain_plan('wan-2-2', 30) == [15, 15]

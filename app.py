@@ -36976,8 +36976,34 @@ def _gen_advance(row):
                         result.urls[0])
     elif result.status == 'done' and result.urls:
         _gen_finish(job_id, slug, spec, workspace, result.urls)
+    elif result.status == 'failed' and _gen_chain_retry_plain(job_id, slug, spec, provider_name):
+        logger.info('chain job=%s: part with identity image failed (%s), re-ran without it',
+                    job_id, (result.error or '')[:160])
     elif result.status == 'failed':
         _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _gen_chain_retry_plain(job_id, slug, spec, provider_name):
+    """Re-run a failed H3 part once without the identity image, in case the
+    worker's checkpoint cannot take one. True when the part was resubmitted."""
+    chain = spec.get('chain') or {}
+    if spec.get('model') != 'h3-gv' or not chain.get('parts') or chain.get('plain'):
+        return False
+    chain['plain'] = True
+    try:
+        frame = imagegen.last_frame(storage.get(chain['parts'][-1]))
+        new_job = frame and _gen_chain_submit(job_id, slug, spec, provider_name, len(chain['parts']), frame)
+    except Exception:
+        logger.exception('chain job=%s plain retry failed', job_id)
+        return False
+    if not new_job:
+        return False
+    s = _db_session()
+    try:
+        update_generation(s, job_id, provider_job_id=new_job, spec_json=json.dumps(spec))
+    finally:
+        s.close()
+    return True
 
 
 def _previous_action(spec, done):
@@ -36985,6 +37011,44 @@ def _previous_action(spec, done):
     before = spec.get('motion', '') if done == 1 else chain['motions'][done - 2]
     now = chain['motions'][done - 1]
     return '' if before.strip().lower() == now.strip().lower() else before.strip()[:200]
+
+
+def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
+    """Start part done+1 from the last frame of part done."""
+    import base64
+    chain = spec['chain']
+    motion = chain['motions'][done - 1]
+    call = dict(spec)
+    call.update({'seconds': chain['plan'][done], 'motion': motion,
+                 'prompt_extra': '', 'reference_url': '',
+                 'reference_b64': base64.b64encode(frame).decode(),
+                 'reference_mime': 'image/jpeg',
+                 # The previous part's action is negated when this part's
+                 # differs: its first frame already shows that action, and
+                 # the model otherwise just carries it on.
+                 'negative': imagegen.merge_negative(
+                     ', '.join(x for x in (spec.get('negative_extra'),
+                                           _previous_action(spec, done)) if x),
+                     video=True)})
+    template = imagegen.build_chain_prompt(motion)
+    # A part prompt the creator wrote or edited runs as written.
+    stored = chain.get('prompts') or []
+    call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
+        imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
+                                     style=imagegen.lora_style(spec)) or template)
+    logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
+                len(chain['plan']), call['prompt'])
+    if spec.get('model') == 'h3-gv' and not chain.get('plain'):
+        # Her original photo rides along as an identity image, so a
+        # long clip does not drift from part to part.
+        ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
+        if ref_b64:
+            call.update({'identity_b64': ref_b64, 'identity_mime': ref_mime})
+    spec.setdefault('sent', []).append(_video_sent(call, provider_name))
+    new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
+    if not new_job:
+        raise imagegen.GenerationError('part %d was not accepted' % (done + 1))
+    return new_job
 
 
 def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, url):
@@ -37015,31 +37079,7 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
             frame = imagegen.last_frame(data)
             if not frame:
                 raise imagegen.GenerationError('could not read the end of part %d' % done)
-            motion = chain['motions'][done - 1]
-            call = dict(spec)
-            call.update({'seconds': chain['plan'][done], 'motion': motion,
-                         'prompt_extra': '', 'reference_url': '',
-                         'reference_b64': base64.b64encode(frame).decode(),
-                         'reference_mime': 'image/jpeg',
-                         # The previous part's action is negated when this part's
-                         # differs: its first frame already shows that action, and
-                         # the model otherwise just carries it on.
-                         'negative': imagegen.merge_negative(
-                             ', '.join(x for x in (spec.get('negative_extra'),
-                                                   _previous_action(spec, done)) if x),
-                             video=True)})
-            template = imagegen.build_chain_prompt(motion)
-            # A part prompt the creator wrote or edited runs as written.
-            stored = chain.get('prompts') or []
-            call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
-                imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
-                                             style=imagegen.lora_style(spec)) or template)
-            logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
-                        len(chain['plan']), call['prompt'])
-            spec.setdefault('sent', []).append(_video_sent(call, provider_name))
-            new_job, _ = imagegen.get_provider(provider_name).submit_video(call)
-            if not new_job:
-                raise imagegen.GenerationError('part %d was not accepted' % (done + 1))
+            new_job = _gen_chain_submit(job_id, slug, spec, provider_name, done, frame)
             s = _db_session()
             try:
                 update_generation(s, job_id, provider_job_id=new_job,

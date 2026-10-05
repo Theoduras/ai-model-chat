@@ -2414,7 +2414,9 @@ class RunPodProvider(Provider):
             else:
                 data, mime = fetch_result(image)
                 image = _data_uri(base64.b64encode(data).decode(), mime)
-            return h3_payload(spec, image)
+            ref = (_data_uri(spec['identity_b64'], spec.get('identity_mime'))
+                   if spec.get('identity_b64') else None)
+            return h3_payload(spec, image, ref)
         if model == 'wan-2-2-gv':
             width, height = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
             body = {
@@ -2510,9 +2512,11 @@ class RunPodProvider(Provider):
 H3_STEPS = 8
 
 
-def h3_payload(spec, image):
+def h3_payload(spec, image, ref=None):
     """An API-format copy of Comfy's video_minimax_h3_i2v template, sent whole
-    so the worker is stock worker-comfyui plus a LoRA fetcher."""
+    so the worker is stock worker-comfyui plus a LoRA fetcher. With `ref` (her
+    original photo) the clip still starts on `image`, pinned at frame 0, and
+    the photo is <Picture 1>, holding her identity across a chain."""
     # Height follows the rounded width, so the clip keeps the asked-for shape.
     w, h = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
     width = max(32, round(w / 32) * 32)
@@ -2566,7 +2570,20 @@ def h3_payload(spec, image):
         'save': {'class_type': 'SaveVideo', 'inputs': {
             'video': ['video', 0], 'filename_prefix': 'h3', 'format': 'auto', 'codec': 'auto'}},
     })
-    return {'input': {'workflow': wf, 'images': [{'name': 'still.png', 'image': image}]}}
+    images = [{'name': 'still.png', 'image': image}]
+    if ref:
+        wf['ref'] = {'class_type': 'LoadImage', 'inputs': {'image': 'ref.png'}}
+        wf['cond'] = {'class_type': 'MiniMaxH3ReferenceToVideo', 'inputs': {
+            'clip': ['clip', 0], 'vae': ['vae', 0], 'audio_vae': ['avae', 0],
+            'prompt': 'The woman in <Picture 1>. ' + (spec.get('prompt') or build_video_prompt()),
+            'width': width, 'height': height, 'length': frames,
+            'ref_image_size': 'match', 'ref_images.ref_image_0': ['ref', 0]}}
+        wf['guide'] = {'class_type': 'MiniMaxH3AddGuide', 'inputs': {
+            'positive': ['cond', 0], 'latent': ['cond', 1], 'vae': ['vae', 0],
+            'image': ['fit', 0], 'frame_idx': 0}}
+        wf['guider']['inputs']['conditioning'] = ['guide', 0]
+        images.append({'name': 'ref.png', 'image': ref})
+    return {'input': {'workflow': wf, 'images': images}}
 
 
 def lora_url(url):
