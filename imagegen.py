@@ -157,6 +157,13 @@ if _GV:
 _H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'szk0bfj0wywyyv').strip().rstrip('/')
 if _H3:
     RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
+# Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
+# character's approved photos, and makes stills from the same base with it.
+CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
+_LORA_EP = os.getenv('RUNPOD_LORA_ENDPOINT', '').strip().rstrip('/')
+if _LORA_EP:
+    RUNPOD_ENDPOINTS[CHAR_LORA_IMAGE_MODEL] = (
+        _LORA_EP if '/' in _LORA_EP else f'https://api.runpod.ai/v2/{_LORA_EP}')
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
@@ -164,6 +171,11 @@ RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
 # they take an uploaded track or none, never a generated one.
 SILENT_MODELS = tuple(m for m in RUNPOD_MODELS if m != 'h3-gv')
+# Pixel sizes for a character-LoRA still, by frame shape; multiples of 16.
+IMAGE_LORA_PX = {'1:1': (1216, 1216), '2:3': (1024, 1536), '3:2': (1536, 1024),
+                 '4:5': (1152, 1440), '5:4': (1440, 1152), '21:9': (1792, 768),
+                 '3:4': (1088, 1440), '4:3': (1440, 1088), '9:16': (896, 1600),
+                 '16:9': (1600, 896)}
 # Models that run the studio's LoRA library (`spec['loras']`).
 LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv')
 
@@ -309,7 +321,7 @@ def preserves_source(job, model_key):
 EXPLICIT_MODEL = 'seedream-4-5'
 # Every image model that may run an explicit shot as asked. credits imports
 # this module, so this is a copy of its MODEL_RATINGS; test_tokens pins the two.
-EXPLICIT_MODELS = (EXPLICIT_MODEL,)
+EXPLICIT_MODELS = (EXPLICIT_MODEL, CHAR_LORA_IMAGE_MODEL)
 
 # Identity is one reference-conditioned call. `referenceImages` is the field
 # Seedream accepts; `seedImage` with a strength is refused by the architecture.
@@ -2401,6 +2413,12 @@ class RunPodProvider(Provider):
         if status == 'COMPLETED':
             out = body.get('output')
             url = _first_url(out)
+            if not url and isinstance(out, dict) and isinstance(out.get('image'), str):
+                url = 'data:image/png;base64,' + out['image']
+            if not url and isinstance(out, dict) and out.get('trained'):
+                return Result('done', ['trained'])
+            if not url and isinstance(out, dict) and out.get('error'):
+                return Result('failed', error=str(out['error'])[:500])
             if not url and isinstance(out, dict) and isinstance(out.get('video'), str):
                 # generate_video hands the clip back inline as base64.
                 url = 'data:video/mp4;base64,' + out['video']
@@ -2496,7 +2514,29 @@ class RunPodProvider(Provider):
         return {'input': body}
 
     def submit_image(self, spec):
-        raise GenerationError('RunPod only runs Wan 2.2 video here', fatal=True)
+        if spec.get('model') != CHAR_LORA_IMAGE_MODEL or CHAR_LORA_IMAGE_MODEL not in RUNPOD_ENDPOINTS:
+            raise GenerationError('RunPod only runs Wan 2.2 video here', fatal=True)
+        w, h = IMAGE_LORA_PX.get(spec.get('aspect') or '2:3', IMAGE_LORA_PX['2:3'])
+        args = {'prompt': spec.get('prompt') or '', 'negative': spec.get('negative') or '',
+                'width': w, 'height': h, 'seed': spec.get('seed'),
+                'loras': [{'high': lora_url(l['high']), 'low': lora_url(l['low']),
+                           'scale': float(l['scale'])}
+                          for l in (spec.get('loras') or [])[:3] if l.get('high') and l.get('low')]}
+        return self._run(CHAR_LORA_IMAGE_MODEL, {'input': {'image': args}})
+
+    def submit_lora_training(self, images, trigger, high_put, low_put, steps):
+        """Start a character LoRA training run: `images` is [{url, caption}],
+        the two PUT links are where the worker uploads the finished files."""
+        if CHAR_LORA_IMAGE_MODEL not in RUNPOD_ENDPOINTS:
+            raise GenerationError('RUNPOD_LORA_ENDPOINT is not set', fatal=True)
+        return self._run(CHAR_LORA_IMAGE_MODEL, {'input': {'train': {
+            'images': images, 'trigger': trigger, 'steps': steps,
+            'high_put': high_put, 'low_put': low_put}}})
+
+    def _run(self, model, payload):
+        body = _post(f'{RUNPOD_ENDPOINTS[model]}/run', payload, self._headers(), timeout=VIDEO_TIMEOUT)
+        job = str(body.get('id') or '')
+        return (f'{model}|{job}' if job else ''), self._read(body)
 
     def submit_video(self, spec):
         model = spec.get('model') if spec.get('model') in RUNPOD_ENDPOINTS else 'wan-2-2'

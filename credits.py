@@ -41,7 +41,8 @@ TOKEN_COST_USD = 0.04
 # it or nothing starts.
 MIN_MARGIN_MULTIPLE = 2.25
 
-IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2')
+IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2',
+                'wan-2-2-char')
 RESOLUTIONS = ('2k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
@@ -86,7 +87,14 @@ PROVIDER_COST_USD = {
     'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
     'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
     'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
+    # A still on our char-lora endpoint (infra/runpod-lora). Unmeasured guess:
+    # ~1 min of an 80-96 GB card plus its share of cold starts.
+    'wan-2-2-char': {'2k': 0.08},
 }
+
+# Training one character LoRA on the same endpoint: about an hour of an
+# 80-96 GB card. Unmeasured, so set high.
+LORA_TRAIN_COST_USD = 6.0
 
 VIDEO_COST_USD_PER_SECOND = {
     'wan-2-5':      {'480p': 0.09076, '720p': 0.09076, '1080p': 0.2269},
@@ -222,6 +230,8 @@ GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
 # bills a video-to-audio call flat, and a model that emits sound in the same
 # pass bills nothing extra at all. Priced as if it always costs us the dearer of
 # the two, because the cheaper case cannot be told apart at quote time.
+LORA_TRAIN_PRICE = credits_for_cost(LORA_TRAIN_COST_USD)
+
 ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),
     'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
@@ -277,6 +287,7 @@ MODEL_LABELS = {
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
 }
+MODEL_LABELS['wan-2-2-char'] = 'Her LoRA'
 MODEL_LABELS_NSFW = {'seedream-4-5': 'Creative Pro 18+ Full LoRA'}
 MODEL_TAGLINES = {
     'seedream-4-5': 'Bold ideas, brought to life.',
@@ -297,6 +308,7 @@ MODEL_RATINGS = {
     'seedream-5-pro': ('sfw',),
     'nano-banana-pro': ('sfw',),
     'nano-banana-2': ('sfw',),
+    'wan-2-2-char': ('sfw', 'nsfw'),
 }
 
 # Video, measured the same way. Wan 2.7 served the explicit probe; Seedance 2.5

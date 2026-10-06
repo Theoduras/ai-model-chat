@@ -972,6 +972,7 @@ async function loadCharacterBadge() {
     c = d.character;
   } catch (e) {}
   genCharacter = c;
+  renderModelChips();
   if (genJob === 'reel' || genJob === 'swap') renderGenForm();
   const was = genIdentity;
   renderIdentitySrc();
@@ -1557,6 +1558,7 @@ function renderModelChips() {
   const rank = m => (order.indexOf(m) + 1) || order.length + 1;
   const keys = Object.keys(genPrices.images)
     .filter(m => m !== 'seedream-5-pro' && (ratings[m] || ['sfw']).includes(want))
+    .filter(m => m !== 'wan-2-2-char' || (genCharacter && genCharacter.lora === 'ready'))
     .sort((a, b) => rank(a) - rank(b));
   if (!keys.includes(hidden.value)) {
     hidden.value = keys.includes(genPrices.defaults.model)

@@ -33858,6 +33858,12 @@ def _gen_spec(slug, body, user):
                 and 'nsfw' not in CR.MODEL_RATINGS.get(model, ('sfw',))):
             model = imagegen.EXPLICIT_MODEL
         batch = max(1, min(8, int(body.get('batch') or 1)))
+        if model == imagegen.CHAR_LORA_IMAGE_MODEL:
+            lora = _char_lora_entry(slug)
+            if not lora:
+                raise imagegen.GenerationError('She has no trained LoRA yet.')
+            # One still per RunPod job.
+            spec['loras'], batch = [lora], 1
         aspect = (body.get('aspect') or '').strip()
         # Checked on the model that will run, after any move above: a size it
         # does not serve is refused by the provider after the tokens are held.
@@ -34116,6 +34122,9 @@ def _gen_spec(slug, body, user):
                                'low': lora['low'], 'scale': scale,
                                'trigger': lora.get('trigger', ''),
                                'examples': lora.get('examples', '')})
+        her = _char_lora_entry(slug) if family == 'wan' else None
+        if her:
+            picked = [her] + picked[:3]
         # A toy clip gets the toy LoRA even when none was ticked: close-up
         # wording picks the close-up pair, anything else the full-body one.
         text = ' '.join(str(spec.get(k) or '') for k in ('prompt_extra', 'motion'))
@@ -35126,6 +35135,7 @@ def _char_json(s, row, full=False):
            'nsfw_level': row.nsfw_level, 'body_type': row.body_type,
            'persona': _char_linked_persona(row.slug), 'status': row.status,
            'version': row.version or 0,
+           'lora': _char_lora_status(_char_lora(row.id)),
            'required': len(required),
            'approved_required': len([k for k in required if k in canon]),
            'face_url': _char_img_json(canon['face_front'])['url']
@@ -36018,6 +36028,177 @@ def api_persona_character(slug):
         return jsonify({'ok': True, 'character': out})
     finally:
         s.close()
+
+
+# ── Character LoRA ───────────────────────────────────────────────────────────
+# A Wan 2.2 LoRA trained on her approved views (infra/runpod-lora). Once ready
+# it rides on every Wan clip of her persona and powers the "Her LoRA" still
+# model. State lives in app settings, one row per character; a retrain keeps
+# the last good files in use until the new ones land.
+CHAR_LORA_MIN_PHOTOS = 6
+CHAR_LORA_TIMEOUT = 4 * 3600
+
+
+def _char_lora(char_id):
+    try:
+        return json.loads(_get_setting(f'char_lora:{char_id}') or 'null') or {}
+    except ValueError:
+        return {}
+
+
+def _char_lora_save(char_id, state):
+    _set_setting(f'char_lora:{char_id}', json.dumps(state))
+    try:
+        open_ids = set(json.loads(_get_setting('char_lora_open') or '[]'))
+    except ValueError:
+        open_ids = set()
+    if state.get('status') == 'training':
+        open_ids.add(char_id)
+    else:
+        open_ids.discard(char_id)
+    _set_setting('char_lora_open', json.dumps(sorted(open_ids)))
+
+
+def _char_lora_status(state):
+    if state.get('status') == 'training':
+        return 'training'
+    return 'ready' if state.get('high') else state.get('status') or 'none'
+
+
+def _char_lora_entry(slug):
+    """The persona's trained character LoRA as a library entry, or None."""
+    from db import Character
+    s = _db_session()
+    try:
+        row = s.query(Character).filter(Character.slug == slug).first()
+        char_id = row.id if row else None
+    finally:
+        s.close()
+    state = _char_lora(char_id) if char_id else {}
+    if not state.get('high'):
+        return None
+    high = storage.signed_url(state['high'], ttl=2 * 86400)
+    low = storage.signed_url(state['low'], ttl=2 * 86400)
+    if not (high and low):
+        return None
+    return {'name': 'Her LoRA', 'high': high, 'low': low, 'scale': 1.0,
+            'trigger': state.get('trigger', ''), 'examples': ''}
+
+
+def _char_lora_fail(char_id, state, message):
+    _refund_tokens(state.get('workspace'), state.get('source'), note='LoRA training failed')
+    state.update(status='failed', error=str(message)[:300])
+    state.pop('pending', None)
+    _char_lora_save(char_id, state)
+
+
+def _char_lora_advance(char_id):
+    state = _char_lora(char_id)
+    if state.get('status') != 'training':
+        return
+    if time.time() - float(state.get('started') or 0) > CHAR_LORA_TIMEOUT:
+        return _char_lora_fail(char_id, state, 'training never finished')
+    try:
+        res = imagegen.get_provider('runpod').poll(state['job'])
+    except imagegen.GenerationError as e:
+        if e.fatal:
+            _char_lora_fail(char_id, state, e)
+        return
+    except Exception:
+        logger.exception('char lora poll crashed char=%s', char_id)
+        return
+    if res.status == 'failed':
+        return _char_lora_fail(char_id, state, res.error or 'training failed')
+    if res.status != 'done':
+        return
+    old = (state.get('high'), state.get('low'))
+    state.update(status='ready', error='', trained_at=time.time(), **state.pop('pending'))
+    _char_lora_save(char_id, state)
+    for path in old:
+        if path:
+            try:
+                storage.delete(path)
+            except Exception:
+                logger.warning('could not delete old LoRA file %s', path)
+
+
+def _char_lora_poll_all():
+    try:
+        ids = json.loads(_get_setting('char_lora_open') or '[]')
+    except ValueError:
+        ids = []
+    for char_id in ids:
+        _char_lora_advance(char_id)
+
+
+@app.route('/api/characters/<char_id>/lora', methods=['GET', 'POST'])
+def api_character_lora(char_id):
+    """GET: where her LoRA stands. POST: train it (again) on her approved
+    views, for CR.LORA_TRAIN_PRICE tokens, refunded if the run fails."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    user = _current_user()
+    s = _db_session()
+    try:
+        row = _char_row(s, user, char_id)
+        if not row:
+            return jsonify({'ok': False, 'error': 'Unknown character'}), 404
+        photos = [((CH.view(k, row.body_type) or {}).get('label') or k, img.gcs_path)
+                  for k, img in _char_canonicals(s, row.id).items() if img.gcs_path]
+        key, workspace = row.key, row.workspace_id
+    finally:
+        s.close()
+    state = _char_lora(char_id)
+    if request.method == 'GET':
+        _char_lora_advance(char_id)
+        state = _char_lora(char_id)
+    elif state.get('status') == 'training':
+        return jsonify({'ok': False, 'error': 'Her LoRA is already training.'}), 409
+    elif len(photos) < CHAR_LORA_MIN_PHOTOS:
+        return jsonify({'ok': False, 'error': f'Approve at least {CHAR_LORA_MIN_PHOTOS} '
+                        f'photos first ({len(photos)} so far).'}), 400
+    elif imagegen.CHAR_LORA_IMAGE_MODEL not in imagegen.RUNPOD_ENDPOINTS:
+        return jsonify({'ok': False, 'error': 'LoRA training is not set up yet.'}), 503
+    else:
+        price = CR.LORA_TRAIN_PRICE
+        balance = _token_balance(user)
+        if balance is not None and balance < price:
+            return _tokens_denied(price, balance)
+        version = int(state.get('version') or 0) + 1
+        source = f'lora-{char_id}-{version}'
+        if not _spend_tokens(user, price, source, note='character LoRA training'):
+            return _tokens_denied(price, _token_balance(user) or 0)
+        # Kept across retrains, so her prompts never need rewording.
+        trigger = state.get('trigger') or 'zx' + secrets.token_hex(3)
+        pending = {side: f'{storage.KEPT_PREFIX}/loras/{key}/v{version}-{side}.safetensors'
+                   for side in ('high', 'low')}
+        ttl = 6 * 3600
+        try:
+            puts = {side: storage.signed_upload_url(p, 'application/octet-stream', ttl=ttl)
+                    for side, p in pending.items()}
+            images = [{'url': storage.signed_url(path, ttl=ttl),
+                       'caption': f'{trigger}, a woman, {label.lower()}'} for label, path in photos]
+            if not all(puts.values()) or not all(i['url'] for i in images):
+                raise imagegen.GenerationError('storage could not sign the links')
+            job, res = imagegen.RunPodProvider().submit_lora_training(
+                images, trigger, puts['high'], puts['low'],
+                steps=min(2000, max(1200, 100 * len(images))))
+            if not job or res.status == 'failed':
+                raise imagegen.GenerationError(res.error or 'RunPod refused the job')
+        except Exception as e:
+            logger.exception('char lora submit failed char=%s', char_id)
+            _refund_tokens(workspace, source, note='LoRA training not started')
+            return jsonify({'ok': False, 'error': f'Training could not start: {e}'}), 502
+        state.update(status='training', job=job, version=version, trigger=trigger,
+                     pending=pending, source=source, workspace=workspace,
+                     started=time.time(), error='', photos=len(images))
+        _char_lora_save(char_id, state)
+    return jsonify({'ok': True, 'lora': {
+        'status': _char_lora_status(state), 'version': state.get('version') or 0,
+        'error': state.get('error', ''), 'photos': len(photos),
+        'trained_at': state.get('trained_at'), 'price': CR.LORA_TRAIN_PRICE,
+        'min_photos': CHAR_LORA_MIN_PHOTOS}})
 
 
 @app.route('/api/characters/<char_id>/images', methods=['POST'])
@@ -37022,6 +37203,12 @@ def _gen_start(job_id, slug, spec, workspace):
                 call['prompt'] = spec['prompt']
                 provider_job, result, ran = _char_submit(call)
                 spec['model'] = ran
+            elif spec['kind'] == 'image' and spec.get('model') == imagegen.CHAR_LORA_IMAGE_MODEL:
+                # Her identity is the LoRA, so no references: its trigger leads.
+                style = imagegen.lora_style(spec) or {}
+                call['prompt'] = ', '.join(style.get('triggers') or []) + ', ' + \
+                    _gen_image_prompt(slug, spec, False)
+                provider_job, result = provider.submit_image(call)
             elif spec['kind'] == 'image':
                 refs = _character_content(spec)[0]
                 if spec.get('identity') != 'character':
@@ -37716,6 +37903,7 @@ def _gen_poll_round():
         s.close()
     for row in rows:
         _gen_advance(row)
+    _char_lora_poll_all()
     _gen_purge_finished()
     return len(rows)
 
