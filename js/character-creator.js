@@ -420,6 +420,7 @@
   function upBtn(k) {
     const refs = imgs(k, 'reference');
     return refs.map(r => `<span class="chipf">Your image<button type="button" aria-label="Remove your image" onclick="CC.unref(${attr(r.id)})">✕</button></span>`).join('') +
+      (PAIRS[k] ? '' : `<label class="btn btn-ghost btn-sm up">Upload photo<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upPhoto(${attr(k)},this)"></label>`) +
       `<label class="btn btn-ghost btn-sm up">+ Your image<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upRef(${attr(k)},this)"></label>`;
   }
   const optsOf = k => { const c = canon(k), list = cands(k).slice(-8); return c ? [c, ...list.filter(x => x.id !== c.id)] : list; };
@@ -447,7 +448,7 @@
         ? `<div class="fld"><div class="fl">Outfit photo</div>${(pick.outfit || '').startsWith('upload:') ? '<span class="chipf">Outfit added</span>' : `<label class="btn btn-ghost btn-sm up">+ Upload outfit<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upOutfit(${attr(k)},this)"></label>`}</div>`
         : `<label class="fl">Colour<select onchange="CC.advSet(${attr(k)},'colour',this.value)">${['Random', ...Object.keys(COLOURS)].map(o => `<option ${(pick.colour || 'Random') === o ? 'selected' : ''}>${o}</option>`).join('')}</select></label>`}</div>` : '';
     return `<div class="view">${th}<div class="nm">${esc(label(k))}<small>${esc(sub)}</small>${img ? wearTag(k, img) : ''}</div>
-      <div class="acts">${run ? (views.map(v => RUN[v] ? bar(v) : '').join('') || '<span class="pill">Generating</span>') : all ? '<span class="pill ok">Approved</span>' : ''}
+      <div class="acts">${run ? (views.map(v => RUN[v] ? bar(v) : '').join('') || '<span class="pill">Generating</span>') : all ? `<span class="pill ok">Approved</span>${canon(k) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="CC.unapprove(${attr(canon(k).id)})">Remove</button>` : ''}` : ''}
       <select class="qty" aria-label="How many of ${esc(label(k))}" onchange="CC.advSet(${attr(k)},'qty',+this.value)">${[1, 2, 4, 8].map(n => `<option ${q === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
       <button type="button" class="btn btn-sm ${img ? 'btn-ghost' : 'btn-primary'}" ${locked || run ? 'disabled' : ''} onclick="CC.advGen(${attr(k)})">${img ? 'Generate again' : 'Generate'}</button></div>
       <div class="refs">${upBtn(k)}</div>
@@ -706,7 +707,7 @@
     lbVar(k, id) {
       const all = optsOf(k);
       const items = all.map((m, i) => ({title: `${label(k)}, option ${i + 1}`, url: m.url,
-        acts: m.role === 'canonical' ? '<span class="pill ok">Approved</span>' : act(`CC.approve(${attr(m.id)})`, 'Approve this one', true)}));
+        acts: m.role === 'canonical' ? '<span class="pill ok">Approved</span>' + act(`CC.unapprove(${attr(m.id)})`, 'Remove approval') : act(`CC.approve(${attr(m.id)})`, 'Approve this one', true)}));
       lbOpen(items, Math.max(0, all.findIndex(m => m.id === id)));
     },
     lbDone(k) {
@@ -745,6 +746,23 @@
         const image = await fileData(f);
         for (const v of PAIRS[k] || [k]) await api(`/api/characters/${C.id}/images`, {body: {view: v, image, attest: true}});
         await refresh();
+      } catch (e) { return fail(e); }
+      render();
+    },
+    async unapprove(id) {
+      try { await api(`/api/characters/${C.id}/images/${id}/unapprove`, {body: {}}); await refresh(); } catch (e) { return fail(e); }
+      lbClose();
+      render();
+    },
+    async upPhoto(k, input) {
+      const f = input.files[0];
+      if (!f) return;
+      if (!S.attest) { input.value = ''; return say('Tick the rights and consent box first.'); }
+      try {
+        const up = await api(`/api/characters/${C.id}/images`, {body: {view: k, image: await fileData(f), attest: true, import: true}});
+        const id = (up.image || {}).id;
+        await refresh();
+        if (id) await approveImage(id);
       } catch (e) { return fail(e); }
       render();
     },
