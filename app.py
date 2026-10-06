@@ -5138,8 +5138,8 @@ function stopWatch(){watchKey=null;clearTimeout(watchTimer);clearTimeout(watchCh
 function fitWatch(v){
   var fr=document.querySelector('.watchwrap .frame'), f=document.getElementById('wframe');
   if(!fr||!f||!v||!v.w)return;
-  var sc=Math.min(fr.clientWidth/v.w, fr.clientHeight/(v.h||v.w));
-  f.style.width=v.w+'px'; f.style.height=(v.h||v.w)+'px'; f.style.transform='scale('+sc+')';
+  var sc=fr.clientWidth/v.w;
+  f.style.width=v.w+'px'; f.style.height=Math.ceil(fr.clientHeight/sc)+'px'; f.style.transform='scale('+sc+')';
 }
 function pollWatch(){
   if(!watchKey)return;
