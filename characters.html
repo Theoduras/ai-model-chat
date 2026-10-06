@@ -30,6 +30,7 @@
     .ob-rsub.approved .ob-rsub-i { color: var(--ok); }
     .ob-rsub.review .ob-rsub-i, .ob-rsub.generating .ob-rsub-i, .ob-rsub.outdated .ob-rsub-i { color: var(--warn); }
     .info { display: inline-flex; align-items: center; justify-content: center; width: 16px; height: 16px; margin-left: 6px; border: 1px solid var(--text-muted); border-radius: 50%; font: italic 700 .68rem/1 Georgia, serif; color: var(--text-muted); cursor: pointer; vertical-align: middle; background: transparent; flex-shrink: 0; }
+    .info { text-transform: none; letter-spacing: 0; }
     .info:hover, .info:focus-visible { color: var(--accent); border-color: var(--accent); outline: none; }
     .info-slot { display: inline-flex; }
     .info-pop { position: fixed; z-index: 120; max-width: 300px; padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: var(--r-md); box-shadow: var(--shadow-lg); font-size: .82rem; line-height: 1.45; color: var(--text-2); }
@@ -312,6 +313,11 @@
       background: var(--panel); border-left: 1px solid var(--border); box-shadow: var(--shadow-lg);
     }
     .drawer-scrim { position: fixed; inset: 0; z-index: 39; background: rgba(0,0,0,.45); }
+    /* The scrim sits outside the photo step, so leaving the step with the drawer
+       open left the next step dimmed. */
+    .ch-body[hidden] ~ .drawer-scrim { display: none; }
+    #step-card .section-title { flex-wrap: wrap; row-gap: 4px; }
+    #step-progress { margin-left: auto; text-transform: none; letter-spacing: 0; font-weight: 500; white-space: nowrap; }
     .views-mode .ch-body > .drawer:not([hidden]) { display: flex; }
     @media (min-width: 1320px) {
       .views-mode .ch-body { grid-template-columns: minmax(0, 1fr) 360px; }
@@ -491,9 +497,10 @@
       /* Three stacked rows ate a sixth of the screen: Back, Save and Guide share
          one, the primary action gets the full width under them. */
       #ch-foot { padding: 10px 0 max(12px, env(safe-area-inset-bottom)); margin-top: 18px; gap: 8px; }
-      #ch-foot .btn, #ch-foot .ob-skip { flex: 1 1 0; min-height: 42px; justify-content: center; }
+      #ch-foot .btn, #ch-foot .ob-skip { flex: 1 1 0; min-width: 0; min-height: 42px; justify-content: center; padding-left: 0; padding-right: 0; }
       #ch-foot .btn-primary { order: 2; flex-basis: 100%; }
-      #ch-foot .ob-alt { width: auto; flex: 1 1 0; margin: 0; }
+      /* 2px: the buttons beside it carry a 1px border each side, it does not. */
+      #ch-foot .ob-alt { width: auto; flex: 1 1 2px; margin: 0; }
       #ch-foot .ob-alt .ob-skip { width: 100%; padding: 8px 6px; }
       #ch-foot .ob-alt:has(.ob-skip ~ .ob-skip) { flex-basis: 100%; order: 4; }
       #ch-foot .ob-alt .ob-skip { white-space: normal; min-height: 36px; padding: 6px; font-size: .78rem; }
@@ -514,6 +521,7 @@
       #ch-rail .pw-stages::-webkit-scrollbar { display: none; }
       #ch-rail .ob-rstage { flex-shrink: 0; }
       #ch-rail .ob-rstage-t { min-height: 40px; white-space: nowrap; }
+      #ch-foot .ob-alt:not(:has(.ob-skip ~ .ob-skip)) .ob-skip { min-height: 42px; border-radius: var(--r); font-size: .88rem; }
       #ch-foot .ob-alt:has(.ob-skip ~ .ob-skip) .ob-skip { border-color: transparent; background: transparent; min-height: 32px; color: var(--text-muted); }
       /* Per-photo rows: the label had ~77px beside the Generate button. */
       .step-shot { display: grid; grid-template-columns: 38px minmax(0, 1fr); }
@@ -524,7 +532,13 @@
       #vp-source { order: 3; flex-basis: 100%; }
       #vp-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
       .actionbar { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
-      .actionbar > .btn { flex: 1 1 100%; min-height: 42px; justify-content: center; }
+      /* Each (i) took a row of its own and the bar grew to half the screen:
+         variations, then price + Generate, then Approve. */
+      .actionbar { gap: 8px 10px; padding-top: 10px; }
+      .actionbar .info-slot, .actionbar .grow { display: none; }
+      .actionbar #vp-quote { flex: 0 0 auto; }
+      .actionbar #vp-var { flex: 1 1 0; min-height: 40px; justify-content: center; }
+      .actionbar #vp-approve { flex: 1 1 100%; min-height: 44px; justify-content: center; }
       .ch-check .ch-shot { max-width: 220px; width: 100%; margin: 0 auto; }
       .ch-check-card > * { padding: 14px 16px; }
       .checks th:first-child, .checks td:first-child { padding-left: 16px; }
