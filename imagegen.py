@@ -2592,10 +2592,12 @@ class VastProvider(RunPodProvider):
         if not self.key:
             raise GenerationError('VAST_API_KEY is not set')
 
-    def _post(self, url, body, timeout=TIMEOUT):
+    def _post(self, url, body, timeout=TIMEOUT, key=None):
+        # The router and its workers take the endpoint's own key, not the account's.
         import requests
         try:
-            resp = requests.post(url, json=body, headers=self._headers(), timeout=timeout)
+            resp = requests.post(url, json=body, timeout=timeout, headers={
+                'Authorization': f'Bearer {key or self.key}', 'Content-Type': 'application/json'})
         except Exception as e:
             raise ProviderUnreachable(f'Vast unreachable: {e}', fatal=False)
         if resp.status_code == 410:
@@ -2649,22 +2651,25 @@ class VastProvider(RunPodProvider):
             try:
                 body = self._post('https://run.vast.ai/route/', {
                     'endpoint': name, 'api_key': key, 'cost': 100, 'request_idx': idx,
-                    'replay_timeout': 60})
+                    'replay_timeout': 60}, key=key)
             except ProviderUnreachable:
                 # One dropped connection must not end a wait that can run 20 minutes.
                 continue
+            if body.get('error_msg'):
+                raise GenerationError(f'Vast refused the route: {body["error_msg"]}', fatal=True)
             idx = body.get('request_idx', idx)
-        return body
+        return dict(body, _key=key)
 
     def _run(self, model, payload):
         auth = self._route(VAST_ENDPOINTS[model])
+        key = auth.pop('_key')
         url = auth['url'].rstrip('/')
         sess = self._post(f'{url}/session/create', {'auth_data': auth, 'payload': {
-            'lifetime': 3 * 3600}})
+            'lifetime': 3 * 3600}}, key=key)
         body = self._post(f'{url}/run', {'auth_data': auth, 'session_id': sess['session_id'],
-                                         'payload': payload}, timeout=VIDEO_TIMEOUT)
+                                         'payload': payload}, timeout=VIDEO_TIMEOUT, key=key)
         job = json.dumps({'url': url, 'auth': auth, 'session': sess['session_id'],
-                          'job': body.get('id')})
+                          'job': body.get('id'), 'key': key})
         return job, self._read(body)
 
     def submit_video(self, spec):
@@ -2674,11 +2679,12 @@ class VastProvider(RunPodProvider):
     def poll(self, job_id, expect=1):
         h = json.loads(job_id)
         res = self._read(self._post(f'{h["url"]}/status', {
-            'auth_data': h['auth'], 'session_id': h['session'], 'payload': {'id': h['job']}}))
+            'auth_data': h['auth'], 'session_id': h['session'], 'payload': {'id': h['job']}},
+            key=h.get('key')))
         if res.status != 'running':
             try:
                 self._post(f'{h["url"]}/session/end', {'session_id': h['session'],
-                                                       'session_auth': h['auth']})
+                                                       'session_auth': h['auth']}, key=h.get('key'))
             except Exception:
                 pass
         return res
