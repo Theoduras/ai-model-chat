@@ -37,7 +37,7 @@ WORKERS = {
 # Scripts come from this repo (public) at VJ_REF. Truncating the log matters:
 # a resumed cold worker must not read the last boot's "ready" line before its
 # handler is up again.
-ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora; cd /opt/vast_jobs; '
+ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora /opt/vast_jobs/start; cd /opt/vast_jobs; '
            'R=https://raw.githubusercontent.com/Theoduras/ai-model-chat/$VJ_REF/infra; '
            'for f in vast/sitecustomize.py vast/worker.py vast/preload.py vast/start/$VJ_NAME.sh runpod-gv-patch.py '
            'runpod-h3/handler.py runpod-h3/deploy.py runpod-lora/handler.py; do '
@@ -45,7 +45,7 @@ ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora; cd /op
            '(pip install -q --target /opt/pw vastai >/var/log/pyworker.log 2>&1; '
            'PYTHONPATH=/opt/pw nohup python3 worker.py >>/var/log/pyworker.log 2>&1 &); '
            'cd /; PYTHONPATH=/opt/vast_jobs nohup bash /opt/vast_jobs/start/$VJ_NAME.sh '
-           '>>/var/log/vast-jobs.log 2>&1 &')
+           '>>/var/log/vast-jobs.log 2>&1 &; tail -F /var/log/vast-jobs.log /var/log/pyworker.log &')
 
 
 def call(method, path, body=None):
