@@ -233,7 +233,7 @@
   }
 
   // ── Navigation ──────────────────────────────────────────────────────────────
-  function go(s) { if (s !== S.step) S.hist.push(S.step); S.step = s; say(''); render(); el('cc-card').scrollIntoView({block: 'start'}); }
+  function go(s) { if (s !== S.step) S.hist.push(S.step); S.step = s; if (s === 'done' && C) loadLora(); say(''); render(); el('cc-card').scrollIntoView({block: 'start'}); }
   function back() { const s = S.hist.pop() || 'start'; if (s === 'start') S.mode = ''; S.step = s; say(''); render(); }
   const FLOW = {fast: ['basics', 'look', 'faces', 'body', 'photos'], adv: ['basics', 'look', 'body', 'adv'], own: ['own', 'photos']};
 
@@ -495,10 +495,25 @@
         </div>
         ${S.persona === 'link' ? `<label class="fl" for="cc-link">Persona<select id="cc-link" onchange="CC.S.link=this.value;CC.render()"><option value="">${S.personas ? 'Choose a persona' : 'Loading…'}</option>${
           personas.map(p => `<option value="${esc(p.slug)}" ${S.link === p.slug ? 'selected' : ''}>${esc(p.name || p.slug)}</option>`).join('')}</select></label>` : ''}</div>
+      ${loraBox()}
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-primary" ${!S.persona || (S.persona === 'link' && !S.link) ? 'disabled' : ''} onclick="CC.finish()">${
         S.persona === 'new' ? 'Create persona' : S.persona === 'link' ? 'Link and open studio' : 'Open studio'}</button></div>`;
     },
   };
+  function loraBox() {
+    const l = S.lora;
+    if (!l) return '';
+    const body = l.status === 'ready' ? '<span class="pill ok">Trained</span>'
+      : l.status === 'training' ? '<span class="pill">Training…</span>'
+      : l.photos < l.min_photos ? `<small>Needs ${l.min_photos} approved photos, she has ${l.photos}.</small>`
+      : `<button type="button" class="btn btn-primary btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">${l.status === 'failed' ? 'Try again' : 'Train LoRA'} · ${esc(l.price)} tokens</button>`;
+    return `<div class="fld"><div class="fl">Character LoRA</div><p>Trains a model on her approved photos so videos keep her look.${l.error ? ' Last try failed: ' + esc(l.error) : ''}</p>${body}</div>`;
+  }
+  async function loadLora() {
+    try { S.lora = (await api(`/api/characters/${C.id}/lora`)).lora; } catch (e) { S.lora = null; }
+    if (S.step === 'done') render();
+    if (S.lora && S.lora.status === 'training') setTimeout(loadLora, 15000);
+  }
   const lookDone = () => ['ethnicity', 'apparent_age', 'skin_tone', 'hair_colour', 'hair_texture'].every(k => sheet()[k]);
 
   // ── Lightbox ────────────────────────────────────────────────────────────────
@@ -602,6 +617,11 @@
     async exMake(k) { try { await api('/api/characters/examples/' + k, {body: {}}); } catch (e) { return fail(e); } await loadEx(); render(); },
     async exRedo(k, o) { if (!confirm('Redo the ' + o + ' example?')) return; try { await api('/api/characters/examples/' + k, {body: {redo: o}}); } catch (e) { return fail(e); } await loadEx(); render(); },
     async exApprove(k, on) { try { await api(`/api/characters/examples/${k}/approve`, {body: {approved: on}}); } catch (e) { return fail(e); } await loadEx(); render(); },
+    async trainLora() {
+      try { S.lora = (await api(`/api/characters/${C.id}/lora`, {body: {}})).lora; }
+      catch (e) { return fail(e); }
+      render(); loadLora();
+    },
     async bodyNext() {
       say('');
       try { await CC.ensureChar(); } catch (e) { return fail(e); }
