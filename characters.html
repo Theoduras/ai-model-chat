@@ -458,7 +458,7 @@
     #ch-import label.field input, #ch-import label.field select { width: 100%; }
 
     @media (max-width: 900px) {
-      .ch-list-wrap { padding: 16px 16px 56px; }
+      .ch-list-wrap { padding: 16px 16px 88px; }
       /* The shared rail disappears on a phone; this one is the step navigation,
          so it folds into a strip above the step instead. */
       #edit-view > #ch-rail { display: block; width: auto; border-right: 0; border-bottom: 1px solid var(--border-soft); padding: 14px 16px 10px; }
@@ -471,8 +471,19 @@
       #ch-stepwrap { padding: 18px 16px 0; }
       .vp-refs { grid-template-columns: 1fr; }
       .opts { grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); }
+      .opts > .drop { grid-column: 1 / -1; }
+      .drawer { overscroll-behavior: contain; }
+      .ch-busy { align-items: center; }
     }
     @media (max-width: 600px) {
+      /* Three items never fit one 360px row: the heading takes its own line and
+         the two buttons split the next one. */
+      .ch-list-head .pg-head-l { flex-wrap: wrap; }
+      .ch-list-head .pg-head-l h2 { flex-basis: 100%; }
+      .ch-list-head .pg-head-l .btn { flex: 1 1 0; justify-content: center; }
+      /* One card per row was a 430px-tall card each. */
+      .ch-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+      .ch-grid .pg-initials { font-size: 1.8rem; }
       /* Fixed 80px tiles left a ragged gap on the right; a grid fills the row. */
       .fp-opts:not(:has(.fp-opt.text)) { display: grid; grid-template-columns: repeat(auto-fill, minmax(84px, 1fr)); }
       .fp-opts:not(:has(.fp-opt.text)) .fp-opt { width: auto; }
@@ -484,8 +495,44 @@
       #ch-foot .btn-primary { order: 2; flex-basis: 100%; }
       #ch-foot .ob-alt { width: auto; flex: 1 1 0; margin: 0; }
       #ch-foot .ob-alt .ob-skip { width: 100%; padding: 8px 6px; }
-      #ch-foot .ob-alt:has(.ob-skip + .ob-skip) { flex-basis: 100%; order: 3; }
-      #ch-foot .ob-saved { order: 4; flex-basis: 100%; text-align: center; }
+      #ch-foot .ob-alt:has(.ob-skip ~ .ob-skip) { flex-basis: 100%; order: 4; }
+      #ch-foot .ob-alt .ob-skip { white-space: normal; min-height: 36px; padding: 6px; font-size: .78rem; }
+      /* decorateInfo puts an (i) after every footer button; on a phone they
+         squeezed the buttons until the labels overlapped. */
+      #ch-foot .info { display: none; }
+      #ch-foot .pw-why { order: 3; flex-basis: 100%; text-align: center; font-size: .76rem; }
+      #ch-foot .ob-saved { order: 5; flex-basis: 100%; text-align: center; }
+      #ch-rail .ob-rail-p { display: none; }
+      /* The rail and the sticky footer both stay put; together they left a
+         third of the screen for the step. Back and the name share a line, the
+         stages scroll sideways in one. */
+      #edit-view > #ch-rail { display: flex; flex-wrap: wrap; align-items: center; column-gap: 12px; padding: 8px 16px 0; }
+      #ch-rail .btn-back-gallery { margin: 0; order: 0; }
+      #ch-rail .pw-rail-name { flex: 1; min-width: 0; margin: 0; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      #ch-rail .ob-mini { flex-basis: 100%; margin: 4px 0 6px; }
+      #ch-rail .pw-stages { flex-basis: 100%; flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; gap: 16px; padding-bottom: 2px; }
+      #ch-rail .pw-stages::-webkit-scrollbar { display: none; }
+      #ch-rail .ob-rstage { flex-shrink: 0; }
+      #ch-rail .ob-rstage-t { min-height: 40px; white-space: nowrap; }
+      #ch-foot .ob-alt:has(.ob-skip ~ .ob-skip) .ob-skip { border-color: transparent; background: transparent; min-height: 32px; color: var(--text-muted); }
+      /* Per-photo rows: the label had ~77px beside the Generate button. */
+      .step-shot { display: grid; grid-template-columns: 38px minmax(0, 1fr); }
+      .ch-gen .step-shot .btn { grid-column: 1 / -1; width: 100%; min-height: 40px; justify-content: center; }
+      .step-shot .st { white-space: normal; }
+      #ch-stepwrap .vp-head-t { min-width: 0; flex: 1 1 calc(100% - 110px); }
+      .vp-head .vp-close { order: 2; margin-left: auto; width: 40px; height: 40px; }
+      #vp-source { order: 3; flex-basis: 100%; }
+      #vp-opts { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+      .actionbar { padding-bottom: max(16px, env(safe-area-inset-bottom)); }
+      .actionbar > .btn { flex: 1 1 100%; min-height: 42px; justify-content: center; }
+      .ch-check .ch-shot { max-width: 220px; width: 100%; margin: 0 auto; }
+      .ch-check-card > * { padding: 14px 16px; }
+      .checks th:first-child, .checks td:first-child { padding-left: 16px; }
+      .checks th:last-child, .checks td:last-child { padding-right: 16px; }
+      .ch-actions { flex-direction: column-reverse; }
+      .ch-actions .btn { width: 100%; min-height: 42px; justify-content: center; }
+      #ch-stepwrap .btn-sm, .drawer .btn-sm { min-height: 38px; }
+      #ch-stepwrap .chip, .drawer .chip { min-height: 38px; }
       #ch-foot .ob-saved:empty { display: none; }
     }
   </style>

@@ -9,6 +9,7 @@
   <script src="/js/theme.js"></script>
   <script>
     if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
   </script>
   <link rel="stylesheet" href="/css/style.css">
 <link rel="stylesheet" href="/css/lazy.css">
@@ -30,6 +31,8 @@
   .pl-slot-media .pl-slot-thumb { width:26px; height:26px; border-radius:5px;
     object-fit:cover; display:block; }
   .pl-slot-warn { color:#d6336c; font-weight:700; }
+  /* The dashboard frames this page and has its own top bar. */
+  .in-workspace body > header { display: none; }
 </style>
 </head>
 <body class="page-dashboard">
@@ -112,7 +115,7 @@
           <span class="pl-count" id="pl-m-count"></span>
         </label>
         <textarea id="pl-m-text" rows="5" oninput="plCount()"></textarea>
-        <div style="margin-top:6px; display:flex; gap:6px;">
+        <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
           <button type="button" class="btn-ai" id="pl-m-write" onclick="plWrite(this)">✨ Write it</button>
           <span class="pl-rating" id="pl-m-rating">
             <button type="button" class="on" data-r="" onclick="plSetRating('')" title="Whatever this persona is set to">Auto</button>
@@ -131,9 +134,9 @@
         </label>
         <div class="pl-picked" id="pl-m-picked"></div>
         <div id="pl-m-browse" style="margin:8px 0 2px;"></div>
-        <div id="pl-m-gen" style="margin:8px 0 2px; display:flex; gap:6px; align-items:center;">
+        <div id="pl-m-gen" style="margin:8px 0 2px; display:flex; flex-wrap:wrap; gap:6px; align-items:center;">
           <button type="button" class="btn-ai" id="pl-m-gen-btn" onclick="plGenMedia(this)">🎨 Create media</button>
-          <select id="pl-m-gen-n" title="How many photos">
+          <select id="pl-m-gen-n" title="How many photos" aria-label="How many photos" style="width:auto; flex:0 0 auto;">
             <option>1</option><option>2</option><option>3</option><option>4</option>
           </select>
           <span class="hint" id="pl-m-gen-hint">Made from the post text.</span>
