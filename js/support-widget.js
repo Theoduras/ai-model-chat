@@ -68,7 +68,7 @@
     + '.spw-send:disabled{opacity:.5;cursor:default;}'
     + '.spw-send svg{width:18px;height:18px;}'
     + '@media(max-width:520px){.spw-panel{right:0;left:0;bottom:0;top:0;width:auto;height:auto;max-height:none;'
-    + 'border-radius:0;border:none;}.spw-fab{right:16px;bottom:16px;}.spw-open .spw-fab{display:none;}}';
+    + 'border-radius:0;border:none;}.spw-fab{display:none;}.spw-open .spw-fab{display:none;}}';
 
   var CHAT_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" '
     + 'stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5'
