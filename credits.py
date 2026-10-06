@@ -35,9 +35,9 @@ TOKEN_COST_USD = 0.04
 # month of invoices.
 #
 # It was 4.0 when the ladder was four packs with a shallow curve. The ladder now
-# runs from EUR 0.15 a token down to EUR 0.09 -- a 40% volume discount -- so the
-# two largest packs land at 2.81x and 2.29x. That is the discount working as
-# intended (64% and 56% gross margin), not a mistake, but the floor has to admit
+# runs from EUR 0.19 a token down to EUR 0.09 -- a 53% volume discount -- so the
+# two largest packs land at 2.54x and 2.29x. That is the discount working as
+# intended (61% and 56% gross margin), not a mistake, but the floor has to admit
 # it or nothing starts.
 MIN_MARGIN_MULTIPLE = 2.25
 
@@ -422,18 +422,21 @@ DEFAULT_MONTHLY_TOKENS = 100
 FREE_CREDITS = 15
 
 # Top-up packs. One price for everyone -- there are no tier bands. The ladder
-# already falls 40% from the smallest pack to the largest, which is the same
+# already falls 53% from the smallest pack to the largest, which is the same
 # incentive bought by volume rather than by subscription tier; stacking the old
 # Pro and Agency bands on top of it would put the 5,000 pack at roughly 1.7x
-# cost.
-PACK_SIZES = (100, 500, 1000, 2000, 5000)
+# cost. The 100-300 packs are deliberately close together and 500 is a step
+# down from them, so 500 reads as the obvious buy.
+PACK_SIZES = (100, 200, 300, 500, 1000, 2000, 5000)
 
 PACK_PRICES = {
-    100:   {'eur': 15,  'usd': 16,  'gbp': 13},
-    500:   {'eur': 70,  'usd': 75,  'gbp': 62},
-    1000:  {'eur': 130, 'usd': 139, 'gbp': 115},
-    2000:  {'eur': 220, 'usd': 235, 'gbp': 195},
-    5000:  {'eur': 450, 'usd': 479, 'gbp': 395},
+    100:   {'eur': 19,  'usd': 21,  'gbp': 17},
+    200:   {'eur': 35,  'usd': 39,  'gbp': 29},
+    300:   {'eur': 49,  'usd': 55,  'gbp': 43},
+    500:   {'eur': 59,  'usd': 65,  'gbp': 52},
+    1000:  {'eur': 109, 'usd': 119, 'gbp': 89},
+    2000:  {'eur': 199, 'usd': 219, 'gbp': 159},
+    5000:  {'eur': 449, 'usd': 489, 'gbp': 389},
 }
 
 # Stripe refuses a charge under these, whatever the price table says, so a pack

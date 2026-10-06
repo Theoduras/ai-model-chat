@@ -48,7 +48,7 @@ PAGES = {
             ('Pro', '800 tokens a month.'),
             ('Agency', '2,500 tokens a month.'),
             ('Monthly allowance', 'Arrives at the start of each month and expires at the end of it. It is always spent before tokens you bought.'),
-            ('Bought tokens', 'Packs of 100, 500, 1,000, 2,000 and 5,000. They never expire.'),
+            ('Bought tokens', 'Packs of 100, 200, 300, 500, 1,000, 2,000 and 5,000. They never expire.'),
             ('Refunds', 'A generation that fails returns its tokens to the bucket they came from.'),
         ],
         'tips': [
