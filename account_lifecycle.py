@@ -1,4 +1,5 @@
-"""What happens to a creator's stuff when the subscription lapses.
+"""What happens to a creator's stuff when the subscription lapses, and when an
+admin deletes the account outright (delete_account).
 
 A lapsed account keeps everything for GRACE_DAYS and can download all of it;
 after that the content, history and saved files are deleted. Paying again
@@ -140,6 +141,71 @@ def sweep(session, notify=None):
         logger.info('LAPSE PURGE user=%s personas=%d rows=%d', u.email, len(slugs), n)
         done += 1
     return done
+
+
+# Per-persona state outside what purge_content clears: fans, funnels, posts,
+# studio presets and the persona's own page.
+_PERSONA_TABLES = (
+    (db.FanEvent, 'persona'), (db.FanProfile, 'persona'), (db.FanReward, 'persona'),
+    (db.FunnelAssignment, 'persona'), (db.FunnelPosterior, 'persona'),
+    (db.LinkClick, 'persona'), (db.PpvDrop, 'persona'), (db.ScheduledPost, 'persona'),
+    (db.XEvent, 'persona'), (db.XOpener, 'persona'), (db.StudioLocation, 'slug'),
+    (db.StudioOutfit, 'slug'), (db.BioPage, 'slug'))
+
+
+def delete_account(session, user):
+    """Delete an account and everything it made: personas, characters,
+    media, chats, its workspaces and every seat in them, its support thread
+    and its push subscriptions.
+
+    Payments, referral earnings, trial redemptions and the token ledger stay:
+    they are the record of money that changed hands, and three of them hold a
+    foreign key to the user row. So the row stays too, emptied of who it was,
+    and marked deleted so a session still holding its id signs nobody in.
+    Safe to run again on a partly deleted account. Returns rows removed."""
+    workspaces = owned_workspaces(session, user.id)
+    slugs = owned_slugs(session, user.id)
+    removed = purge_content(session, slugs, workspaces)
+    ws = list(workspaces)
+    page_slugs = slugs + ['acct-' + w for w in ws]
+    for model, col in _PERSONA_TABLES:
+        removed += session.query(model).filter(
+            getattr(model, col).in_(page_slugs)).delete(synchronize_session=False)
+    removed += session.query(db.SavedPersona).filter(
+        db.SavedPersona.slug.in_(slugs)).delete(synchronize_session=False)
+    for model in (db.Invite, db.UsageCounter, db.Membership):
+        removed += session.query(model).filter(
+            model.workspace_id.in_(ws)).delete(synchronize_session=False)
+    removed += session.query(db.Membership).filter(
+        db.Membership.user_id == user.id).delete(synchronize_session=False)
+    removed += session.query(db.Workspace).filter(
+        db.Workspace.id.in_(ws)).delete(synchronize_session=False)
+    threads = [t for (t,) in session.query(db.SupportThread.id)
+               .filter(db.SupportThread.user_id == user.id).all()]
+    if threads:
+        removed += session.query(db.SupportMessage).filter(
+            db.SupportMessage.thread_id.in_(threads)).delete(synchronize_session=False)
+        removed += session.query(db.SupportThread).filter(
+            db.SupportThread.id.in_(threads)).delete(synchronize_session=False)
+    removed += session.query(db.PushSubscription).filter(
+        db.PushSubscription.user_id == user.id).delete(synchronize_session=False)
+    session.query(db.ActivityLog).filter(db.ActivityLog.user_id == user.id).update(
+        {'email': ''}, synchronize_session=False)
+
+    user.email = f'deleted-{user.id}@deleted.invalid'
+    user.password_hash = '!'
+    for col in ('google_sub', 'team_owner_id', 'expires_at', 'grandfathered_until',
+                'reset_token', 'reset_token_expires', 'stripe_customer_id',
+                'stripe_subscription_id', 'referral_code', 'last_seen_at'):
+        setattr(user, col, None)
+    for col in ('name', 'tier', 'brand', 'country', 'timezone', 'phone', 'website',
+                'bio', 'avatar', 'setup_json'):
+        setattr(user, col, '')
+    user.role = 'user'
+    user.status = 'deleted'
+    user.content_purged_at = _now()
+    session.commit()
+    return removed
 
 
 def _decode_data_url(url):

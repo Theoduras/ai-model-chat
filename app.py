@@ -2002,7 +2002,7 @@ def _current_user():
     s = _db_session()
     try:
         u = s.get(User, uid)
-        if u is None:
+        if u is None or u.status == 'deleted':
             return None
         if (u.status == 'active' and u.expires_at
                 and u.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
@@ -3775,8 +3775,9 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <a href="/admin/trials">Trial links</a>
 <a href="/admin/support">Support inbox</a>
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
+{% if deleted %}<div class="ok">Deleted {{ deleted }}.</div>{% endif %}
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>Last online</th><th></th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>Last online</th><th></th><th></th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
@@ -3788,6 +3789,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <td>{{ u.expires or '—' }}</td><td data-at="{{ u.joined_at }}">{{ u.created or '—' }}</td>
 <td data-seen="{{ u.seen_at }}">—</td>
 <td><a class="email" href="/admin/support?user={{ u.id }}">Message</a></td>
+<td><a class="email" style="color:#f87171" href="/admin/users/{{ u.id }}#delete">Delete</a></td>
 </tr>{% endfor %}
 </table></div></div></div>
 <script>
@@ -3953,6 +3955,13 @@ h2{font-size:1rem;margin-bottom:14px}
 <label>New password</label><input type="password" name="password" required placeholder="At least 8 characters">
 <button type="submit" class="danger">Set password</button></form></div>
 
+{% if can_delete %}<div class="card" id="delete" style="margin-top:16px;border-color:#7f1d1d"><h2>Delete account</h2>
+<p class="sub">Deletes this account and everything it made: personas and their platform connections, characters, photos and videos, chats, its team seats and its support thread. Any Stripe subscription is cancelled first. Payments and the token ledger are kept as records, with no name or email on them. This cannot be undone.</p>
+<form method="post" action="/admin/users/{{ u.id }}" onsubmit="return confirm('Delete {{ u.email }} and everything in it? This cannot be undone.')">
+<input type="hidden" name="action" value="delete">
+<label>Type <b>{{ u.email }}</b> to confirm</label><input type="text" name="confirm_email" required autocomplete="off" spellcheck="false">
+<button type="submit" class="danger">Delete account</button></form></div>{% endif %}
+
 </div></body></html>"""
 
 
@@ -4041,7 +4050,7 @@ def admin_users():
     s = _db_session()
     try:
         from db import Workspace, Membership
-        users = list_users(s)
+        users = [u for u in list_users(s) if u.status != 'deleted']
         by_id = {u.id: u for u in users}
         ws_owner = {w.id: w.owner_id for w in s.query(Workspace).all()}
         seats, guest_of = {}, {}
@@ -4070,6 +4079,7 @@ def admin_users():
         s.close()
     return render_template_string(
         ADMIN_USERS_HTML, users=rows, now=int(time.time()),
+        deleted=(request.args.get('deleted') or '')[:255],
         online_window=SUPPORT_ONLINE_WINDOW,
         super_admin=bool((_current_user() or {}).get('is_super_admin')))
 
@@ -5292,6 +5302,34 @@ def admin_user_detail(uid):
                     logger.info('ADMIN TOKEN REMOVE by=%s target=%s tokens=%s',
                                 me['email'], u.email, n)
 
+            elif action == 'delete':
+                import account_lifecycle
+                slugs = account_lifecycle.owned_slugs(s, u.id)
+                house = [x for x in slugs if _is_house_persona(x)]
+                if u.id == me['id']:
+                    error = 'You cannot delete your own account.'
+                elif u.role == 'super_admin' or u.email == SUPER_ADMIN_EMAIL:
+                    error = 'The super admin account cannot be deleted.'
+                elif u.role == 'admin' and not me.get('is_super_admin'):
+                    error = 'Only the super admin can delete an admin.'
+                elif (request.form.get('confirm_email') or '').strip().lower() != u.email:
+                    error = 'Type the account\'s email exactly to confirm.'
+                elif house:
+                    error = (f'This account owns {", ".join(house)}, which runs the public '
+                             'demo chat. Move it to another account first.')
+                elif u.stripe_subscription_id and not _stripe_cancel_subscription(
+                        u.stripe_subscription_id):
+                    error = ('Could not cancel the Stripe subscription, so nothing was '
+                             'deleted. Cancel it in Stripe, then try again.')
+                if not error:
+                    email = u.email
+                    n = account_lifecycle.delete_account(s, u)
+                    for x in slugs:
+                        _prompt_cache.pop(x, None)
+                    logger.warning('ADMIN DELETE ACCOUNT by=%s target=%s id=%s personas=%d rows=%d',
+                                   me['email'], email, u.id, len(slugs), n)
+                    return redirect('/admin/users?deleted=' + urllib.parse.quote(email))
+
             elif action == 'trial':
                 err = _grant_trial(s, u)
                 if err:
@@ -5317,13 +5355,16 @@ def admin_user_detail(uid):
             from db import token_balance
             view['tokens'] = token_balance(s, _owned_workspace_id(s, u))
         p = {f: (getattr(u, f) or '') for f in pfields}
+        can_delete = (u.id != me['id'] and u.role != 'super_admin'
+                      and u.email != SUPER_ADMIN_EMAIL
+                      and (u.role != 'admin' or me.get('is_super_admin')))
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
                                   super_admin=bool(me.get('is_super_admin')),
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
                                   roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
-                                  trial_days=TRIAL_DAYS)
+                                  trial_days=TRIAL_DAYS, can_delete=can_delete)
 
 
 SEAT_ROLES = ('manager', 'chatter')
@@ -6339,6 +6380,26 @@ def _stripe_get(path, timeout=20):
     except Exception:
         error_logger.error('Stripe GET %s failed', path, exc_info=True)
     return None
+
+
+def _stripe_cancel_subscription(sub_id):
+    """Cancel now rather than at the period's end: the account it bills is being
+    deleted. True once Stripe says the subscription is canceled or gone."""
+    req = urllib.request.Request(
+        f'{STRIPE_API}/subscriptions/{urllib.parse.quote(sub_id)}', method='DELETE',
+        headers={'Authorization': 'Bearer ' + _stripe_key()})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as resp:
+            return json.loads(resp.read().decode()).get('status') == 'canceled'
+    except url_error.HTTPError as e:
+        if e.code == 404:
+            return True
+        error_logger.error('Stripe cancel %s failed: %s', sub_id, e.read()[:300])
+    except Exception:
+        error_logger.error('Stripe cancel %s failed', sub_id, exc_info=True)
+    # Cancelling one that is already canceled is refused; that is still done.
+    sub = _stripe_get(f'/subscriptions/{urllib.parse.quote(sub_id)}')
+    return bool(sub) and sub.get('status') in ('canceled', 'incomplete_expired')
 
 
 def _checkout_stripe(user, tier_key, tier, order_id, base):
