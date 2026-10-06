@@ -354,7 +354,7 @@ def _iam_signer():
     return _signer['email'], _signer['creds']
 
 
-def signed_url(path, ttl=None):
+def signed_url(path, ttl=None, disposition=None):
     """A time-boxed read URL, or None when the backend cannot mint one — the
     caller then serves the bytes itself. A private Blob object is 403 to anyone
     without the store token, and that token must never reach a browser. On GCS
@@ -364,9 +364,10 @@ def signed_url(path, ttl=None):
         return None
     blob = _bucket().blob(path)
     expiry = timedelta(seconds=ttl or signed_url_ttl())
+    extra = {'response_disposition': disposition} if disposition else {}
     try:
         return blob.generate_signed_url(version='v4', expiration=expiry,
-                                        method='GET')
+                                        method='GET', **extra)
     except Exception:
         email, creds = _iam_signer()
         if not email:
@@ -374,7 +375,7 @@ def signed_url(path, ttl=None):
         try:
             return blob.generate_signed_url(
                 version='v4', expiration=expiry, method='GET',
-                service_account_email=email, access_token=creds.token)
+                service_account_email=email, access_token=creds.token, **extra)
         except Exception:
             logger.exception('could not sign a URL for %s', path)
             return None
