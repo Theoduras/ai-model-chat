@@ -472,7 +472,7 @@ live on the Cloud Run service, not in this repository; change them with
   Civitai LoRAs). Its template's start command runs `infra/runpod-gv-patch.py`, which makes the
   stock worker take LoRA links, our seed and our steps; re-install it if the template is rebuilt.
 - Character LoRA (`/api/characters/<id>/lora`, `CR.LORA_TRAIN_PRICE` tokens, refunded on failure) trains a
-  Wan 2.2 T2V LoRA, then a MiniMax H3 one for her `h3-gv` clips, on her approved views on our RunPod endpoint `char-lora` (`infra/runpod-lora/deploy.py`,
+  Wan 2.2 T2V LoRA, plus (opt-in, `CR.LORA_H3_TRAIN_PRICE`) a MiniMax H3 one for her `h3-gv` clips, on her approved views on our RunPod endpoint `char-lora` (`infra/runpod-lora/deploy.py`,
   `RUNPOD_LORA_ENDPOINT`; unset = off). Once ready it rides on every Wan clip of her persona and powers the
   "Her LoRA" still model (`wan-2-2-char`, studio shows it only for a character with a ready LoRA).
   Price, steps and timings are unmeasured guesses until the first real run.

@@ -36292,7 +36292,7 @@ def _char_lora_advance(char_id):
         return _char_lora_fail(char_id, state, res.error or 'training failed')
     if res.status != 'done':
         return
-    old = (state.get('high'), state.get('low'), state.get('h3'))
+    old = [state.get(side) for side in state.get('pending') or {}]
     state.update(status='ready', error='', trained_at=time.time(), **state.pop('pending'))
     _char_lora_save(char_id, state)
     for path in old:
@@ -36342,7 +36342,8 @@ def api_character_lora(char_id):
     elif imagegen.CHAR_LORA_IMAGE_MODEL not in imagegen.RUNPOD_ENDPOINTS:
         return jsonify({'ok': False, 'error': 'LoRA training is not set up yet.'}), 503
     else:
-        price = CR.LORA_TRAIN_PRICE
+        with_h3 = (request.get_json(silent=True) or {}).get('h3') is True
+        price = CR.LORA_TRAIN_PRICE + (CR.LORA_H3_TRAIN_PRICE if with_h3 else 0)
         balance = _token_balance(user)
         if balance is not None and balance < price:
             return _tokens_denied(price, balance)
@@ -36353,7 +36354,7 @@ def api_character_lora(char_id):
         # Kept across retrains, so her prompts never need rewording.
         trigger = state.get('trigger') or 'zx' + secrets.token_hex(3)
         pending = {side: f'{storage.KEPT_PREFIX}/loras/{key}/v{version}-{side}.safetensors'
-                   for side in ('high', 'low', 'h3')}
+                   for side in ('high', 'low') + (('h3',) if with_h3 else ())}
         ttl = 10 * 3600
         try:
             puts = {side: storage.signed_upload_url(p, 'application/octet-stream', ttl=ttl)
@@ -36364,7 +36365,7 @@ def api_character_lora(char_id):
                 raise imagegen.GenerationError('storage could not sign the links')
             job, res = imagegen.RunPodProvider().submit_lora_training(
                 images, trigger, puts['high'], puts['low'],
-                steps=min(2000, max(1200, 100 * len(images))), h3_put=puts['h3'])
+                steps=min(2000, max(1200, 100 * len(images))), h3_put=puts.get('h3'))
             if not job or res.status == 'failed':
                 raise imagegen.GenerationError(res.error or 'RunPod refused the job')
         except Exception as e:
@@ -36379,6 +36380,7 @@ def api_character_lora(char_id):
         'status': _char_lora_status(state), 'version': state.get('version') or 0,
         'error': state.get('error', ''), 'photos': len(photos),
         'trained_at': state.get('trained_at'), 'price': CR.LORA_TRAIN_PRICE,
+        'h3_price': CR.LORA_H3_TRAIN_PRICE, 'h3': bool(state.get('h3')),
         'min_photos': CHAR_LORA_MIN_PHOTOS}})
 
 

@@ -552,7 +552,8 @@
     const body = l.status === 'ready' ? '<span class="pill ok">Trained</span>'
       : l.status === 'training' ? '<span class="pill">Training…</span>'
       : l.photos < l.min_photos ? `<small>Needs ${l.min_photos} approved photos, she has ${l.photos}.</small>`
-      : `<button type="button" class="btn btn-primary btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">${l.status === 'failed' ? 'Try again' : 'Train LoRA'} · ${+l.price ? esc(l.price) + ' tokens' : 'free'}</button>`;
+      : `<label><input type="checkbox" id="loraH3"> Also for H3 sound videos · ${+l.h3_price ? esc(l.h3_price) + ' tokens' : 'free'}</label>
+         <button type="button" class="btn btn-primary btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">${l.status === 'failed' ? 'Try again' : 'Train LoRA'} · ${+l.price ? esc(l.price) + ' tokens' : 'free'}</button>`;
     return `<div class="fld"><div class="fl">Character LoRA</div><p>Trains a model on her approved photos so videos keep her look.${l.error ? ' Last try failed: ' + esc(l.error) : ''}</p>${body}</div>`;
   }
   async function loadLora() {
@@ -666,7 +667,7 @@
     async exRedo(k, o) { if (!confirm('Redo the ' + o + ' example?')) return; try { await api('/api/characters/examples/' + k, {body: {redo: o}}); } catch (e) { return fail(e); } await loadEx(); render(); },
     async exApprove(k, on) { try { await api(`/api/characters/examples/${k}/approve`, {body: {approved: on}}); } catch (e) { return fail(e); } await loadEx(); render(); },
     async trainLora() {
-      try { S.lora = (await api(`/api/characters/${C.id}/lora`, {body: {}})).lora; }
+      try { S.lora = (await api(`/api/characters/${C.id}/lora`, {body: {h3: !!(document.getElementById('loraH3') || {}).checked}})).lora; }
       catch (e) { return fail(e); }
       render(); loadLora();
     },

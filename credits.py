@@ -92,9 +92,11 @@ PROVIDER_COST_USD = {
     'wan-2-2-char': {'2k': 0.08},
 }
 
-# Training one character LoRA on the same endpoint: Wan 2.2 then MiniMax H3,
-# about two hours of an 80-96 GB card. Unmeasured, so set high.
-LORA_TRAIN_COST_USD = 12.0
+# Training one character LoRA on the same endpoint: about an hour of an
+# 80-96 GB card each for Wan 2.2 and, opted into separately, MiniMax H3.
+# Unmeasured, so set high.
+LORA_TRAIN_COST_USD = 6.0
+LORA_H3_TRAIN_COST_USD = 6.0
 
 VIDEO_COST_USD_PER_SECOND = {
     'wan-2-5':      {'480p': 0.09076, '720p': 0.09076, '1080p': 0.2269},
@@ -232,6 +234,7 @@ GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
 # the two, because the cheaper case cannot be told apart at quote time.
 # Free while LoRA training is being tested; LORA_TRAIN_FREE=0 restores the real price.
 LORA_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits_for_cost(LORA_TRAIN_COST_USD)
+LORA_H3_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits_for_cost(LORA_H3_TRAIN_COST_USD)
 
 ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),
