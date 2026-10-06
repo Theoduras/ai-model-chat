@@ -35800,10 +35800,15 @@ def characters_page():
 
 @app.route('/character-creator')
 def character_creator_page():
-    # The new step-by-step creator, admin-only while it is tested beside /characters.
-    blocked = _require_admin()
-    if blocked:
-        return blocked
+    # The new step-by-step creator: admins and Pro and up while it is tested
+    # beside /characters.
+    user = _current_user()
+    tier = ((user or {}).get('tier') or '').replace(ANNUAL_SUFFIX, '')
+    if not (user and (user.get('is_admin') or (tier in ('pro', 'agency')
+                                               and user.get('status') == 'active'))):
+        blocked = _require_admin()
+        if blocked:
+            return blocked
     return send_from_directory(BASE_DIR, 'character-creator.html')
 
 

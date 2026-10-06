@@ -188,7 +188,7 @@
           <span>Character Creator</span>
         </button>
         <div class="sb-quick" id="sb-chars" data-role-area="generate"></div>
-        <button type="button" class="sb-item admin-only" data-view="/character-creator" data-search="new character creator fast advanced" onclick="openEmbedded('/character-creator', this)">
+        <button type="button" class="sb-item cc-new" data-view="/character-creator" data-search="new character creator fast advanced" onclick="openEmbedded('/character-creator', this)">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" width="16" height="16" aria-hidden="true"><circle cx="12" cy="8" r="4"/><path d="M4 21c1.5-4 4.5-6 8-6s6.5 2 8 6" stroke-linecap="round"/><path d="M19 3v4M17 5h4" stroke-linecap="round"/></svg>
           <span>Character Creator (new)</span>
         </button>
@@ -633,6 +633,8 @@ function applyEntitlements(me) {
   const tier = (me.tier || '').replace('_annual', '');
   document.body.classList.add('role-' + seat);
   if (tier) document.body.classList.add('tier-' + tier);
+  if (!me.is_admin && !(['pro', 'agency'].includes(tier) && me.status === 'active'))
+    document.querySelectorAll('.cc-new').forEach(el => el.remove());
   Object.keys(caps).forEach(k => { if (caps[k]) document.body.classList.add('cap-' + k); });
 
   const hidden = me.hidden_areas || [];
