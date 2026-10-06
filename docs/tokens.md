@@ -24,8 +24,8 @@ Two changes:
 
 1. **Re-denominate to tokens at human scale.** One token is about one photo.
    A clip is about twelve. A month's allowance is a two- or three-digit number.
-2. **Cut the retail price from ~15x provider cost to 2.3–3.8x**, on a ladder
-   that discounts 40% by volume. A photo is **€0.15** at the smallest pack and
+2. **Cut the retail price from ~15x provider cost to 2.3–4.3x**, on a ladder
+   that discounts 47% by volume. A photo is **€0.17** at the smallest pack and
    **€0.09** at the largest — at or below every comparable platform.
 
 The margin discipline is kept exactly: a token is still a fixed slice of
@@ -42,7 +42,7 @@ competitor for our cost base.
 
 | | photo | 5s 720p clip | NSFW | our cost |
 |---|---|---|---|---|
-| **Us** | €0.15 → €0.09 | €1.80 → €1.08 | **yes, identity-locked** | $0.040 / $0.504 |
+| **Us** | €0.17 → €0.09 | €2.04 → €1.08 | **yes, identity-locked** | $0.040 / $0.504 |
 | Higgsfield, $19 tier | $0.141 | $0.56 | no | — |
 | Higgsfield, $99 tier | $0.066 | $0.26 | no | — |
 | WaveSpeed (a provider) | $0.040 Seedream | $1.80 Seedance 720p | n/a | it *is* cost |
@@ -210,26 +210,28 @@ rate means an ordinary FX swing cannot quietly push a price under cost.
 
 | Tokens | EUR | USD | GBP | €/token | margin | buys |
 |---|---|---|---|---|---|---|
-| 100 | **€15** | $16 | £13 | €0.150 | 3.82x | 100 photos / 8 clips |
-| 500 | **€70** | $75 | £62 | €0.140 | 3.57x | 500 photos / 41 clips |
-| 1,000 | **€130** | $139 | £115 | €0.130 | 3.31x | 1,000 photos / 83 clips |
-| 2,000 | **€220** | $235 | £195 | €0.110 | 2.81x | 2,000 photos / 166 clips |
-| 5,000 | **€450** | $479 | £395 | €0.090 | 2.29x | 5,000 photos / 416 clips |
+| 100 | **€17** | $18 | £15 | €0.170 | 4.34x | 100 photos / 8 clips |
+| 200 | **€33** | $35 | £29 | €0.165 | 4.21x | 200 photos / 16 clips |
+| 300 | **€49** | $52 | £43 | €0.163 | 4.17x | 300 photos / 25 clips |
+| 500 | **€59** | $63 | £52 | €0.118 | 3.01x | 500 photos / 41 clips |
+| 1,000 | **€109** | $117 | £96 | €0.109 | 2.78x | 1,000 photos / 83 clips |
+| 2,000 | **€199** | $213 | £175 | €0.100 | 2.54x | 2,000 photos / 166 clips |
+| 5,000 | **€449** | $479 | £395 | €0.090 | 2.29x | 5,000 photos / 416 clips |
 
-A photo runs **€0.15 down to €0.09** and a five-second clip **€1.80 down to
+A photo runs **€0.17 down to €0.09** and a five-second clip **€2.04 down to
 €1.08**, depending on pack size. Generation prices quoted in cash use the
 smallest pack's rate, because that is the marginal price of buying more — the
 same reason `credits.credit_rate_usd()` reads `PACK_SIZES[0]` today.
 
-**`MIN_MARGIN_MULTIPLE` moves 4.0 → 2.25.** The two largest packs sell at 2.81x
-and 2.29x, under the 3.0x the smaller ones clear. That is the volume discount
-working as intended — gross margin is still 64% and 56% — but the floor is a
+**`MIN_MARGIN_MULTIPLE` moves 4.0 → 2.25.** The three largest packs sell at 2.78x,
+2.54x and 2.29x, under the 3.0x the smaller ones clear. That is the volume discount
+working as intended — gross margin is still 64%, 61% and 56% — but the floor is a
 build-gate assertion that runs at import, so it must come down or nothing starts.
 
 ### The ladder already is the discount — drop the tier bands
 
 Today Pro and Agency buy credits ~13% and ~27% cheaper than Starter. This ladder
-already falls 40% from smallest pack to largest, which is the same incentive
+already falls 47% from smallest pack to largest, which is the same incentive
 bought by volume rather than by subscription tier. Stacking the tier bands on top
 would put the 5,000 pack at roughly **1.7x cost**.
 
@@ -323,7 +325,7 @@ cost — but it can only check the numbers it is given.
    Starter / Pro / Agency. Demo keeps unlimited generation, so it has no
    allowance to state.
 3. **Drop the tier discount bands?** → **yes**. The size ladder already
-   discounts 40%.
+   discounts 47%.
 
 All three are implemented. What remains open is the video cost gap in section 2:
 measure Wan on fal.ai and WaveSpeed against Runware's $0.09076 a second, and if
