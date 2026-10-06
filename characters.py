@@ -758,6 +758,37 @@ def hair_words(hexcode):
     return f'{tone} {hue}'.strip()
 
 
+# Example photos for the creator's body picks, in place of the drawings: one
+# anonymous adult per option, made once by an admin and kept in storage.
+EXAMPLE_KEYS = ('cup', 'nipples', 'pubic_style')
+EXAMPLE_NIPPLES = (('Small', 'Flat'), ('Small', 'Protruding'), ('Medium', 'Protruding'),
+                   ('Medium', 'Puffy'), ('Large', 'Protruding'), ('Large', 'Puffy'))
+_EXAMPLE_FRAME = {
+    'cup': 'Photo of the bare chest of an adult woman in her late twenties, framed from the collarbones '
+           'to just below the breasts, facing the camera, arms relaxed at her sides, no face in frame. She has {}.',
+    'nipples': 'Close-up photo of one bare breast of an adult woman in her late twenties, centred on the '
+               'nipple, no face in frame. She has {}.',
+    'pubic_style': 'Photo of the pubic area of an adult woman in her late twenties standing with her legs '
+                   'together, framed from the navel to the upper thighs, no face in frame. She has {}.'}
+_EXAMPLE_TAIL = (' Medium skin tone, soft even studio light, plain light grey background, realistic photograph, '
+                 'natural skin texture, the same framing for every option.')
+
+
+def example_options(key):
+    if key == 'nipples':
+        return [f'{size}, {shape.lower()}' for size, shape in EXAMPLE_NIPPLES]
+    return [o for o, _ in features()[key][2]]
+
+
+def example_prompt(key, option):
+    if key == 'nipples':
+        size, shape = option.split(', ')
+        words = f'{size.lower()} {shape} nipples with {size.lower()} areolae'
+    else:
+        words = dict(features()[key][2])[option]
+    return _EXAMPLE_FRAME[key].format(words) + _EXAMPLE_TAIL
+
+
 HIGHLIGHTS = ('Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')
 BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup')
 DEFAULT_MAKEUP = 'Natural glam'

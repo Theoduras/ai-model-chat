@@ -36176,6 +36176,142 @@ def api_character_look(folder, n):
     return send_from_directory(os.path.join(CH.LOOK_ROOT, folder), n + '.jpg')
 
 
+_EXAMPLES_SETTING = 'character_examples'
+_EXAMPLES_RUNNING = set()
+
+
+def _char_examples():
+    """{key: {option: storage path}} of the creator's example photos."""
+    from db import get_app_setting
+    s = _db_session()
+    try:
+        raw = get_app_setting(s, _EXAMPLES_SETTING) or '{}'
+    finally:
+        s.close()
+    try:
+        return json.loads(raw) or {}
+    except ValueError:
+        return {}
+
+
+def _char_examples_make(key, options):
+    from db import set_app_setting
+    try:
+        for option in options:
+            spec = {'kind': 'image', 'prompt': CH.example_prompt(key, option), 'model': CHAR_MODEL,
+                    'explicit': True, 'resolution': '2k', 'aspect': '3:4', 'batch': 1}
+            try:
+                provider = imagegen.provider_for(spec)
+                job_id, result = provider.submit_image(spec)
+                for _ in range(60):
+                    if result.status != 'running':
+                        break
+                    time.sleep(5)
+                    result = provider.poll(job_id)
+                if result.status != 'done' or not result.urls:
+                    raise imagegen.GenerationError(result.error or 'no image came back')
+                data, mime = imagegen.fetch_result(result.urls[0])
+                path = storage.put('character-examples', data, mime, prefix=storage.KEPT_PREFIX)
+            except Exception as e:
+                logger.warning('character example %s/%s failed: %s', key, option, str(e)[:300])
+                continue
+            # Re-read before writing: the other sets may be filling at the same time.
+            s = _db_session()
+            try:
+                from db import get_app_setting
+                all_sets = json.loads(get_app_setting(s, _EXAMPLES_SETTING) or '{}')
+                old = all_sets.setdefault(key, {}).get(option)
+                all_sets[key][option] = path
+                set_app_setting(s, _EXAMPLES_SETTING, json.dumps(all_sets))
+                s.commit()
+            finally:
+                s.close()
+            if old:
+                try:
+                    storage.delete(old)
+                except Exception:
+                    pass
+    finally:
+        _EXAMPLES_RUNNING.discard(key)
+
+
+@app.route('/api/characters/examples')
+def api_character_examples():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    have = _char_examples()
+    sets = {k: {o: f'/api/characters/examples/{k}/{i}.jpg?v={hashlib.md5(have[k][o].encode()).hexdigest()[:8]}'
+                for i, o in enumerate(CH.example_options(k)) if o in have.get(k, {})}
+            for k in CH.EXAMPLE_KEYS}
+    return jsonify({'ok': True, 'sets': sets, 'running': sorted(_EXAMPLES_RUNNING),
+                    'approved': [k for k in have.get('_approved', []) if k in CH.EXAMPLE_KEYS],
+                    'options': {k: CH.example_options(k) for k in CH.EXAMPLE_KEYS}})
+
+
+@app.route('/api/characters/examples/<key>/<int:i>.jpg')
+def api_character_example_file(key, i):
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    options = CH.example_options(key) if key in CH.EXAMPLE_KEYS else []
+    path = _char_examples().get(key, {}).get(options[i]) if 0 <= i < len(options) else None
+    if not path:
+        return ('Not found', 404)
+    url = storage.signed_url(path)
+    if url:
+        return redirect(url)
+    data = storage.get(path)
+    if not data:
+        return ('Not found', 404)
+    return Response(data, mimetype='image/jpeg', headers={'Cache-Control': 'private, max-age=3600'})
+
+
+@app.route('/api/characters/examples/<key>/approve', methods=['POST'])
+def api_character_examples_approve(key):
+    """Admin: show this set to creators in place of the drawings, or take it back."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if key not in CH.EXAMPLE_KEYS:
+        return jsonify({'ok': False, 'error': 'Unknown example set'}), 404
+    from db import get_app_setting, set_app_setting
+    on = (request.get_json(silent=True) or {}).get('approved') is not False
+    s = _db_session()
+    try:
+        all_sets = json.loads(get_app_setting(s, _EXAMPLES_SETTING) or '{}')
+        approved = set(all_sets.get('_approved', [])) - {key}
+        if on:
+            approved.add(key)
+        all_sets['_approved'] = sorted(approved)
+        set_app_setting(s, _EXAMPLES_SETTING, json.dumps(all_sets))
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'approved': sorted(approved)})
+
+
+@app.route('/api/characters/examples/<key>', methods=['POST'])
+def api_character_examples_make(key):
+    """Admin: make the missing example photos of one set, or redo one."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    if key not in CH.EXAMPLE_KEYS:
+        return jsonify({'ok': False, 'error': 'Unknown example set'}), 404
+    if key in _EXAMPLES_RUNNING:
+        return jsonify({'ok': False, 'error': 'That set is already being made.'}), 409
+    redo = (request.get_json(silent=True) or {}).get('redo')
+    have = _char_examples().get(key, {})
+    options = [redo] if redo in CH.example_options(key) else \
+        [o for o in CH.example_options(key) if o not in have]
+    if not options:
+        return jsonify({'ok': True, 'started': 0})
+    _EXAMPLES_RUNNING.add(key)
+    threading.Thread(target=_char_examples_make, args=(key, options), daemon=True).start()
+    return jsonify({'ok': True, 'started': len(options)})
+
+
 @app.route('/api/characters/<char_id>/generate', methods=['POST'])
 def api_character_generate(char_id):
     blocked = _require_active()

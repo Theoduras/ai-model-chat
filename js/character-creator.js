@@ -279,16 +279,36 @@
       `<button type="button" class="tile ${tile(v) ? 'sel' : ''}" onclick="CC.look(${attr(k)},${attr(v)})" aria-label="${esc(title)}: ${esc(cap)}">${art}<span class="cap">${esc(cap)}</span></button>`).join('')}</div></div>`;
   }
   const vulvaLook = () => ((S.cat && S.cat.looks) || []).find(l => l.key === 'vulva_look');
+  const exImg = (k, o) => S.ex && S.ex.approved.includes(k) && S.ex.sets[k][o]
+    ? `<img src="${esc(S.ex.sets[k][o])}" alt="" loading="lazy">` : '';
+  function examplesPanel() {
+    if (!S.ex) return '';
+    const names = {cup: 'Breast size', nipples: 'Nipples', pubic_style: 'Pubic hair'};
+    const keys = S.ex.keys.filter(k => k === 'cup' || k === 'nipples' ? RANK[S.level] >= 1 : S.level === 'explicit');
+    if (!keys.length) return '';
+    return `<details class="info"><summary>Example photos (admin preview)</summary>${keys.map(k => {
+      const opts = S.ex.options[k], got = S.ex.sets[k], run = S.ex.running.includes(k), ok = S.ex.approved.includes(k);
+      return `<div class="fld"><div class="fl" style="display:flex;gap:8px;align-items:center">${names[k]} ${ok ? '<span class="pill ok">Shown to creators</span>' : '<span class="pill">Drawings shown</span>'}</div>
+        <div class="looks">${opts.map(o => got[o] ? `<button type="button" class="tile" onclick="CC.exRedo(${attr(k)},${attr(o)})" title="Redo this one"><img src="${esc(got[o])}" alt=""><span class="cap">${esc(o)}</span></button>`
+          : `<div class="tile sk"><span class="cap">${esc(o)}</span></div>`).join('')}</div>
+        <div class="nav"><span>${run ? '<span class="pill">Generating…</span>' : `<button type="button" class="btn btn-ghost btn-sm" onclick="CC.exMake(${attr(k)})" ${Object.keys(got).length === opts.length ? 'disabled' : ''}>Generate missing</button>`}</span>
+          ${Object.keys(got).length === opts.length ? `<button type="button" class="btn btn-sm ${ok ? 'btn-ghost' : 'btn-primary'}" onclick="CC.exApprove(${attr(k)},${!ok})">${ok ? 'Back to drawings' : 'Approve set'}</button>` : ''}</div></div>`;
+    }).join('')}<p>Click a photo to redo just that one.</p></details>`;
+  }
+  async function loadEx() {
+    try { const r = await api('/api/characters/examples'); S.ex = Object.assign(r, {keys: Object.keys(r.options)}); } catch (e) {}
+    if (S.ex && S.ex.running.length) setTimeout(() => loadEx().then(() => S.step === 'body' && render()), 6000);
+  }
   function bodyLooks() {
     const s = sheet(), out = [];
     if (RANK[S.level] >= 1) {
-      out.push(lookTiles('cup', 'Breast size', 'Pick the closest.', featOpts('cup').slice().sort().map(o => [o, o, CharacterVisuals.render('cup', o, s)]), v => s.cup === v));
+      out.push(lookTiles('cup', 'Breast size', 'Pick the closest.', featOpts('cup').slice().sort().map(o => [o, o, exImg('cup', o) || CharacterVisuals.render('cup', o, s)]), v => s.cup === v));
       out.push(lookTiles('nipples', 'Nipples', 'Pick the closest. Colour follows her skin tone.',
-        NIPPLES.map(([cap, size, shape]) => [cap, cap, CharacterVisuals.render('nipple_shape', shape, s)]),
+        NIPPLES.map(([cap, size, shape]) => [cap, cap, exImg('nipples', cap) || CharacterVisuals.render('nipple_shape', shape, s)]),
         v => { const n = NIPPLES.find(x => x[0] === v); return s.nipple_size === n[1] && s.nipple_shape === n[2]; }));
     }
     if (S.level === 'explicit') {
-      out.push(lookTiles('pubic_style', 'Pubic hair', 'Pick the closest.', featOpts('pubic_style').map(o => [o, o, CharacterVisuals.render('pubic_style', o, s)]), v => s.pubic_style === v));
+      out.push(lookTiles('pubic_style', 'Pubic hair', 'Pick the closest.', featOpts('pubic_style').map(o => [o, o, exImg('pubic_style', o) || CharacterVisuals.render('pubic_style', o, s)]), v => s.pubic_style === v));
       const lk = vulvaLook();
       if (lk) out.push(lookTiles('vulva_look', 'Vagina, closed', 'Pick the shape. Her photo is made in her own skin tone from this.',
         lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), v => s.vulva_look === v));
@@ -415,7 +435,7 @@
     body: () => `<h2>Her body</h2><p>Pick the closest type. Fine-tune below if you want.</p>
       <div class="opts big">${((S.cat && S.cat.presets) || []).filter(p => p.key !== 'scratch').map(p =>
         `<button type="button" class="opt ${S.preset === p.key ? 'sel' : ''}" onclick="CC.preset(${attr(p.key)})">${CharacterVisuals.preset(p.values)}<span>${esc(p.label)}</span><small>${esc(p.hint)}</small></button>`).join('')}</div>
-      ${bodyLooks()}
+      ${bodyLooks()}${examplesPanel()}
       <details class="info"><summary>Fine-tune</summary>${optRow('height', 'Height')}${optRow('build', 'Build')}</details>
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-primary" ${looksDone() ? '' : 'disabled'} onclick="CC.bodyNext()">${S.mode === 'fast' ? 'Generate photos' : 'Next'}</button></div>`,
 
@@ -579,6 +599,9 @@
       else s[k] = v;
       render();
     },
+    async exMake(k) { try { await api('/api/characters/examples/' + k, {body: {}}); } catch (e) { return fail(e); } await loadEx(); render(); },
+    async exRedo(k, o) { if (!confirm('Redo the ' + o + ' example?')) return; try { await api('/api/characters/examples/' + k, {body: {redo: o}}); } catch (e) { return fail(e); } await loadEx(); render(); },
+    async exApprove(k, on) { try { await api(`/api/characters/examples/${k}/approve`, {body: {approved: on}}); } catch (e) { return fail(e); } await loadEx(); render(); },
     async bodyNext() {
       say('');
       try { await CC.ensureChar(); } catch (e) { return fail(e); }
@@ -705,6 +728,7 @@
 
   // Reopening a character made here picks up where it was left.
   async function boot() {
+    loadEx().then(render);
     const id = new URLSearchParams(location.search).get('id');
     if (!id) return render();
     try {
