@@ -1137,12 +1137,13 @@ _PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-image-generator' else '0.8',
 _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 
 # Crawling these wastes budget and can leak a creator's funnel into search.
+# /signup- links are tracked redirects: a crawler following one counts as a click.
 # The fan pages (/chat, /chat.html) are deliberately absent: they
 # carry <meta name="robots" content="noindex">, and a crawler blocked here would
 # never fetch the page to read that tag, leaving anything already indexed stuck.
 _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/tokens', '/api/',
                    '/xbot', '/fanvue', '/onlyfans', '/threads', '/telegram', '/auth/',
-                   '/logout', '/go/']
+                   '/logout', '/go/', '/signup-']
 
 
 def _request_origin():
@@ -1169,6 +1170,22 @@ def _site_origin():
     the marketing domain even when the app answers on a *.run.app host."""
     explicit = (os.getenv('SITE_URL') or '').strip().rstrip('/')
     return explicit or _request_origin()
+
+
+def _www_redirect():
+    """www.<site> answers with the same pages as the bare domain, and two copies
+    of every page split what Google knows about the site between them, so www
+    sends a permanent redirect to the bare domain. A bio domain is left to its
+    own gate, which already treats its www as the same site."""
+    host = (request.host or '').split(':')[0].lower()
+    if not host.startswith('www.') or _on_bio_domain():
+        return None
+    qs = request.query_string.decode('latin-1')
+    return redirect('https://' + host[4:] + request.path + ('?' + qs if qs else ''), code=301)
+
+
+# Ahead of every other hook, so a sign-in redirect never answers on www first.
+app.before_request_funcs.setdefault(None, []).insert(0, _www_redirect)
 
 
 @app.route('/robots.txt')
