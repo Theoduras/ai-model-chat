@@ -3,6 +3,8 @@
 #   {"train": {...}}  trains a Wan 2.2 T2V A14B LoRA on her approved photos with
 #                     ai-toolkit and PUTs the high/low noise files to the signed
 #                     URLs the app hands over (too big for a job's output).
+#                     With `h3_put` it then trains a MiniMax H3 LoRA on the
+#                     same photos, for the H3 clips (`h3-gv`).
 #   {"image": {...}}  one still from the same base model with her LoRA, so the
 #                     photos and the explicit clips share one identity file.
 # Both read the base weights from the network volume (HF_HOME), downloaded on
@@ -20,6 +22,8 @@ import urllib.request
 import runpod
 
 BASE = os.getenv('LORA_BASE_MODEL', 'ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16')
+H3_BASE = os.getenv('LORA_H3_BASE_MODEL', 'Comfy-Org/MiniMax-H3')
+H3_ADAPTER = 'ostris/minimax_h3_training_adapter/minimax_h3_training_adapter_v3.safetensors'
 PIPE_REPO = os.getenv('LORA_PIPE_REPO', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers')
 TOOLKIT = '/app/ai-toolkit'
 WORK = '/tmp/char-lora'
@@ -76,6 +80,45 @@ def config(name, data, steps, rank):
     }]}})
 
 
+def config_h3(name, data, steps, rank):
+    # ai-toolkit's own MiniMax-H3 defaults: the Comfy weights are pre-quantized
+    # (convrot8 DiT, nvfp4 TE), and the guidance-distilled model trains through
+    # Ostris's assistant adapter.
+    import yaml
+    return yaml.safe_dump({'job': 'extension', 'config': {'name': name, 'process': [{
+        'type': 'sd_trainer', 'training_folder': WORK + '/out', 'device': 'cuda:0',
+        'network': {'type': 'lora', 'linear': rank, 'linear_alpha': rank,
+                    'network_kwargs': {'ignore_if_contains': ['adaln_proj']}},
+        'save': {'dtype': 'bf16', 'save_every': steps, 'max_step_saves_to_keep': 1},
+        'datasets': [{'folder_path': data, 'caption_ext': 'txt', 'caption_dropout_rate': 0.05,
+                      'num_frames': 1, 'resolution': [512, 768], 'cache_latents_to_disk': True}],
+        'train': {'batch_size': 1, 'steps': steps, 'gradient_accumulation': 1,
+                  'train_unet': True, 'train_text_encoder': False,
+                  'gradient_checkpointing': True, 'noise_scheduler': 'flowmatch',
+                  'timestep_type': 'shift', 'optimizer': 'adamw8bit', 'lr': 1e-4,
+                  'optimizer_params': {'weight_decay': 1e-4}, 'dtype': 'bf16',
+                  'cache_text_embeddings': True, 'disable_sampling': True,
+                  'skip_first_sample': True},
+        'model': {'name_or_path': H3_BASE, 'arch': 'minimax_h3', 'quantize': True,
+                  'qtype': 'convrot8', 'quantize_te': True, 'qtype_te': 'nvfp4',
+                  'low_vram': True, 'assistant_lora_path': H3_ADAPTER},
+    }]}})
+
+
+def train_h3(job, args, data, name, steps):
+    name += '_h3'
+    cfg = f'{WORK}/{name}.yaml'
+    with open(cfg, 'w') as f:
+        f.write(config_h3(name, data, steps, 16))
+    runpod.serverless.progress_update(job, f'training H3 {steps} steps')
+    run = subprocess.run(['python', 'run.py', cfg], cwd=TOOLKIT, capture_output=True, text=True)
+    files = sorted(glob.glob(f'{WORK}/out/{name}/*.safetensors'), key=os.path.getmtime)
+    if run.returncode or not files:
+        return {'error': f'H3 training failed ({run.returncode}): ' + (run.stderr or run.stdout)[-1500:]}
+    put(args['h3_put'], files[-1])
+    return {'bytes': os.path.getsize(files[-1])}
+
+
 def train(job, args):
     drop_pipe()
     name = 'char_' + hashlib.sha1(str(args['high_put']).split('?')[0].encode()).hexdigest()[:12]
@@ -98,8 +141,13 @@ def train(job, args):
         return {'error': f'training failed ({run.returncode}): ' + (run.stderr or run.stdout)[-1500:]}
     put(args['high_put'], high[-1])
     put(args['low_put'], low[-1])
-    return {'trained': True, 'steps': steps,
-            'bytes': os.path.getsize(high[-1]) + os.path.getsize(low[-1])}
+    size = os.path.getsize(high[-1]) + os.path.getsize(low[-1])
+    if args.get('h3_put'):
+        h3 = train_h3(job, args, data, name, steps)
+        if h3.get('error'):
+            return h3
+        size += h3['bytes']
+    return {'trained': True, 'steps': steps, 'bytes': size}
 
 
 def lora_file(url):

@@ -34290,7 +34290,7 @@ def _gen_spec(slug, body, user):
                                'low': lora['low'], 'scale': scale,
                                'trigger': lora.get('trigger', ''),
                                'examples': lora.get('examples', '')})
-        her = _char_lora_entry(slug) if family == 'wan' else None
+        her = _char_lora_entry(slug, family) if family in ('wan', 'h3') else None
         if her:
             picked = [her] + picked[:3]
         # A toy clip gets the toy LoRA even when none was ticked: close-up
@@ -36215,7 +36215,7 @@ def api_persona_character(slug):
 # model. State lives in app settings, one row per character; a retrain keeps
 # the last good files in use until the new ones land.
 CHAR_LORA_MIN_PHOTOS = 6
-CHAR_LORA_TIMEOUT = 4 * 3600
+CHAR_LORA_TIMEOUT = 8 * 3600
 
 
 def _char_lora(char_id):
@@ -36244,8 +36244,9 @@ def _char_lora_status(state):
     return 'ready' if state.get('high') else state.get('status') or 'none'
 
 
-def _char_lora_entry(slug):
-    """The persona's trained character LoRA as a library entry, or None."""
+def _char_lora_entry(slug, family='wan'):
+    """The persona's trained character LoRA for a model family ('wan' or
+    'h3') as a library entry, or None."""
     from db import Character
     s = _db_session()
     try:
@@ -36254,10 +36255,11 @@ def _char_lora_entry(slug):
     finally:
         s.close()
     state = _char_lora(char_id) if char_id else {}
-    if not state.get('high'):
+    sides = ('h3', 'h3') if family == 'h3' else ('high', 'low')
+    if not state.get(sides[0]):
         return None
-    high = storage.signed_url(state['high'], ttl=2 * 86400)
-    low = storage.signed_url(state['low'], ttl=2 * 86400)
+    high = storage.signed_url(state[sides[0]], ttl=2 * 86400)
+    low = storage.signed_url(state[sides[1]], ttl=2 * 86400)
     if not (high and low):
         return None
     return {'name': 'Her LoRA', 'high': high, 'low': low, 'scale': 1.0,
@@ -36290,7 +36292,7 @@ def _char_lora_advance(char_id):
         return _char_lora_fail(char_id, state, res.error or 'training failed')
     if res.status != 'done':
         return
-    old = (state.get('high'), state.get('low'))
+    old = (state.get('high'), state.get('low'), state.get('h3'))
     state.update(status='ready', error='', trained_at=time.time(), **state.pop('pending'))
     _char_lora_save(char_id, state)
     for path in old:
@@ -36351,8 +36353,8 @@ def api_character_lora(char_id):
         # Kept across retrains, so her prompts never need rewording.
         trigger = state.get('trigger') or 'zx' + secrets.token_hex(3)
         pending = {side: f'{storage.KEPT_PREFIX}/loras/{key}/v{version}-{side}.safetensors'
-                   for side in ('high', 'low')}
-        ttl = 6 * 3600
+                   for side in ('high', 'low', 'h3')}
+        ttl = 10 * 3600
         try:
             puts = {side: storage.signed_upload_url(p, 'application/octet-stream', ttl=ttl)
                     for side, p in pending.items()}
@@ -36362,7 +36364,7 @@ def api_character_lora(char_id):
                 raise imagegen.GenerationError('storage could not sign the links')
             job, res = imagegen.RunPodProvider().submit_lora_training(
                 images, trigger, puts['high'], puts['low'],
-                steps=min(2000, max(1200, 100 * len(images))))
+                steps=min(2000, max(1200, 100 * len(images))), h3_put=puts['h3'])
             if not job or res.status == 'failed':
                 raise imagegen.GenerationError(res.error or 'RunPod refused the job')
         except Exception as e:

@@ -2524,14 +2524,15 @@ class RunPodProvider(Provider):
                           for l in (spec.get('loras') or [])[:3] if l.get('high') and l.get('low')]}
         return self._run(CHAR_LORA_IMAGE_MODEL, {'input': {'image': args}})
 
-    def submit_lora_training(self, images, trigger, high_put, low_put, steps):
+    def submit_lora_training(self, images, trigger, high_put, low_put, steps, h3_put=None):
         """Start a character LoRA training run: `images` is [{url, caption}],
-        the two PUT links are where the worker uploads the finished files."""
+        the PUT links are where the worker uploads the finished files (Wan
+        high/low, then the H3 one)."""
         if CHAR_LORA_IMAGE_MODEL not in RUNPOD_ENDPOINTS:
             raise GenerationError('RUNPOD_LORA_ENDPOINT is not set', fatal=True)
         return self._run(CHAR_LORA_IMAGE_MODEL, {'input': {'train': {
             'images': images, 'trigger': trigger, 'steps': steps,
-            'high_put': high_put, 'low_put': low_put}}})
+            'high_put': high_put, 'low_put': low_put, 'h3_put': h3_put}}})
 
     def _run(self, model, payload):
         body = _post(f'{RUNPOD_ENDPOINTS[model]}/run', payload, self._headers(), timeout=VIDEO_TIMEOUT)
