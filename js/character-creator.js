@@ -52,7 +52,7 @@
 
   const S = {step: 'start', mode: '', hist: [], name: '', level: 'sfw', attest: false,
              own: {}, ownLook: '', face: -1, faces: [], fabric: {}, adv: {}, cat: null, catLevel: '', personas: null,
-             persona: '', link: '', busy: false};
+             persona: '', link: '', busy: false, fresh: {}};
   let C = null;
   const RUN = {};
 
@@ -213,6 +213,7 @@
   async function redo(k) {
     say('');
     try { await startView(k, S.mode === 'adv' ? qtyOf(k) : 1); } catch (e) { return fail(e); }
+    S.fresh[k] = true;
     render();
   }
   async function approveImage(id, quiet) {
@@ -228,6 +229,8 @@
   async function approve(id) {
     say('');
     try { await approveImage(id); } catch (e) { return fail(e); }
+    const v = ((C.images || []).find(x => x.id === id) || {}).view;
+    if (v) delete S.fresh[v];
     await drive();
     render();
   }
@@ -238,12 +241,42 @@
   const FLOW = {fast: ['basics', 'look', 'faces', 'body', 'photos'], adv: ['basics', 'look', 'body', 'adv'], own: ['own', 'photos']};
 
   function render() {
-    const flow = FLOW[S.mode] || [];
-    el('cc-rail').innerHTML = ['start', ...flow].map((s, i, a) =>
-      `<i class="${S.step === 'done' || a.indexOf(S.step) >= i ? 'on' : ''}"></i>`).join('');
     el('cc-mode').textContent = {fast: 'Fast mode', adv: 'Advanced mode', own: 'Your own character'}[S.mode] || '';
     el('cc-title').textContent = C ? C.name : 'New character';
+    renderSide();
     el('cc-card').innerHTML = (STEPS[S.step] || STEPS.start)();
+  }
+
+  // ── Side rail: the old builder's menu, over this flow ──────────────────────
+  const stages = () => [{key: 'face', label: 'Her face'}, {key: 'body', label: 'Her body'}, {key: 'photos', label: S.level === 'sfw' ? 'Photos' : 'Intimate'}, {key: 'ready', label: 'Ready'}];
+  const NAV = {basics: ['face', 'Basics'], look: ['face', 'Her look'], faces: ['face', 'Pick her face'], own: ['face', 'Your photos'],
+               body: ['body', 'Body type'], photos: ['photos', 'Required photos'], adv: ['photos', 'All photos'], done: ['ready', 'Accept & link']};
+  const railSteps = () => [...(FLOW[S.mode] || []), 'done'].map(key => ({key, stage: NAV[key][0], nav: NAV[key][1]}));
+  const reqViews = () => ['face_front', ...(S.mode === 'adv' ? advViews().filter(k => (catView(k) || {}).required).flatMap(k => PAIRS[k] || [k]) : fastViews())];
+  const reqDone = () => !!C && reqViews().every(k => canon(k));
+  const RAIL_ICON = {approved: '✓', review: '●', generating: '●', outdated: '!', locked: '🔒'};
+  function renderSide() {
+    const side = el('cc-side');
+    side.hidden = S.step === 'start';
+    el('cc-title').hidden = !side.hidden;
+    if (side.hidden) return;
+    const steps = railSteps(), idx = Math.max(0, steps.findIndex(x => x.key === S.step));
+    const done = i => i < idx || S.step === 'done' || (['photos', 'adv', 'done'].includes(steps[i].key) && reqDone());
+    const reachable = i => i <= idx || steps.slice(0, i).every((x, j) => done(j));
+    const req = reqViews(), ok = C ? req.filter(k => canon(k)).length : 0;
+    const sub = i => {
+      if (!['photos', 'adv'].includes(steps[i].key) || !C) return '';
+      return `<div class="rail-sub" role="group" aria-label="Her photos">${req.filter(k => k !== 'face_front').map(k => {
+        const d = RUN[k] ? 'generating' : canon(k) && disp(k) !== 'outdated' ? 'approved' : parentsOf(k).some(p => !canon(p)) ? 'locked' : shown(k) ? 'review' : disp(k);
+        return `<button type="button" class="ob-rsub ${d}" onclick="CC.railView(${attr(k)})"><span class="ob-rsub-i">${RAIL_ICON[d] || '○'}</span><span class="ob-rsub-t">${esc(label(k))}</span></button>`;
+      }).join('')}</div>`;
+    };
+    const pct = Math.round(steps.filter((x, i) => done(i)).length / steps.length * 100);
+    side.innerHTML = `<button type="button" class="btn-back-gallery" onclick="CC.home()">← All characters</button>` +
+      PageWizard.railHtml({title: 'Your character', name: C ? C.name : (S.name || 'New character'), pct, stages: stages().filter(st => steps.some(x => x.stage === st.key)), steps, idx,
+        done, reachable, call: 'CC.goIdx', sub}) +
+      (C ? `<div class="cc-side-meta"><span><b>${ok} of ${req.length}</b> required photos approved</span>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="CC.del()">Delete character</button></div>` : '');
   }
 
   // ── Steps ───────────────────────────────────────────────────────────────────
@@ -348,14 +381,15 @@
     if (d === 'outdated') return '<span class="pill warn">Outdated</span>';
     return '';
   }
+  const rowImg = k => (S.fresh[k] ? shown(k) : canon(k) || shown(k));
   function viewRow(k, n, i) {
-    const img = shown(k), d = disp(k), run = RUN[k] || d === 'generating';
+    const img = rowImg(k), d = disp(k), run = RUN[k] || d === 'generating';
     const waiting = parentsOf(k).filter(p => !canon(p)).map(label);
     const th = img && !run ? `<div class="th zoom" role="button" tabindex="0" aria-label="View ${esc(label(k))}" onclick="CC.lbView(${attr(k)})"><img src="${esc(img.url)}" alt=""></div>`
       : `<div class="th ${run ? 'run' : ''}"></div>`;
     let acts;
     if (run) acts = statusPill(k);
-    else if (d === 'approved' && img && img.role === 'canonical') acts = `<span class="pill ok">Approved</span><button type="button" class="btn btn-ghost btn-sm" onclick="CC.redo(${attr(k)})">Redo</button>`;
+    else if (d !== 'outdated' && img && img.role === 'canonical') acts = `<span class="pill ok">Approved</span><button type="button" class="btn btn-ghost btn-sm" onclick="CC.redo(${attr(k)})">Redo</button>`;
     else if (img) acts = `${d === 'approved' ? '<span class="pill ok">Approved</span>' : ''}<button type="button" class="btn btn-ghost btn-sm" onclick="CC.redo(${attr(k)})">Redo</button><button type="button" class="btn btn-primary btn-sm" onclick="CC.approve(${attr(img.id)})">Approve</button>`;
     else if (waiting.length) acts = '<span class="pill">Waiting</span>';
     else acts = `<button type="button" class="btn btn-primary btn-sm" onclick="CC.redo(${attr(k)})">Generate</button>`;
@@ -378,11 +412,11 @@
     return refs.map(r => `<span class="chipf">Your image<button type="button" aria-label="Remove your image" onclick="CC.unref(${attr(r.id)})">✕</button></span>`).join('') +
       `<label class="btn btn-ghost btn-sm up">+ Your image<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upRef(${attr(k)},this)"></label>`;
   }
-  function strip(k, side) {
-    const list = cands(k).slice(-8), c = canon(k);
-    const all = c ? [c, ...list.filter(x => x.id !== c.id)] : list;
+  const optsOf = k => { const c = canon(k), list = cands(k).slice(-8); return c ? [c, ...list.filter(x => x.id !== c.id)] : list; };
+  function strip(k, side, skip) {
+    const all = optsOf(k).filter(m => m.id !== skip);
     if (!all.length) return '';
-    return `<div class="pr">${side ? `<small>${esc(side)}</small>` : `<small>${all.length > 1 ? 'Open one to approve it' : 'Open it to approve'}</small>`}<div class="mini">${
+    return `<div class="pr">${side ? `<small>${esc(side)}</small>` : canon(k) ? '<small>Other options</small>' : '<small>Open one to approve it</small>'}<div class="mini">${
       all.map((m, i) => `<button type="button" class="tile ${m.role === 'canonical' ? 'sel' : ''}" aria-label="${esc(side || label(k))} option ${i + 1}" onclick="CC.lbVar(${attr(k)},${attr(m.id)})"><img src="${esc(m.url)}" alt=""></button>`).join('')}</div></div>`;
   }
   function advRow(k) {
@@ -407,7 +441,8 @@
       <select class="qty" aria-label="How many of ${esc(label(k))}" onchange="CC.advSet(${attr(k)},'qty',+this.value)">${[1, 2, 4, 8].map(n => `<option ${q === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
       ${upBtn(k)}
       <button type="button" class="btn btn-sm ${img ? 'btn-ghost' : 'btn-primary'}" ${locked || run ? 'disabled' : ''} onclick="CC.advGen(${attr(k)})">${img ? 'Generate again' : 'Generate'}</button></div>
-      ${wear}${views.some(v => cands(v).length || canon(v)) ? `<div class="pairs">${views.map(v => strip(v, PAIRS[k] ? SIDE[v] : '')).join('')}</div>` : ''}</div>`;
+      ${wear}${PAIRS[k] ? `<div class="pairs">${views.map(v => strip(v, SIDE[v])).join('')}</div>`
+        : optsOf(k).length > 1 ? `<div class="pairs">${strip(k, '', img && img.id)}</div>` : ''}</div>`;
   }
 
   const STEPS = {
@@ -451,15 +486,15 @@
       const groups = (GROUPS[order()] || GROUPS.nude_first)[S.level] || [];
       const done = groups.flatMap(g => g[2]).every(k => canon(k));
       const faceImg = canon('face_front');
+      const faceRow = `<div class="view"><div class="th zoom" role="button" tabindex="0" aria-label="View her face" onclick="CC.lbView('face_front')">${faceImg ? `<img src="${esc(faceImg.url)}" alt="">` : ''}</div><div class="nm">Face, front<small>${S.mode === 'own' ? 'Your upload' : 'Chosen in the previous step'}</small></div><div class="acts"><span class="pill ok">Approved</span></div></div>`;
       const missing = S.level === 'explicit' ? [['vulva_look', 'Vagina, closed'], ...EXTRA_LOOKS].map(([k, t]) => [((S.cat && S.cat.looks) || []).find(l => l.key === k), t]).filter(([lk]) => lk && !sheet()[lk.key]) : [];
       const pickLooks = missing.length ? `<div class="stage"><div class="sh"><b>Pick her looks first</b><small>These photos are made from an example look.</small></div>${missing.map(([lk, t]) => lookTiles(lk.key, t, 'Pick the closest look.',
         lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), () => false)).join('')}</div>` : '';
       return `<h2>Required photos</h2>${pickLooks}<p>One image each. Approve them, or redo a single photo. Each group is built from the approved photos above it, so the bodies match her exact choices.</p>
-      <div class="view"><div class="th zoom" role="button" tabindex="0" onclick="CC.lbView('face_front')">${faceImg ? `<img src="${esc(faceImg.url)}" alt="">` : ''}</div><div class="nm">Face, front<small>${S.mode === 'own' ? 'Your upload' : 'Chosen in the previous step'}</small></div><span class="pill ok">Approved</span></div>
       ${groups.map(([title, why, vs], n) => {
         const open = n === 0 || groups[n - 1][2].every(k => canon(k));
         return `<div class="stage ${open ? '' : 'locked'}"><div class="sh"><b>${n + 1}. ${esc(title)}</b><small>${open ? esc(why) : 'Waiting for group ' + n + ' to be approved'}<span data-left="${esc(JSON.stringify(vs))}">${groupLeft(vs)}</span></small></div>
-          <div class="views">${vs.map((k, i) => viewRow(k, n, i)).join('')}</div></div>`;
+          <div class="views">${n ? '' : faceRow}${vs.map((k, i) => viewRow(k, n, i)).join('')}</div></div>`;
       }).join('')}
       <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-ghost" onclick="CC.toAdv()">Switch to Advanced</button></span>
         <button type="button" class="btn btn-primary" ${done ? '' : 'disabled'} onclick="CC.go('done')">Finish</button></div>`;
@@ -470,7 +505,7 @@
       const done = req.every(k => (PAIRS[k] || [k]).every(v => canon(v)));
       return `<h2>All photos</h2><p>Generate each photo when you want it, and choose how many options. Add your own image to any photo to generate from it.</p>
       <label class="fl attest"><input type="checkbox" ${S.attest ? 'checked' : ''} onchange="CC.S.attest=this.checked"> I have the rights to images I upload, and anyone shown is 18+ and agreed.</label>
-      <div class="views">${advViews().map(advRow).join('')}</div>
+      <div class="views adv">${advViews().map(advRow).join('')}</div>
       <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-ghost" onclick="CC.toFast()">Switch to Fast</button></span>
         <button type="button" class="btn btn-primary" ${done ? '' : 'disabled'} onclick="CC.go('done')">Finish</button></div>`;
     },
@@ -644,17 +679,20 @@
     redo, approve: id => approve(id),
     lbView(k) {
       const keys = S.step === 'photos' ? ['face_front', ...fastViews()] : [k];
-      const items = keys.filter(v => shown(v) && !RUN[v]).map(v => {
-        const img = shown(v), approved = img.role === 'canonical';
-        return {k: v, title: label(v), url: img.url,
-                acts: v === 'face_front' ? '' : (approved ? '<span class="pill ok">Approved</span>' : '') + act(`CC.redo(${attr(v)})`, 'Redo') +
-                  (approved ? '' : act(`CC.approve(${attr(img.id)})`, 'Approve', true))};
+      const items = keys.filter(v => !RUN[v]).flatMap(v => {
+        const all = v === 'face_front' ? [canon(v)].filter(Boolean) : optsOf(v);
+        return all.map((img, i) => {
+          const approved = img.role === 'canonical';
+          return {k: v, id: img.id, title: label(v) + (all.length > 1 ? `, option ${i + 1}` : ''), url: img.url,
+                  acts: v === 'face_front' ? '' : (approved ? '<span class="pill ok">Approved</span>' : '') + act(`CC.redo(${attr(v)})`, 'Redo') +
+                    (approved ? '' : act(`CC.approve(${attr(img.id)})`, 'Approve this one', true))};
+        });
       });
-      lbOpen(items, Math.max(0, items.findIndex(x => x.k === k)));
+      const at = (rowImg(k) || {}).id;
+      lbOpen(items, Math.max(0, items.findIndex(x => x.id === at), items.findIndex(x => x.k === k)));
     },
     lbVar(k, id) {
-      const c = canon(k), list = cands(k).slice(-8);
-      const all = c ? [c, ...list.filter(x => x.id !== c.id)] : list;
+      const all = optsOf(k);
       const items = all.map((m, i) => ({title: `${label(k)}, option ${i + 1}`, url: m.url,
         acts: m.role === 'canonical' ? '<span class="pill ok">Approved</span>' : act(`CC.approve(${attr(m.id)})`, 'Approve this one', true)}));
       lbOpen(items, Math.max(0, all.findIndex(m => m.id === id)));
@@ -665,6 +703,18 @@
       lbOpen(items, Math.max(0, items.findIndex(x => x.k === k)));
     },
     toAdv() { S.mode = 'adv'; go('adv'); },
+    goIdx(i) { const k = railSteps()[i].key; go(k); if (k === 'photos') drive().then(render); },
+    railView(k) {
+      const img = S.mode === 'adv' ? canon(k) || shown(k) : rowImg(k);
+      if (!img) return go(S.mode === 'adv' ? 'adv' : 'photos');
+      S.mode === 'adv' ? CC.lbVar(k, img.id) : (S.step === 'photos' ? CC.lbView(k) : (go('photos'), CC.lbView(k)));
+    },
+    home() { remember(''); C = null; S.mode = ''; S.hist = []; S.step = 'start'; S.fresh = {}; say(''); loadList(); render(); },
+    async del() {
+      if (!C || !confirm(`Delete ${C.name || 'this character'}? Every photo made for her character is deleted too. This cannot be undone.`)) return;
+      try { await api('/api/characters/' + C.id, {method: 'DELETE'}); } catch (e) { return fail(e); }
+      CC.home();
+    },
     toFast() { S.mode = C && C.sheet.order === 'own' ? 'own' : 'fast'; go(canon('face_front') ? 'photos' : 'look'); drive().then(render); },
     advSet(k, f, v) {
       S.adv[k] = Object.assign({}, S.adv[k], {[f]: v});
