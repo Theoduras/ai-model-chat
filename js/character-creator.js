@@ -451,14 +451,17 @@
       const groups = (GROUPS[order()] || GROUPS.nude_first)[S.level] || [];
       const done = groups.flatMap(g => g[2]).every(k => canon(k));
       const faceImg = canon('face_front');
-      return `<h2>Required photos</h2><p>One image each. Approve them, or redo a single photo. Each group is built from the approved photos above it, so the bodies match her exact choices.</p>
+      const missing = S.level === 'explicit' ? [['vulva_look', 'Vagina, closed'], ...EXTRA_LOOKS].map(([k, t]) => [((S.cat && S.cat.looks) || []).find(l => l.key === k), t]).filter(([lk]) => lk && !sheet()[lk.key]) : [];
+      const pickLooks = missing.length ? `<div class="stage"><div class="sh"><b>Pick her looks first</b><small>These photos are made from an example look.</small></div>${missing.map(([lk, t]) => lookTiles(lk.key, t, 'Pick the closest look.',
+        lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), () => false)).join('')}</div>` : '';
+      return `<h2>Required photos</h2>${pickLooks}<p>One image each. Approve them, or redo a single photo. Each group is built from the approved photos above it, so the bodies match her exact choices.</p>
       <div class="view"><div class="th zoom" role="button" tabindex="0" onclick="CC.lbView('face_front')">${faceImg ? `<img src="${esc(faceImg.url)}" alt="">` : ''}</div><div class="nm">Face, front<small>${S.mode === 'own' ? 'Your upload' : 'Chosen in the previous step'}</small></div><span class="pill ok">Approved</span></div>
       ${groups.map(([title, why, vs], n) => {
         const open = n === 0 || groups[n - 1][2].every(k => canon(k));
         return `<div class="stage ${open ? '' : 'locked'}"><div class="sh"><b>${n + 1}. ${esc(title)}</b><small>${open ? esc(why) : 'Waiting for group ' + n + ' to be approved'}<span data-left="${esc(JSON.stringify(vs))}">${groupLeft(vs)}</span></small></div>
           <div class="views">${vs.map((k, i) => viewRow(k, n, i)).join('')}</div></div>`;
       }).join('')}
-      <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button>${S.mode === 'own' ? '' : '<button type="button" class="btn btn-ghost" onclick="CC.toAdv()">Switch to Advanced</button>'}</span>
+      <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-ghost" onclick="CC.toAdv()">Switch to Advanced</button></span>
         <button type="button" class="btn btn-primary" ${done ? '' : 'disabled'} onclick="CC.go('done')">Finish</button></div>`;
     },
 
@@ -617,8 +620,9 @@
       if (p) Object.assign(sheet(), p.values);
       render();
     },
-    look(k, v) {
+    async look(k, v) {
       const s = sheet();
+      if (C && S.step === 'photos') { s[k] = v; try { await saveSheet(); } catch (e) { return fail(e); } say(''); await drive(); return render(); }
       if (k === 'nipples') { const n = NIPPLES.find(x => x[0] === v); s.nipple_size = n[1]; s.nipple_shape = n[2]; }
       else s[k] = v;
       render();
@@ -661,7 +665,7 @@
       lbOpen(items, Math.max(0, items.findIndex(x => x.k === k)));
     },
     toAdv() { S.mode = 'adv'; go('adv'); },
-    toFast() { S.mode = 'fast'; go(canon('face_front') ? 'photos' : 'look'); drive().then(render); },
+    toFast() { S.mode = C && C.sheet.order === 'own' ? 'own' : 'fast'; go(canon('face_front') ? 'photos' : 'look'); drive().then(render); },
     advSet(k, f, v) {
       S.adv[k] = Object.assign({}, S.adv[k], {[f]: v});
       if (f !== 'qty') render();
