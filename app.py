@@ -4469,9 +4469,65 @@ def api_support_get():
             t.last_page = page
         _support_seen(s, t, user)
         s.commit()
-        return jsonify(_support_payload(s, t, user))
+        out = _support_payload(s, t, user)
+        out['watch'] = _screen_watched(_screen_key(user, vid))
+        return jsonify(out)
     finally:
         s.close()
+
+
+# Screen mirror: while an admin has a thread open, the bubble posts a DOM
+# snapshot every 2s. Kept in app settings, not memory, because Cloud Run may
+# answer the user and the admin from different instances.
+SCREEN_WATCH_FOR = 20
+
+
+def _screen_key(user, vid):
+    return user['id'] if user else 'v:' + (vid or '')
+
+
+def _screen_watched(key):
+    try:
+        return float(_get_setting('screen_watch:' + key) or 0) > time.time()
+    except ValueError:
+        return False
+
+
+@app.route('/api/support/screen', methods=['POST'])
+def api_support_screen():
+    user, vid = _support_caller()
+    key = _screen_key(user, vid)
+    if not _screen_watched(key):
+        return jsonify({'ok': True, 'watch': False})
+    d = request.get_json(silent=True) or {}
+    snap = {k: d.get(k) for k in ('url', 'w', 'h', 'x', 'y')}
+    snap['at'] = int(time.time())
+    if isinstance(d.get('html'), str) and len(d['html']) < 1500000:
+        _set_setting('screen_html:' + key, d['html'])
+        snap['hv'] = str(time.time())
+    else:
+        try:
+            snap['hv'] = json.loads(_get_setting('screen_view:' + key) or '{}').get('hv')
+        except ValueError:
+            pass
+    _set_setting('screen_view:' + key, json.dumps(snap))
+    return jsonify({'ok': True, 'watch': True})
+
+
+@app.route('/api/admin/support/<key>/screen')
+def api_admin_support_screen(key):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    _set_setting('screen_watch:' + key, str(time.time() + SCREEN_WATCH_FOR))
+    try:
+        view = json.loads(_get_setting('screen_view:' + key) or '{}')
+    except ValueError:
+        view = {}
+    if request.args.get('hv') and view.get('hv') == request.args['hv']:
+        return jsonify({'ok': True, 'view': view, 'same': True})
+    return jsonify({'ok': True, 'view': view,
+                    'html': _get_setting('screen_html:' + key) or ''})
 
 
 @app.route('/api/support', methods=['POST'])
@@ -4862,6 +4918,15 @@ body{display:block;padding:24px 16px}
 .convo-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
 .convo-head .name{font-weight:700;display:flex;align-items:center;gap:8px}
 .convo-head .meta{font-size:.78rem;color:var(--text-muted);margin-top:3px}
+.hbtns{display:flex;gap:8px}
+.watchwrap{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:999;display:none;flex-direction:column;padding:20px}
+.watchwrap.on{display:flex}
+.watchwrap .bar{display:flex;justify-content:space-between;align-items:center;color:#fff;font-size:.85rem;margin-bottom:10px;gap:12px}
+.watchwrap .bar b{font-weight:700}
+.watchwrap .bar button{width:auto;padding:7px 14px;border-radius:9px;font-size:.8rem}
+.watchwrap .frame{flex:1;background:#fff;border-radius:12px;overflow:hidden;position:relative}
+.watchwrap iframe{position:absolute;top:0;left:0;border:0;transform-origin:top left}
+.watchwrap .idle{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#64748b;font-size:.9rem;background:rgba(255,255,255,.9)}
 .msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:72%;padding:9px 13px;border-radius:14px;font-size:.88rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
 .m.user{align-self:flex-start;background:var(--surface);color:var(--text)}
@@ -4957,7 +5022,7 @@ function loadConvo(scroll){
     var times=presence(d.seen)+(d.seen&&!on?' ('+esc(full(d.seen))+')':'')+' · '+(u?'joined ':'first seen ')+esc(full(d.joined));
     if(d.page)times+=' · on '+esc(d.page);
     var h='<div class="convo-head"><div><div class="name"><span class="dot'+(on?' on':'')+'"></span>'+esc(u?(u.name?u.name+' · '+u.email:u.email):'Visitor')+'</div><div class="meta">'+esc(meta)+'</div><div class="meta">'+times+'</div></div>'
-      +'<div>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
+      +'<div class="hbtns"><button class="ghost" id="watch" type="button">Watch screen</button>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
     if(!d.messages.length)h+='<div class="empty">No messages yet. Write first &mdash; it appears in their chat bubble with a badge.</div>';
     d.messages.forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+' · '+when(m.at)+'</span>'+esc(m.content)+'</div>';});
     h+='</div><form class="compose" id="f"><textarea id="reply" placeholder="Write as the team (Enter to send, Shift+Enter for a new line)"></textarea><button type="submit">Send</button></form>';
@@ -4966,6 +5031,7 @@ function loadConvo(scroll){
     var box=document.getElementById('msgs'); box.scrollTop=box.scrollHeight;
     r.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}};
     document.getElementById('f').onsubmit=function(e){e.preventDefault();send();};
+    document.getElementById('watch').onclick=function(){watchScreen(k);};
     document.getElementById('mode').onclick=function(){
       fetch('/api/admin/support/'+encodeURIComponent(k)+'/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:this.getAttribute('data-m')})})
         .then(function(){lastSig='';loadConvo();loadList();});
@@ -5041,6 +5107,41 @@ var p=new URLSearchParams(location.search);
 if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
 loadAlerts(); loadList(); if(current)loadConvo(true);
 setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
+var watchKey=null, watchHv='', watchTimer=null, watchDoc=null;
+function watchScreen(k){
+  if(watchKey){stopWatch();return;}
+  watchKey=k; watchHv='';
+  var w=document.getElementById('watchwrap');
+  if(!w){w=document.createElement('div');w.className='watchwrap';w.id='watchwrap';
+    w.innerHTML='<div class="bar"><div>Watching <b id="wkey"></b> &middot; <span id="wurl"></span></div><button class="ghost" id="wclose">Stop watching</button></div><div class="frame"><iframe id="wframe" sandbox=""></iframe><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>';
+    document.body.appendChild(w);
+    document.getElementById('wclose').onclick=stopWatch;}
+  document.getElementById('wkey').textContent=k;
+  w.classList.add('on'); pollWatch();
+}
+function stopWatch(){watchKey=null;clearTimeout(watchTimer);var w=document.getElementById('watchwrap');if(w)w.classList.remove('on');}
+function fitWatch(v){
+  var fr=document.querySelector('.watchwrap .frame'), f=document.getElementById('wframe');
+  if(!fr||!f||!v||!v.w)return;
+  var sc=Math.min(fr.clientWidth/v.w, fr.clientHeight/(v.h||v.w));
+  f.style.width=v.w+'px'; f.style.height=(v.h||v.w)+'px'; f.style.transform='scale('+sc+')';
+}
+function pollWatch(){
+  if(!watchKey)return;
+  var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k)+'/screen'+(watchHv?'?hv='+encodeURIComponent(watchHv):''),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(watchKey!==k)return;
+      var v=d.view||{}, f=document.getElementById('wframe'), idle=document.getElementById('widle');
+      var fresh=v.at&&(d.now?d.now:Math.floor(Date.now()/1000))-v.at<15;
+      idle.style.display=(v.at&&fresh)?'none':'flex';
+      if(d.html){watchDoc=d.html; watchHv=v.hv||watchHv; var doc=f.contentWindow.document; doc.open();doc.write(d.html);doc.close();}
+      else if(v.hv){watchHv=v.hv;}
+      if(v.url)document.getElementById('wurl').textContent=v.url;
+      fitWatch(v);
+      try{if(f.contentWindow)f.contentWindow.scrollTo(v.x||0,v.y||0);}catch(e){}
+    },function(){}).then(function(){if(watchKey===k)watchTimer=setTimeout(pollWatch,2000);});
+}
 </script></body></html>"""
 
 
