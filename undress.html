@@ -158,7 +158,7 @@ function udRow(p) {
     <div class="ud-row-th"><img src="${esc(p.url)}" loading="lazy" decoding="async" alt=""></div>
     <div class="pg-row-info"><div class="pg-row-name">${p.result ? 'Undressed' : 'Photo'}</div><div class="pg-row-sub">${esc((p.created || '').slice(0, 10))}</div></div>
     <span class="vw-b ${p.result ? 'nsfw' : 'off'}">${p.result ? 'RESULT' : 'ORIGINAL'}</span>
-    <a class="pg-ctl ud-sm" href="${esc(p.url)}" download="photo-${id}.png" onclick="event.stopPropagation()" title="Download">↓</a>
+    <a class="pg-ctl ud-sm" href="${esc(p.url)}?dl=1" download onclick="event.stopPropagation()" title="Download">↓</a>
     <button type="button" class="btn btn-primary ud-sm" onclick="event.stopPropagation();udGo('${id}')">Undress</button>
     <button type="button" class="pg-del" title="Delete" onclick="event.stopPropagation();udDel('${id}')">✕</button></div>`;
 }
@@ -173,7 +173,7 @@ function udCard(p) {
       ${orig ? `<img class="ud-orig" src="${esc(orig.url)}" title="Original" alt="" onclick="event.stopPropagation();udClick('${esc(orig.id)}')">` : ''}
     </div>
     <div class="vw-card-foot"><span class="vw-card-name">${p.result ? 'Undressed' : 'Photo'} · ${esc((p.created || '').slice(0, 10))}</span>
-      <a class="pg-ctl ud-sm" href="${esc(p.url)}" download="photo-${id}.png" onclick="event.stopPropagation()" title="Download">↓</a>
+      <a class="pg-ctl ud-sm" href="${esc(p.url)}?dl=1" download onclick="event.stopPropagation()" title="Download">↓</a>
       <button type="button" class="btn btn-primary ud-sm" onclick="event.stopPropagation();udGo('${id}')">Undress</button></div></div>`;
 }
 function udRender() {
@@ -194,7 +194,7 @@ function udAll() { udView().forEach(p => sel.add(p.id)); udRender(); }
 function udBulkBar() { el('ud-bulk').classList.toggle('on', selMode); el('ud-bulk-n').textContent = sel.size + ' selected'; }
 function udBulkDl() {
   [...sel].forEach((id, i) => setTimeout(() => {
-    const a = document.createElement('a'); a.href = byId(id).url; a.download = 'photo-' + id + '.png';
+    const a = document.createElement('a'); a.href = byId(id).url + '?dl=1'; a.download = '';
     document.body.appendChild(a); a.click(); a.remove();
   }, i * 400));
 }
@@ -264,7 +264,7 @@ function udShow() {
   const o = p.parent && byId(p.parent);
   const src = lbOrig && o ? o.url : p.url;
   el('ud-lb-img').src = src;
-  const dl = el('ud-lb-dl'); dl.href = src; dl.download = 'photo-' + p.id + '.png';
+  const dl = el('ud-lb-dl'); dl.href = src + '?dl=1'; dl.download = '';
   const ba = el('ud-lb-ba'); ba.hidden = !o; ba.textContent = lbOrig ? 'Show result' : 'Show original';
   el('ud-lb').classList.add('on');
 }

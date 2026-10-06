@@ -12056,7 +12056,31 @@ def api_persona_avatar(slug):
         return ('', 400)
 
 
-def _serve_data_url(data_url):
+def _file_name(owner, kind, uid, mime=''):
+    """`Name-type-xxxx.ext` for a file a creator saves. The tag is derived from
+    the id, so one file keeps one name however often it is fetched."""
+    import mimetypes
+    part = lambda v: re.sub(r'[^A-Za-z0-9]+', '-', v or '').strip('-')
+    tag = int(hashlib.sha1((uid or '').encode()).hexdigest(), 16)
+    abc = '0123456789abcdefghijklmnopqrstuvwxyz'
+    tag = ''.join(abc[(tag >> (6 * i)) % 36] for i in range(4))
+    ext = mimetypes.guess_extension((mime or '').split(';')[0]) or ''
+    ext = {'.jpe': '.jpg', '.jpeg': '.jpg'}.get(ext, ext)
+    return f"{part(owner) or 'file'}-{part(kind) or 'file'}-{tag}{ext}"
+
+
+def _disposition(name):
+    """`?dl=1` makes it a download; otherwise it shows inline, and Save As
+    still offers the name."""
+    return ('attachment' if request.args.get('dl') else 'inline') + f'; filename="{name}"'
+
+
+def _media_file_name(row):
+    kind = row.purpose or ('video' if (row.kind or 'image') == 'video' else 'photo')
+    return _file_name(_bio_name(row.slug), kind, row.id, row.mime)
+
+
+def _serve_data_url(data_url, headers=None):
     """Serve a data: URL as a Response of its own type, or 404/400."""
     import base64
     from flask import Response
@@ -12065,7 +12089,7 @@ def _serve_data_url(data_url):
     try:
         header, b64 = data_url.split(',', 1)
         mime = header.split(';')[0].replace('data:', '') or 'image/jpeg'
-        return Response(base64.b64decode(b64), mimetype=mime)
+        return Response(base64.b64decode(b64), mimetype=mime, headers=headers)
     except Exception:
         return ('', 400)
 
@@ -14719,7 +14743,7 @@ def api_persona_media_download(slug):
     ids = [str(i) for i in ((request.json or {}).get('media_ids') or [])][:200]
     if not ids:
         return jsonify({'error': 'Nothing selected.'}), 400
-    import io, zipfile, mimetypes
+    import io, zipfile
     from db import SessionLocal, get_persona_media
     buf = io.BytesIO()
     taken = set()
@@ -14740,10 +14764,11 @@ def api_persona_media_download(slug):
                     continue
                 if not blob:
                     continue
-                ext = mimetypes.guess_extension(row.mime or '') or (
-                    '.mp4' if (row.kind or 'image') == 'video' else '.jpg')
-                base = re.sub(r'[^\w -]', '', row.purpose or '').strip() or mid[:8]
-                name = f'{base}{ext}'
+                name = _media_file_name(row)
+                base, ext = os.path.splitext(name)
+                if not ext:
+                    ext = '.mp4' if (row.kind or 'image') == 'video' else '.jpg'
+                    name = base + ext
                 n = 2
                 while name in taken:
                     name = f'{base} ({n}){ext}'
@@ -15034,6 +15059,7 @@ def api_persona_media_image(slug, media_id):
         if not row or row.slug != slug:
             return ('', 404)
         path = getattr(row, 'gcs_path', '') or ''
+        disp = _disposition(_media_file_name(row))
         if not row.image_data and path:
             # Redirect to a signed URL where the backend can mint one, so the
             # bytes never pass through the app — that is what makes serving a
@@ -15048,7 +15074,7 @@ def api_persona_media_image(slug, media_id):
             # plays a clip should, which is why this is a flag and not the rule.
             inline = bool(request.args.get('inline'))
             try:
-                url = None if inline else storage.signed_url(path)
+                url = None if inline else storage.signed_url(path, disposition=disp)
                 if url:
                     # Cacheable for less than the signature lives, or every
                     # re-render mints a new URL and downloads the file again.
@@ -15062,12 +15088,13 @@ def api_persona_media_image(slug, media_id):
                 return ('', 502)
             return app.response_class(
                 data, mimetype=row.mime or 'application/octet-stream',
-                headers={'Cache-Control': 'private, max-age=300'})
+                headers={'Cache-Control': 'private, max-age=300',
+                         'Content-Disposition': disp})
         # An externally hosted item is a redirect, so a platform fetching this
         # URL still lands on the file rather than on nothing.
         if not row.image_data and row.source_url:
             return redirect(row.source_url)
-        return _serve_data_url(row.image_data)
+        return _serve_data_url(row.image_data, {'Content-Disposition': disp})
     finally:
         s.close()
 
@@ -36089,9 +36116,10 @@ def api_character_image_file(char_id, img_id):
         if not img:
             return ('Not found', 404)
         path, mime = img.gcs_path, img.mime
+        disp = _disposition(_file_name(row.name, img.view or img.role, img.id, mime))
     finally:
         s.close()
-    url = storage.signed_url(path)
+    url = storage.signed_url(path, disposition=disp)
     if url:
         return redirect(url)
     try:
@@ -36102,7 +36130,8 @@ def api_character_image_file(char_id, img_id):
     if not data:
         return ('Not found', 404)
     return Response(data, mimetype=mime or 'image/jpeg',
-                    headers={'Cache-Control': 'private, max-age=300'})
+                    headers={'Cache-Control': 'private, max-age=300',
+                             'Content-Disposition': disp})
 
 
 @app.route('/api/characters/<char_id>/images/<img_id>', methods=['DELETE'])
