@@ -35,7 +35,7 @@ TOKEN_COST_USD = 0.04
 # month of invoices.
 #
 # It was 4.0 when the ladder was four packs with a shallow curve. The ladder now
-# runs from EUR 0.17 a token down to EUR 0.09 -- a 47% volume discount -- so the
+# runs from EUR 0.19 a token down to EUR 0.09 -- a 53% volume discount -- so the
 # two largest packs land at 2.54x and 2.29x. That is the discount working as
 # intended (61% and 56% gross margin), not a mistake, but the floor has to admit
 # it or nothing starts.
@@ -422,7 +422,7 @@ DEFAULT_MONTHLY_TOKENS = 100
 FREE_CREDITS = 15
 
 # Top-up packs. One price for everyone -- there are no tier bands. The ladder
-# already falls 47% from the smallest pack to the largest, which is the same
+# already falls 53% from the smallest pack to the largest, which is the same
 # incentive bought by volume rather than by subscription tier; stacking the old
 # Pro and Agency bands on top of it would put the 5,000 pack at roughly 1.7x
 # cost. The 100-300 packs are deliberately close together and 500 is a step
@@ -430,13 +430,13 @@ FREE_CREDITS = 15
 PACK_SIZES = (100, 200, 300, 500, 1000, 2000, 5000)
 
 PACK_PRICES = {
-    100:   {'eur': 17,  'usd': 18,  'gbp': 15},
-    200:   {'eur': 33,  'usd': 35,  'gbp': 29},
-    300:   {'eur': 49,  'usd': 52,  'gbp': 43},
-    500:   {'eur': 59,  'usd': 63,  'gbp': 52},
-    1000:  {'eur': 109, 'usd': 117, 'gbp': 96},
-    2000:  {'eur': 199, 'usd': 213, 'gbp': 175},
-    5000:  {'eur': 449, 'usd': 479, 'gbp': 395},
+    100:   {'eur': 19,  'usd': 21,  'gbp': 17},
+    200:   {'eur': 35,  'usd': 39,  'gbp': 29},
+    300:   {'eur': 49,  'usd': 55,  'gbp': 43},
+    500:   {'eur': 59,  'usd': 65,  'gbp': 49},
+    1000:  {'eur': 109, 'usd': 119, 'gbp': 89},
+    2000:  {'eur': 199, 'usd': 219, 'gbp': 159},
+    5000:  {'eur': 449, 'usd': 489, 'gbp': 389},
 }
 
 # Stripe refuses a charge under these, whatever the price table says, so a pack
