@@ -20,7 +20,8 @@ IMAGE = 'ostris/aitoolkit:latest'
 GPUS = ['NVIDIA RTX PRO 6000 Blackwell Server Edition',
         'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3']
 DC = 'EU-RO-1'
-VOLUME_GB = 150
+# Wan 2.2 (~80 GB) and MiniMax H3 (~45 GB) weights plus caches; 150 ran out.
+VOLUME_GB = 250
 
 
 def start_cmd():
@@ -31,6 +32,8 @@ def start_cmd():
 def deploy(dc):
     vol = find('/networkvolumes', 'char-lora') or call('POST', '/networkvolumes', {
         'name': 'char-lora', 'size': VOLUME_GB, 'dataCenterId': dc})
+    if int(vol.get('size') or 0) < VOLUME_GB:
+        vol = call('PATCH', f'/networkvolumes/{vol["id"]}', {'size': VOLUME_GB})
     print('volume', vol['id'], vol.get('dataCenterId'), flush=True)
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py'), 'rb') as f:
         handler = base64.b64encode(f.read()).decode()
