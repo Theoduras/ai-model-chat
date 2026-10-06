@@ -1697,6 +1697,41 @@ _BASE_TIERS = {
                }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+
+# Plus: the same plan with a bigger monthly allowance and cheaper token packs.
+# Built from the base tier so a feature can never differ between the two.
+PLUS_PRICES = {'starter': 69, 'pro': 169, 'agency': 449}
+PLUS_OF = {k: k + '_plus' for k in PLUS_PRICES}
+for _key, _plus in PLUS_OF.items():
+    _base = _BASE_TIERS[_key]
+    _BASE_TIERS[_plus] = {
+        **_base, 'name': _base['name'] + ' Plus', 'price': PLUS_PRICES[_key],
+        'plus_of': _key,
+        'features': [_monthly_tokens_line(_plus) if f == _monthly_tokens_line(_key) else f
+                     for f in _base['features']]
+                    + [f'{CR.PACK_DISCOUNT[_plus]}% off every token pack'],
+        'capabilities': {**_base['capabilities'],
+                         'tokens_month': CR.MONTHLY_TOKENS[_plus],
+                         'pack_discount': CR.PACK_DISCOUNT[_plus]},
+    }
+del _key, _plus, _base
+# What a Plus plan's own allowance and discount are; a super admin's override of
+# the base plan reaches everything else on it.
+_PLUS_OWN_CAPS = ('tokens_month', 'pack_discount')
+
+
+def _plus_value(currency=CR.BASE_CURRENCY):
+    """What a Plus plan's extra allowance would cost as the standard plan plus
+    the cheapest packs that cover it, and what Plus saves against that."""
+    out = {}
+    for base, plus in PLUS_OF.items():
+        extra = CR.MONTHLY_TOKENS[plus] - CR.MONTHLY_TOKENS[base]
+        packs, sizes = CR.cheapest_packs(extra, currency)
+        worth = _BASE_TIERS[base]['price'] + packs
+        out[base] = {'worth': worth, 'save': worth - _BASE_TIERS[plus]['price'],
+                     'save_pct': round((1 - _BASE_TIERS[plus]['price'] / worth) * 100),
+                     'packs': sizes, 'extra_tokens': extra}
+    return out
 # Caps from before the October 2026 repricing, kept by accounts that were on
 # the plan then (users.legacy_plan) for as long as they stay on it.
 LEGACY_PLAN_CAPS = {
@@ -2284,6 +2319,9 @@ def tier_capabilities(tier_key):
     # A super admin's edits sit on top of what the plan ships with, so a limit
     # can be moved without a deploy and the code keeps the fallback.
     name = base.get('key') or next((k for k, v in _BASE_TIERS.items() if v is base), '')
+    if base.get('plus_of'):
+        caps.update({k: v for k, v in (tier_overrides().get(base['plus_of']) or {}).items()
+                     if k not in _PLUS_OWN_CAPS})
     return {**caps, **(tier_overrides().get(name) or {})}
 
 
@@ -2989,6 +3027,10 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
    slack — so the pay buttons line up across the row. */
 .tier>[data-period]{display:flex;flex-direction:column;flex:1}
 .tier>[data-period][hidden]{display:none}
+.vtoggle{display:flex;gap:4px;margin:8px 0 4px;background:var(--surface);border-radius:99px;padding:3px;width:max-content}
+.vtoggle button{border:0;background:transparent;color:var(--text-2);border-radius:99px;padding:4px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.vtoggle button.active{background:var(--accent);color:#fff}
+.plusval{color:#4ec9a0}
 .tier ul{flex:1}
 .tier .cta{margin-top:auto;padding-top:4px}
 .tier .cta .spacer{visibility:hidden;margin-top:8px}
@@ -3252,14 +3294,18 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
 {% else %}<button type="button" onclick="window.top.location.href='/register'">Start free</button>{% endif %}
 {% for _ in range(pay_slots - 1) %}<button class="spacer" disabled tabindex="-1" aria-hidden="true">&nbsp;</button>{% endfor %}</div>
 </div>{% endif %}
-{% for key in order %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
-<div class="tier {{ 'featured' if key == 'pro' else '' }}" data-select="{{ key }}"
+{% for base_key in order %}{% set key = base_key %}{% set t = tiers[key] %}
+<div class="tier {{ 'featured' if base_key == 'pro' else '' }}" data-select="{{ key }}"
  role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">
 <div class="pick"><span class="off">Select</span><span class="on">Selected</span>
-{% if key == 'pro' %}<span class="tag">Most popular</span>{% endif %}</div>
-<h2>{{ t.name }}</h2><div class="blurb">{{ t.blurb }}</div>
+{% if base_key == 'pro' %}<span class="tag">Most popular</span>{% endif %}</div>
+<h2>{{ t.name }}</h2>
+{% if plus_of.get(base_key) %}<div class="vtoggle" role="group" aria-label="Plan size">
+<button type="button" class="active" data-set-variant="std">Standard</button>
+<button type="button" data-set-variant="plus">Plus</button></div>{% endif %}<div class="blurb">{{ t.blurb }}</div>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
-<div data-period="month">
+{% for variant, key in [('std', base_key), ('plus', plus_of.get(base_key))] if key %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
+<div data-period="month" data-variant="{{ variant }}"{{ ' hidden' if variant == 'plus' }}>
 {% if ref_pct or offer_pct %}{% set dpct = ref_pct or offer_pct %}
 <div class="price"><s style="opacity:.5">{{ currency }}{{ t.price }}</s>
 {{ currency }}{{ '%.2f'|format(t.price * (100 - dpct) / 100) }}<span>/month</span>
@@ -3268,6 +3314,7 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
 {% else %}
 <div class="price">{{ currency }}{{ t.price }}<span>/month</span> <span class="vat">excl. VAT</span></div>
 {% endif %}
+{% if variant == 'plus' %}<div class="permo plusval">Worth {{ currency }}{{ plus_value[base_key].worth }} a month as {{ tiers[base_key].name }} + token packs: save {{ currency }}{{ plus_value[base_key].save }}</div>{% endif %}
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 <div class="cta">
 {% if stripe_enabled %}<button data-tier="{{ key }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
@@ -3278,9 +3325,10 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
 </div>
-<div data-period="year" hidden>
+<div data-period="year" data-variant="{{ variant }}" hidden>
 <div class="price">{{ currency }}{{ ta.price }}<span>/year</span> <span class="vat">excl. VAT</span></div>
 <div class="permo">{{ currency }}{{ ta.monthly_equiv }}/mo billed annually</div>
+{% if variant == 'plus' %}<div class="permo plusval">Worth {{ currency }}{{ plus_value[base_key].worth }} a month as {{ tiers[base_key].name }} + token packs: save {{ currency }}{{ plus_value[base_key].save }}</div>{% endif %}
 <ul>{% for f in t.features %}<li>{{ f }}</li>{% endfor %}</ul>
 <div class="cta">
 {% if stripe_enabled %}<button data-tier="{{ key }}{{ annual_suffix }}" data-provider="stripe">{{ card_verb }} with card</button>{% endif %}
@@ -3291,6 +3339,7 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
  style="background:var(--surface);color:var(--star);margin-top:8px">Activate free (dev)</button>{% endif %}
 </div>
 </div>
+{% endfor %}
 </div>{% endfor %}
 <div class="tier{{ ' soon' if custom.coming_soon }}">
 <div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
@@ -3317,9 +3366,26 @@ document.querySelectorAll('.ptoggle button').forEach(function(tab){
     document.querySelectorAll('.ptoggle button').forEach(function(t){
       t.classList.toggle('active', t === tab);
     });
-    document.querySelectorAll('[data-period]').forEach(function(el){
-      el.hidden = el.dataset.period !== period;
+    document.body.dataset.period = period;
+    showPlans();
+  });
+});
+function showPlans(){
+  var period = document.body.dataset.period || 'month';
+  document.querySelectorAll('.tier').forEach(function(card){
+    var on = card.querySelector('[data-set-variant].active');
+    var variant = on ? on.dataset.setVariant : 'std';
+    card.querySelectorAll(':scope>[data-period]').forEach(function(el){
+      el.hidden = el.dataset.period !== period
+        || (el.dataset.variant && el.dataset.variant !== variant);
     });
+  });
+}
+document.querySelectorAll('[data-set-variant]').forEach(function(b){
+  b.addEventListener('click', function(e){
+    e.stopPropagation();
+    b.parentNode.querySelectorAll('button').forEach(function(x){ x.classList.toggle('active', x === b); });
+    showPlans();
   });
 });
 var cards = document.querySelectorAll('.tier[data-select]');
@@ -3341,7 +3407,7 @@ cards.forEach(function(card){
   });
 });
 if (cards.length) {
-  var active = {{ (user.tier or '').split(annual_suffix)[0]|tojson }};
+  var active = {{ (user.tier or '').split(annual_suffix)[0].replace('_plus', '')|tojson }};
   var start = null;
   cards.forEach(function(c){ if (c.dataset.select === active) start = c; });
   selectCard(start || document.querySelector('.tier.featured[data-select]') || cards[0]);
@@ -3553,7 +3619,11 @@ var TOK_PROVIDERS = [{% if stripe_enabled %}['stripe','card']{% endif %}{% if st
     if (isBest) badge = '<div class="save">best value &middot; save ' + p.save_pct + '%</div>';
     return '<div class="tokpack' + (p.test ? ' is-test' : '') + (isBest ? ' best' : '') + '">' + badge
       + '<div class="n">' + p.tokens.toLocaleString() + ' <span>tokens</span></div>'
-      + '<div class="p">' + money(p.price, p.symbol) + '</div>'
+      + '<div class="p">' + (p.discount_pct
+          ? '<s style="opacity:.5">' + money(p.list_price, p.symbol) + '</s> ' : '')
+      + money(p.price, p.symbol)
+      + (p.discount_pct ? ' <span class="per">Plus &minus;' + p.discount_pct + '%</span>' : '')
+      + '</div>'
       + '<div class="per">' + perTok(p.per_token, p.symbol) + ' per token</div>'
       + gets + buttons + '</div>';
   }).join('');
@@ -5623,7 +5693,7 @@ def admin_user_detail(uid):
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
                                   now=int(time.time()), online_window=SUPPORT_ONLINE_WINDOW,
                                   super_admin=bool(me.get('is_super_admin')),
-                                  error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
+                                  error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER + list(PLUS_OF.values()),
                                   roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
                                   trial_days=TRIAL_DAYS, can_delete=can_delete)
 
@@ -6456,14 +6526,22 @@ def api_pricing():
     """Public: tier cards for the homepage pricing section (and anywhere else
     that wants the same data without the full /pricing page)."""
     return jsonify({'order': DEFAULT_TIER_ORDER, 'tiers': TIERS,
+                    'plus': PLUS_OF, 'plus_value': _plus_value(),
                     'custom': CUSTOM_TIER, 'currency': CURRENCY_SYMBOL})
 
 
 @app.route('/api/features')
 def api_features():
     """Public: the homepage feature matrix, resolved per tier."""
+    value = _plus_value()
+    plus = {base: {'name': TIERS[key]['name'], 'price': TIERS[key]['price'],
+                   'tokens': CR.MONTHLY_TOKENS[key],
+                   'base_tokens': CR.MONTHLY_TOKENS[base],
+                   'discount': CR.PACK_DISCOUNT[key],
+                   'worth': value[base]['worth'], 'save': value[base]['save']}
+            for base, key in PLUS_OF.items()}
     return jsonify({'order': FEATURE_TIER_ORDER, 'tiers': _feature_matrix(),
-                    'currency': CURRENCY_SYMBOL})
+                    'plus': plus, 'currency': CURRENCY_SYMBOL})
 
 
 @app.route('/pricing')
@@ -6471,6 +6549,7 @@ def pricing():
     user = _current_user() or {'email': '', 'status': 'unpaid', 'tier': '',
                                'expires_at': None}
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
+                                  plus_of=PLUS_OF, plus_value=_plus_value(),
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),
@@ -6511,6 +6590,7 @@ def billing():
     if not user:
         return redirect('/login?next=/billing')
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
+                                  plus_of=PLUS_OF, plus_value=_plus_value(),
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),
@@ -6817,7 +6897,8 @@ def api_tokens():
         'monthly': user_capabilities(user).get('tokens_month'),
         'resets_at': _period_end().date().isoformat(),
         'equivalents': CR.equivalents(balance or 0),
-        'packs': CR.packs_for(_user_currency(user)),
+        'packs': CR.packs_for(_user_currency(user),
+                              user_capabilities(user).get('pack_discount') or 0),
         # Appended, never mixed in: it is priced far under cost, so it reaches
         # the menu only for an admin with the env flag set.
         'test_pack': (CR.test_pack_for(_user_currency(user))
@@ -6930,7 +7011,9 @@ def api_tokens_checkout():
             size = int(pack_id or 0)
         except (TypeError, ValueError):
             size = 0
-        price = CR.pack_price(size, currency) if size else None
+        price = (CR.pack_price(size, currency,
+                               user_capabilities(user).get('pack_discount') or 0)
+                 if size else None)
         if price is None:
             return jsonify({'error': 'Unknown token pack'}), 400
 

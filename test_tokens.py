@@ -807,6 +807,34 @@ def test_wan22_on_runpod():
               CR.video_price('720p', secs, model='wan-2-2') * CR.TOKEN_COST_USD >= cost - 1e-9)
 
 
+
+def test_plus_tiers():
+    import app as A
+    for base, plus in A.PLUS_OF.items():
+        check(f'{plus} includes more tokens than {base}',
+              CR.monthly_tokens(plus) > CR.monthly_tokens(base))
+        check(f'{plus} has every other capability of {base}',
+              {k: v for k, v in A.tier_capabilities(plus).items()
+               if k not in A._PLUS_OWN_CAPS}
+              == {k: v for k, v in A.tier_capabilities(base).items()
+                  if k not in A._PLUS_OWN_CAPS})
+        check(f'{plus} saves against {base} plus packs',
+              A._plus_value()[base]['save'] > 0)
+        check(f'{plus} has an annual twin', plus + A.ANNUAL_SUFFIX in A.TIERS)
+    caps = A.user_capabilities({'status': 'active', 'tier': 'pro_plus_annual'})
+    check('pro plus annual resolves its allowance and discount',
+          caps['tokens_month'] == 1600 and caps['pack_discount'] == 15)
+    check('a standard plan gets no pack discount',
+          not A.user_capabilities({'status': 'active', 'tier': 'pro'}).get('pack_discount'))
+    for d in CR.PACK_DISCOUNT.values():
+        for cur in CR.CURRENCIES:
+            for row in CR.packs_for(cur, d):
+                check(f'{row["tokens"]} pack at {d}% off in {cur} quotes what checkout charges',
+                      row['price'] == CR.pack_price(row['tokens'], cur, d) < row['list_price'])
+    check('cheapest packs cover the tokens asked for',
+          sum(CR.cheapest_packs(1300)[1]) >= 1300)
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -815,7 +843,8 @@ if __name__ == '__main__':
                test_stripe_minimums, test_test_pack_is_not_for_sale,
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
-               test_character_plus_vault_photos, test_wan22_on_runpod):
+               test_character_plus_vault_photos, test_wan22_on_runpod,
+               test_plus_tiers):
         fn()
     print()
     if FAILURES:

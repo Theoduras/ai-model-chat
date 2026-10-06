@@ -40,6 +40,10 @@ TOKEN_COST_USD = 0.04
 # intended (61% and 56% gross margin), not a mistake, but the floor has to admit
 # it or nothing starts.
 MIN_MARGIN_MULTIPLE = 2.25
+# Plus plans buy packs at a discount (PACK_DISCOUNT), which takes the 5,000 pack
+# under the floor above. They have paid a much larger subscription for it, so a
+# discounted pack only has to clear this lower floor.
+MIN_DISCOUNT_MARGIN_MULTIPLE = 1.75
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2',
                 'wan-2-2-char')
@@ -417,8 +421,13 @@ MONTHLY_TOKENS = {
     'starter': 75,
     'pro': 300,
     'agency': 1000,
+    'starter_plus': 500,
+    'pro_plus': 1600,
+    'agency_plus': 5000,
 }
 DEFAULT_MONTHLY_TOKENS = 100
+# Percent off every token pack, by tier key. Only the Plus plans have one.
+PACK_DISCOUNT = {'starter_plus': 10, 'pro_plus': 15, 'agency_plus': 20}
 FREE_CREDITS = 15
 
 # Top-up packs. One price for everyone -- there are no tier bands. The ladder
@@ -573,13 +582,16 @@ def monthly_tokens(tier):
     return MONTHLY_TOKENS.get(tier or '', DEFAULT_MONTHLY_TOKENS)
 
 
-def pack_price(size, currency=BASE_CURRENCY):
+def pack_price(size, currency=BASE_CURRENCY, discount_pct=0):
     """Price of a pack in one currency, or None if there is no such pack."""
     row = PACK_PRICES.get(int(size))
-    return row.get(currency_of(currency)) if row else None
+    price = row.get(currency_of(currency)) if row else None
+    if price is None or not discount_pct:
+        return price
+    return round(price * (100 - discount_pct) / 100, 2)
 
 
-def _pack_row(size, price, cur, save_pct=0, test=False):
+def _pack_row(size, price, cur, save_pct=0, test=False, list_price=None, discount_pct=0):
     """One row of the buy menu. Both the real ladder and the test pack render
     through here, so a card the checkout will honour and a card it will refuse
     can never end up different shapes on the page."""
@@ -595,21 +607,41 @@ def _pack_row(size, price, cur, save_pct=0, test=False):
         'per_token': round(price / size, 5),
         'save_pct': save_pct,
         'test': test,
+        'list_price': price if list_price is None else list_price,
+        'discount_pct': discount_pct,
     }
 
 
-def packs_for(currency=BASE_CURRENCY):
+def packs_for(currency=BASE_CURRENCY, discount_pct=0):
     """The buy-tokens menu, already resolved to one currency so the client needs
-    no pricing logic of its own. There are no tier bands: everyone sees this."""
+    no pricing logic of its own. A Plus plan passes its discount_pct; the price
+    shown is then the same pack_price() the checkout charges."""
     cur = currency_of(currency)
     out = []
     for size in PACK_SIZES:
-        price = PACK_PRICES[size][cur]
+        list_price = PACK_PRICES[size][cur]
         full = PACK_PRICES[PACK_SIZES[0]][cur] / PACK_SIZES[0] * size
         out.append(_pack_row(
-            size, price, cur,
-            save_pct=int(round((1 - price / full) * 100)) if full > price else 0))
+            size, pack_price(size, cur, discount_pct), cur,
+            save_pct=int(round((1 - list_price / full) * 100)) if full > list_price else 0,
+            list_price=list_price, discount_pct=discount_pct))
     return out
+
+
+def cheapest_packs(tokens, currency=BASE_CURRENCY):
+    """The cheapest set of packs, at list price, that adds up to at least
+    `tokens`: (cost, [sizes]). It is what a standard plan would pay for a Plus
+    plan's extra allowance, so the saving the pricing page quotes is real."""
+    cur = currency_of(currency)
+    best = {0: (0, [])}
+    for t in range(1, int(tokens) + 1):
+        options = []
+        for size in PACK_SIZES:
+            cost, sizes = best[max(0, t - size)]
+            options.append((cost + PACK_PRICES[size][cur], sizes + [size]))
+        best[t] = min(options, key=lambda o: o[0])
+    cost, sizes = best[int(tokens)]
+    return cost, sorted(sizes, reverse=True)
 
 
 def test_pack_for(currency=BASE_CURRENCY):
@@ -869,6 +901,18 @@ def _assert_floor():
             raise AssertionError(
                 f'the {TEST_PACK_TOKENS}-token size in {cur} no longer resolves '
                 'to its ladder price -- the test pack has leaked into it')
+    deepest = max(PACK_DISCOUNT.values(), default=0)
+    dfloor = MIN_DISCOUNT_MARGIN_MULTIPLE * TOKEN_COST_USD
+    for size in PACK_SIZES:
+        for cur in CURRENCIES:
+            per_usd = pack_price(size, cur, deepest) / size * REFERENCE_RATES[cur]
+            if per_usd + 1e-9 < dfloor:
+                raise AssertionError(
+                    f'pack {size} in {cur} at {deepest}% off sells tokens at '
+                    f'${per_usd:.5f}, under the ${dfloor:.5f} discount floor')
+            if pack_price(size, cur, deepest) < STRIPE_MIN_CHARGE[cur]:
+                raise AssertionError(f'pack {size} in {cur} at {deepest}% off is '
+                                     "under Stripe's minimum charge")
     # A pack Stripe will not charge is as broken as one that loses money: the
     # customer reaches the checkout page and it fails there rather than here.
     for size in PACK_SIZES:

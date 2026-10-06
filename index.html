@@ -412,6 +412,13 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
             <td>75 / 300 / 1,000</td>
             <td><span class="yes">Both, one persona</span></td>
           </tr>
+          <tr class="is-us">
+            <td>Velvetfunneler.com Plus</td>
+            <td><strong>&euro;69 / &euro;169 / &euro;449</strong></td>
+            <td>1 / 3 / 10</td>
+            <td>500 / 1,600 / 5,000</td>
+            <td><span class="yes">Both, plus 10&ndash;20% off token packs</span></td>
+          </tr>
           <tr>
             <td>Fanvue CreatorLab</td>
             <td>$29 / $69 / $199</td>
@@ -499,6 +506,12 @@ fetch('/api/features')
       note.innerHTML = '<b>' + esc(t.name) + '</b> — ' + esc(t.blurb) +
         (t.price ? ' ' + cursym + t.price + '/month, excl. VAT.'
                  : t.price_label ? ' ' + t.price_label + '.' : ' Free, no card needed.');
+      var p = (d.plus || {})[cur];
+      if (p) note.innerHTML += '<br><b>' + esc(p.name) + '</b> — same plan, ' +
+        p.tokens.toLocaleString() + ' tokens a month instead of ' + p.base_tokens.toLocaleString() +
+        ' and ' + p.discount + '% off token packs: ' + cursym + p.price + '/month. ' +
+        'Worth ' + cursym + p.worth + ' as ' + esc(t.name) + ' + token packs, so you save ' +
+        cursym + p.save + '.';
       var cta = document.getElementById('features-cta');
       cta.textContent = t.cta;
       cta.classList.toggle('soon', t.cta === 'Coming soon');
