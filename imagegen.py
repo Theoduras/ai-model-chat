@@ -38,6 +38,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 import shutil
 import random
 import re
@@ -167,7 +168,17 @@ if _LORA_EP:
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
+# Our own models on Vast Serverless (infra/vast), by endpoint name. With
+# VAST_API_KEY set they run there instead of on RunPod, same payloads.
+VAST_API_KEY = (os.getenv('VAST_API_KEY') or '').strip()
+VAST_ENDPOINTS = {m: os.getenv(f'VAST_{m.upper().replace("-", "_")}_ENDPOINT', m)
+                  for m in ('wan-2-2-gv', 'h3-gv', CHAR_LORA_IMAGE_MODEL)}
+VAST_MODELS = tuple(VAST_ENDPOINTS) if VAST_API_KEY else ()
+for _m in VAST_MODELS:
+    RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
+# Vast has no queue: a submit waits here while a cold worker boots.
+VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '1200'))
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
 # they take an uploaded track or none, never a generated one.
 SILENT_MODELS = tuple(m for m in RUNPOD_MODELS if m != 'h3-gv')
@@ -231,7 +242,7 @@ VIDEO_JOBS = {
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
-                          + (RUNPOD_MODELS if RUNPOD_API_KEY else ('wan-2-7',))
+                          + (RUNPOD_MODELS if RUNPOD_API_KEY or VAST_API_KEY else ('wan-2-7',))
                           + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
@@ -2571,6 +2582,81 @@ class RunPodProvider(Provider):
         return self._read(resp.json())
 
 
+class VastProvider(RunPodProvider):
+    """Our RunPod workers on Vast Serverless. A job id is a JSON handle on
+    the one worker it runs on: its URL, the session pinning it, the job."""
+    name = 'vast'
+
+    def __init__(self, key=None):
+        self.key = (key or VAST_API_KEY).strip()
+        if not self.key:
+            raise GenerationError('VAST_API_KEY is not set')
+
+    def _post(self, url, body, timeout=TIMEOUT):
+        import requests
+        try:
+            resp = requests.post(url, json=body, headers=self._headers(), timeout=timeout)
+        except Exception as e:
+            raise ProviderUnreachable(f'Vast unreachable: {e}', fatal=False)
+        if resp.status_code == 410:
+            return {'status': 'FAILED', 'error': 'the Vast worker running this job is gone'}
+        if resp.status_code >= 400:
+            raise GenerationError(f'Vast {resp.status_code}: {resp.text[:300]}',
+                                  fatal=resp.status_code in (401, 403))
+        return resp.json()
+
+    def _endpoint_key(self, name):
+        import requests
+        resp = requests.get('https://console.vast.ai/api/v0/endptjobs/', params={'client_id': 'me'},
+                            headers=self._headers(), timeout=TIMEOUT)
+        resp.raise_for_status()
+        for e in resp.json().get('results') or ():
+            if e.get('endpoint_name') == name:
+                return e.get('api_key') or self.key
+        raise GenerationError(f'no Vast endpoint named {name}', fatal=True)
+
+    def _route(self, name):
+        key = self._endpoint_key(name)
+        body, idx, deadline = {}, None, time.time() + VAST_ROUTE_WAIT
+        while not body.get('url'):
+            if time.time() > deadline:
+                raise GenerationError(f'no Vast worker for {name} came up', fatal=True)
+            if idx is not None:
+                time.sleep(5)
+            body = self._post('https://run.vast.ai/route/', {
+                'endpoint': name, 'api_key': key, 'cost': 100, 'request_idx': idx,
+                'replay_timeout': 60})
+            idx = body.get('request_idx', idx)
+        return body
+
+    def _run(self, model, payload):
+        auth = self._route(VAST_ENDPOINTS[model])
+        url = auth['url'].rstrip('/')
+        sess = self._post(f'{url}/session/create', {'auth_data': auth, 'payload': {
+            'lifetime': 3 * 3600}})
+        body = self._post(f'{url}/run', {'auth_data': auth, 'session_id': sess['session_id'],
+                                         'payload': payload}, timeout=VIDEO_TIMEOUT)
+        job = json.dumps({'url': url, 'auth': auth, 'session': sess['session_id'],
+                          'job': body.get('id')})
+        return job, self._read(body)
+
+    def submit_video(self, spec):
+        return self._run(spec.get('model'), self.payload(spec))
+
+
+    def poll(self, job_id, expect=1):
+        h = json.loads(job_id)
+        res = self._read(self._post(f'{h["url"]}/status', {
+            'auth_data': h['auth'], 'session_id': h['session'], 'payload': {'id': h['job']}}))
+        if res.status != 'running':
+            try:
+                self._post(f'{h["url"]}/session/end', {'session_id': h['session'],
+                                                       'session_auth': h['auth']})
+            except Exception:
+                pass
+        return res
+
+
 # H3 at 24 fps wants 17n+5 frames; turbo LoRA at 8 steps, as Comfy's template.
 H3_STEPS = 8
 
@@ -2908,7 +2994,7 @@ def write_h3_prompt(idea, spec, chained=False, why=None):
 # ── Selection ─────────────────────────────────────────────────────────────────
 
 PROVIDERS = {'runware': RunwareProvider, 'modelslab': ModelsLabProvider,
-             'runpod': RunPodProvider}
+             'runpod': RunPodProvider, 'vast': VastProvider}
 
 
 def provider_name():
@@ -2930,6 +3016,8 @@ def provider_name_for(spec):
     if ((spec.get('job') == 'swap' or spec.get('kind') == 'swap')
             and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
         return 'modelslab'
+    if spec.get('model') in VAST_MODELS:
+        return 'vast'
     if spec.get('model') in RUNPOD_MODELS:
         return 'runpod'
     return provider_name()

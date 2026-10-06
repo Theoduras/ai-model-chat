@@ -36299,8 +36299,10 @@ def _char_lora_advance(char_id):
         return
     if time.time() - float(state.get('started') or 0) > CHAR_LORA_TIMEOUT:
         return _char_lora_fail(char_id, state, 'training never finished')
+    if not state.get('job'):
+        return
     try:
-        res = imagegen.get_provider('runpod').poll(state['job'])
+        res = imagegen.get_provider('vast' if state['job'].startswith('{') else 'runpod').poll(state['job'])
     except imagegen.GenerationError as e:
         if e.fatal:
             _char_lora_fail(char_id, state, e)
@@ -36383,19 +36385,31 @@ def api_character_lora(char_id):
                        'caption': f'{trigger}, a woman, {label.lower()}'} for label, path in photos]
             if not all(puts.values()) or not all(i['url'] for i in images):
                 raise imagegen.GenerationError('storage could not sign the links')
-            job, res = imagegen.RunPodProvider().submit_lora_training(
-                images, trigger, puts['high'], puts['low'],
-                steps=min(2000, max(1200, 100 * len(images))), h3_put=puts.get('h3'))
-            if not job or res.status == 'failed':
-                raise imagegen.GenerationError(res.error or 'RunPod refused the job')
+            steps = min(2000, max(1200, 100 * len(images)))
+            provider = imagegen.provider_for({'model': imagegen.CHAR_LORA_IMAGE_MODEL})
         except Exception as e:
             logger.exception('char lora submit failed char=%s', char_id)
             _refund_tokens(workspace, source, note='LoRA training not started')
             return jsonify({'ok': False, 'error': f'Training could not start: {e}'}), 502
-        state.update(status='training', job=job, version=version, trigger=trigger,
+        state.update(status='training', job='', version=version, trigger=trigger,
                      pending=pending, source=source, workspace=workspace,
                      started=time.time(), error='', photos=len(images))
         _char_lora_save(char_id, state)
+
+        # Off the request: on Vast the submit waits for a cold worker to boot.
+        def submit():
+            try:
+                job, res = provider.submit_lora_training(
+                    images, trigger, puts['high'], puts['low'], steps=steps, h3_put=puts.get('h3'))
+                if not job or res.status == 'failed':
+                    raise imagegen.GenerationError(res.error or 'the provider refused the job')
+            except Exception as e:
+                logger.exception('char lora submit failed char=%s', char_id)
+                return _char_lora_fail(char_id, _char_lora(char_id), f'Training could not start: {e}')
+            current = _char_lora(char_id)
+            current['job'] = job
+            _char_lora_save(char_id, current)
+        threading.Thread(target=submit, daemon=True).start()
     return jsonify({'ok': True, 'lora': {
         'status': _char_lora_status(state), 'version': state.get('version') or 0,
         'error': state.get('error', ''), 'photos': len(photos),
