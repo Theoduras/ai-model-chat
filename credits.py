@@ -230,7 +230,8 @@ GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
 # bills a video-to-audio call flat, and a model that emits sound in the same
 # pass bills nothing extra at all. Priced as if it always costs us the dearer of
 # the two, because the cheaper case cannot be told apart at quote time.
-LORA_TRAIN_PRICE = credits_for_cost(LORA_TRAIN_COST_USD)
+# Free while LoRA training is being tested; LORA_TRAIN_FREE=0 restores the real price.
+LORA_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits_for_cost(LORA_TRAIN_COST_USD)
 
 ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),

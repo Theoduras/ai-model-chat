@@ -36178,7 +36178,7 @@ def api_character_lora(char_id):
             return _tokens_denied(price, balance)
         version = int(state.get('version') or 0) + 1
         source = f'lora-{char_id}-{version}'
-        if not _spend_tokens(user, price, source, note='character LoRA training'):
+        if price and not _spend_tokens(user, price, source, note='character LoRA training'):
             return _tokens_denied(price, _token_balance(user) or 0)
         # Kept across retrains, so her prompts never need rewording.
         trigger = state.get('trigger') or 'zx' + secrets.token_hex(3)
