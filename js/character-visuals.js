@@ -297,7 +297,8 @@
 
   const COLOURS = {
     skin_tone: {'Fair': '#f6dfcf', 'Light': '#eecbb0', 'Light olive': '#d9b48c', 'Olive': '#c49a6c', 'Tan': '#b07d52',
-      'Brown': '#8a5a3b', 'Deep brown': '#6a4029', 'Dark': '#4a2c1d'},
+      'Brown': '#8a5a3b', 'Deep brown': '#6a4029', 'Dark': '#4a2c1d',
+      'Rich espresso': '#3a2216', 'Very dark': '#2c1a11', 'Ebony': '#1f130c'},
     hair_colour: {'Black': '#1c1a1a', 'Dark brown': '#3b2618', 'Light brown': '#7a5436', 'Auburn': '#7e3a1e',
       'Red': '#a8391c', 'Strawberry blonde': '#d19a6b', 'Blonde': '#e3c27a', 'Platinum': '#efe6d0'},
     areola_colour: {'Light pink': '#e8b3a8', 'Pink': '#d98f86', 'Rosy brown': '#b87562', 'Brown': '#8e5a45', 'Dark brown': '#5e3a2c'},
