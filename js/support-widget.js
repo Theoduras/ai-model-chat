@@ -230,10 +230,9 @@
     watchBanner.classList.toggle('on', !!on);
   }
 
-  function shot() {
-    var doc = document.documentElement.cloneNode(true);
-    var live = document.querySelectorAll('input,textarea,select');
-    var copy = doc.querySelectorAll('input,textarea,select');
+  function syncFields(srcRoot, dstRoot) {
+    var live = srcRoot.querySelectorAll('input,textarea,select');
+    var copy = dstRoot.querySelectorAll('input,textarea,select');
     for (var i = 0; i < live.length && i < copy.length; i++) {
       var el = live[i], c = copy[i], v = el.type === 'password' ? '••••' : el.value;
       if (el.tagName === 'TEXTAREA') c.textContent = v;
@@ -241,7 +240,34 @@
       else if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked) c.setAttribute('checked', ''); }
       else if (el.type !== 'file') c.setAttribute('value', v);
     }
-    doc.querySelectorAll('script,noscript,iframe').forEach(function (n) { n.remove(); });
+  }
+
+  // Replace each same-origin iframe (the dashboard frames its real pages this
+  // way) with its live content, so the stream shows what the user actually sees.
+  function inlineFrames(srcRoot, dstRoot) {
+    var srcF = srcRoot.querySelectorAll('iframe'), dstF = dstRoot.querySelectorAll('iframe');
+    for (var i = 0; i < srcF.length && i < dstF.length; i++) {
+      var idoc;
+      try { idoc = srcF[i].contentDocument; } catch (e) { idoc = null; }
+      if (!idoc || !idoc.documentElement) { dstF[i].remove(); continue; }
+      var inner = idoc.documentElement.cloneNode(true);
+      syncFields(idoc, inner);
+      inlineFrames(idoc, inner);
+      inner.querySelectorAll('script,noscript').forEach(function (n) { n.remove(); });
+      var wrap = document.createElement('div');
+      var cs = srcF[i].getBoundingClientRect();
+      wrap.setAttribute('style', 'all:initial;display:block;width:' + Math.round(cs.width) +
+        'px;height:' + Math.round(cs.height) + 'px;overflow:hidden');
+      wrap.innerHTML = inner.innerHTML;
+      dstF[i].parentNode.replaceChild(wrap, dstF[i]);
+    }
+  }
+
+  function shot() {
+    var doc = document.documentElement.cloneNode(true);
+    syncFields(document, doc);
+    inlineFrames(document, doc);
+    doc.querySelectorAll('script,noscript').forEach(function (n) { n.remove(); });
     var head = doc.querySelector('head');
     if (head) { var b = document.createElement('base'); b.href = location.origin + '/'; head.insertBefore(b, head.firstChild); }
     return '<!DOCTYPE html>' + doc.outerHTML;
@@ -285,7 +311,17 @@
     render(false);
   }
 
-  function page() { return location.pathname + location.search; }
+  function page() {
+    var base = location.pathname + location.search;
+    var fr = document.querySelector('.sb-frame');
+    if (fr && fr.src) {
+      try {
+        var u = new URL(fr.src);
+        if (u.origin === location.origin) return base + ' › ' + u.pathname + u.search;
+      } catch (e) {}
+    }
+    return base;
+  }
 
   function poll() {
     fetch('/api/support?page=' + encodeURIComponent(page()), { credentials: 'same-origin' })
