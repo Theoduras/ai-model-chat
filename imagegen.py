@@ -2617,15 +2617,20 @@ class VastProvider(RunPodProvider):
 
     def _route(self, name):
         key = self._endpoint_key(name)
-        body, idx, deadline = {}, None, time.time() + VAST_ROUTE_WAIT
+        body, idx, deadline, first = {}, None, time.time() + VAST_ROUTE_WAIT, True
         while not body.get('url'):
             if time.time() > deadline:
                 raise GenerationError(f'no Vast worker for {name} came up', fatal=True)
-            if idx is not None:
+            if not first:
                 time.sleep(5)
-            body = self._post('https://run.vast.ai/route/', {
-                'endpoint': name, 'api_key': key, 'cost': 100, 'request_idx': idx,
-                'replay_timeout': 60})
+            first = False
+            try:
+                body = self._post('https://run.vast.ai/route/', {
+                    'endpoint': name, 'api_key': key, 'cost': 100, 'request_idx': idx,
+                    'replay_timeout': 60})
+            except ProviderUnreachable:
+                # One dropped connection must not end a wait that can run 20 minutes.
+                continue
             idx = body.get('request_idx', idx)
         return body
 
