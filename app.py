@@ -1132,7 +1132,7 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
 _PUBLIC_PAGES += [(f"/blog/{p['slug']}", '0.5', 'monthly') for p in blog_posts.POSTS]
 _PUBLIC_PAGES += [('/' + t['slug'], '0.8' if t['track'] else '0.6', 'monthly')
                   for t in free_tools.TOOLS]
-_PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-image-generator' else '0.8', 'monthly')
+_PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-generation-studio' else '0.8', 'monthly')
                   for slug in platform_pages.PAGES]
 _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 
@@ -9306,6 +9306,12 @@ for _pp_slug in platform_pages.PAGES:
     app.add_url_rule('/' + _pp_slug, endpoint='platform_page_' + _pp_slug.replace('-', '_'),
                      view_func=functools.partial(_platform_marketing_page, _pp_slug),
                      methods=['GET'])
+
+
+@app.route('/ai-image-generator', methods=['GET'])
+def ai_image_generator_moved():
+    # The page's old address: links to it and Google's index of it carry over.
+    return redirect('/ai-generation-studio', 301)
 
 
 def _free_tool_page(slug):

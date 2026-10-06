@@ -165,6 +165,19 @@ section:not(.alt) .card{background:var(--panel)}
 .close-cta p{color:var(--text-soft);font-size:16.5px;max-width:560px;margin:0 auto 26px;line-height:1.6;position:relative}
 .close-cta .hero-cta{justify-content:center;position:relative}
 
+/* Big studio band */
+.studio-band{padding:0 0 84px}
+.studio-band .box{position:relative;overflow:hidden;border-radius:28px;padding:56px 48px;text-align:center;
+  background:var(--panel);border:1px solid var(--hair)}
+.studio-band .box::before{content:"";position:absolute;inset:0;background:var(--grad);background-size:300% 100%;
+  opacity:.16;pointer-events:none}
+.studio-band h2{position:relative;font-family:'Sora',system-ui,sans-serif;font-weight:800;font-size:44px;
+  letter-spacing:-.03em;line-height:1.08;margin-bottom:14px}
+.studio-band p{position:relative;color:var(--text-soft);font-size:17px;max-width:600px;margin:0 auto 30px;line-height:1.6}
+.studio-band .btn-big{position:relative;display:inline-flex;align-items:center;gap:12px;font-size:20px;
+  padding:22px 44px;border-radius:16px;box-shadow:0 12px 40px #ff2d7855}
+.studio-band .small{position:relative;font-size:13.5px;color:var(--text-dim);margin:18px auto 0}
+
 footer{text-align:center;padding:32px 24px;border-top:1px solid var(--hair);font-size:13.5px}
 footer a{color:inherit;text-decoration:none;opacity:.7}
 footer a:hover{opacity:1}
@@ -186,6 +199,9 @@ footer a:hover{opacity:1}
   p.lede{font-size:15.5px}
   .cards,.steps,.rel{grid-template-columns:1fr}
   .sec-head h2,.close-cta h2{font-size:28px}
+  .studio-band .box{padding:40px 22px}
+  .studio-band h2{font-size:30px}
+  .studio-band .btn-big{width:100%;justify-content:center;font-size:18px;padding:20px 24px}
   section{padding:62px 0}
   .rows .r{grid-template-columns:1fr;gap:5px}
   .hero-cta .btn{width:100%;justify-content:center}
@@ -211,7 +227,7 @@ footer a:hover{opacity:1}
       <h1>{{ p.h1_pre }} <u>{{ p.h1_accent }}</u></h1>
       {% for para in p.lede %}<p class="lede">{{ para }}</p>{% endfor %}
       <div class="hero-cta">
-        <a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>
+        {% if p.cta_href %}<a class="btn btn-primary" href="{{ p.cta_href }}">{{ p.cta_primary }}</a>{% else %}<a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>{% endif %}
         <a class="btn btn-ghost" href="#features">See how it works</a>
       </div>
       <p class="note">{{ p.hero_note }}</p>
@@ -228,6 +244,21 @@ footer a:hover{opacity:1}
     </div>
   </div>
 </section>
+
+{% if p.studio_cta %}
+<section class="studio-band">
+  <div class="wrap">
+    <div class="box">
+      <h2>{{ p.studio_cta.h2 }}</h2>
+      <p>{{ p.studio_cta.sub }}</p>
+      <a class="btn btn-primary btn-big" href="/studio">{{ p.studio_cta.button }}
+        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"
+          stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M5 12h14M13 6l6 6-6 6"/></svg></a>
+      <p class="small">{{ p.studio_cta.note }}</p>
+    </div>
+  </div>
+</section>
+{% endif %}
 
 <section class="alt" id="features">
   <div class="wrap">
@@ -320,9 +351,9 @@ footer a:hover{opacity:1}
   <div class="wrap">
     <h2>{{ p.close_h2 }}</h2>
     <p>{{ p.close_sub }}</p>
-    <p>Part of Velvetfunneler.com: build the character, generate the content, run the funnel.</p>
+    <p>Part of Velvet Funneler: build the character, generate the content, run the funnel.</p>
     <div class="hero-cta">
-      <a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>
+      {% if p.cta_href %}<a class="btn btn-primary" href="{{ p.cta_href }}">{{ p.cta_primary }}</a>{% else %}<a class="btn btn-primary" data-cta-start href="/register">{{ p.cta_primary }}</a>{% endif %}
       <a class="btn btn-ghost" href="/#pricing">See pricing</a>
     </div>
   </div>
