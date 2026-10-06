@@ -4928,8 +4928,9 @@ body{display:block;padding:24px 16px}
 @keyframes wblink{0%,100%{opacity:1}50%{opacity:.25}}
 .watchwrap .bar button{width:auto;padding:7px 14px;border-radius:9px;font-size:.8rem}
 .watchwrap .stage{flex:1;display:flex;gap:12px;min-height:0}
-.watchwrap .frame{flex:1;background:#fff;border-radius:12px;overflow:hidden;position:relative}
-.watchwrap iframe{position:absolute;top:0;left:0;border:0;transform-origin:top left;pointer-events:none}
+.watchwrap .frame{flex:1;background:#17171a;border-radius:12px;overflow:hidden;position:relative;display:flex;align-items:center;justify-content:center}
+.watchwrap .device{position:absolute;top:0;left:0;transform-origin:top left;background:#000;border:12px solid #0a0a0a;border-radius:38px;box-shadow:0 20px 60px rgba(0,0,0,.6);overflow:hidden}
+.watchwrap iframe{display:block;border:0;background:#fff;pointer-events:none}
 .watchwrap .idle{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#64748b;font-size:.9rem;background:rgba(255,255,255,.9)}
 .watchwrap .wchat{width:340px;flex:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0}
 .watchwrap .wmsgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
@@ -5123,7 +5124,7 @@ function watchScreen(k){
   var w=document.getElementById('watchwrap');
   if(!w){w=document.createElement('div');w.className='watchwrap';w.id='watchwrap';
     w.innerHTML='<div class="bar"><div><span class="live">LIVE</span>Watching <b id="wkey"></b> &middot; <span id="wurl"></span></div><button class="ghost" id="wclose">Stop watching</button></div>'
-      +'<div class="stage"><div class="frame"><iframe id="wframe" sandbox="allow-same-origin"></iframe><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>'
+      +'<div class="stage"><div class="frame"><div class="device" id="wdevice"><iframe id="wframe" sandbox="allow-same-origin"></iframe></div><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>'
       +'<div class="wchat"><div class="wmsgs" id="wmsgs"></div><form class="wc-form" id="wcf"><textarea id="wreply" placeholder="Reply to them while you watch\\u2026"></textarea><button type="submit">Send</button></form></div></div>';
     document.body.appendChild(w);
     document.getElementById('wclose').onclick=stopWatch;
@@ -5136,10 +5137,13 @@ function watchScreen(k){
 }
 function stopWatch(){watchKey=null;clearTimeout(watchTimer);clearTimeout(watchChatTimer);var w=document.getElementById('watchwrap');if(w)w.classList.remove('on');}
 function fitWatch(v){
-  var fr=document.querySelector('.watchwrap .frame'), f=document.getElementById('wframe');
-  if(!fr||!f||!v||!v.w)return;
-  var sc=fr.clientWidth/v.w;
-  f.style.width=v.w+'px'; f.style.height=Math.ceil(fr.clientHeight/sc)+'px'; f.style.transform='scale('+sc+')';
+  var fr=document.querySelector('.watchwrap .frame'), dev=document.getElementById('wdevice'), f=document.getElementById('wframe');
+  if(!fr||!dev||!f||!v||!v.w)return;
+  var vw=v.w+24, vh=(v.h||v.w)+24;
+  var sc=Math.min((fr.clientWidth-24)/vw,(fr.clientHeight-24)/vh);
+  f.style.width=v.w+'px'; f.style.height=(v.h||v.w)+'px';
+  dev.style.width=v.w+'px'; dev.style.height=(v.h||v.w)+'px';
+  dev.style.transform='translate('+((fr.clientWidth-vw*sc)/2)+'px,'+((fr.clientHeight-vh*sc)/2)+'px) scale('+sc+')';
 }
 function pollWatch(){
   if(!watchKey)return;
