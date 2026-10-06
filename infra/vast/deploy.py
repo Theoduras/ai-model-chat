@@ -39,7 +39,7 @@ WORKERS = {
 # handler is up again.
 ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora; cd /opt/vast_jobs; '
            'R=https://raw.githubusercontent.com/Theoduras/ai-model-chat/$VJ_REF/infra; '
-           'for f in vast/sitecustomize.py vast/worker.py vast/start/$VJ_NAME.sh runpod-gv-patch.py '
+           'for f in vast/sitecustomize.py vast/worker.py vast/preload.py vast/start/$VJ_NAME.sh runpod-gv-patch.py '
            'runpod-h3/handler.py runpod-h3/deploy.py runpod-lora/handler.py; do '
            'curl -fsSL $R/$f -o ${f#vast/}; done; : > /var/log/vast-jobs.log; '
            '(pip install -q --target /opt/pw vastai >/var/log/pyworker.log 2>&1; '
@@ -62,7 +62,8 @@ def call(method, path, body=None):
 
 def deploy(name):
     w = WORKERS[name]
-    env = dict(w['env'], VJ_NAME=name, VJ_REF=os.getenv('VJ_REF', 'develop'), WORKER_PORT='3000')
+    env = dict(w['env'], VJ_NAME=name, VJ_REF=os.getenv('VJ_REF', 'develop'), WORKER_PORT='3000',
+               VJ_APP_URL=os.getenv('VJ_APP_URL', ''), VJ_LORA_KEY=os.getenv('VJ_LORA_KEY', ''))
     tpl = call('POST', '/template/', {
         'name': f'{name}-worker', 'image': w['image'], 'runtype': 'ssh', 'ssh_direct': True,
         'env': ' '.join(f"-e {k}='{v}'" for k, v in env.items()) + ' -p 3000:3000',

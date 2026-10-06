@@ -2557,6 +2557,8 @@ _OPEN_PATHS = (
                # browser. It carries its own proof (CRON_SECRET) and has no
                # session to offer, so a sign-in check would only ever 401 it.
                '/api/generate/tick',
+               # Vast workers fetch the LoRA links to preload at boot, by CRON_SECRET.
+               '/api/generate/lora-links',
                # Meta posts these itself: the webhook, and the two callbacks it
                # requires an app to expose. Each carries its own proof — the
                # verify token, or a signed_request checked against the app
@@ -38919,6 +38921,20 @@ def _cron_authorised():
     else:
         sent = (request.args.get('key') or '').strip()
     return hmac.compare_digest(sent, secret)
+
+
+@app.route('/api/generate/lora-links', methods=['GET'])
+def api_generate_lora_links():
+    """Every enabled video LoRA's download links, by family, so a Vast
+    worker can fetch them all at boot rather than on a clip's first use."""
+    if not _cron_authorised():
+        return jsonify({'ok': False}), 401
+    out = {'wan': [], 'h3': []}
+    for l in _video_loras():
+        if l.get('enabled', True) is not False:
+            fam = 'h3' if l.get('family') == 'h3' else 'wan'
+            out[fam] += [imagegen.lora_url(l[k]) for k in ('high', 'low') if l.get(k)]
+    return jsonify({'ok': True, **out})
 
 
 @app.route('/api/generate/tick', methods=['GET', 'POST'])

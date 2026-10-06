@@ -17,5 +17,6 @@ PY
   cp -rn /src/. / && cp /src/extra_model_paths.yaml /ComfyUI/ && chmod +x /entrypoint.sh
   touch /gv_built
 fi
+python3 /opt/vast_jobs/preload.py wan /ComfyUI/models/loras gv_ || true
 cd / && python3 /opt/vast_jobs/runpod-gv-patch.py
 exec /entrypoint.sh
