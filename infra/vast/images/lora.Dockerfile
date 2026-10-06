@@ -5,5 +5,9 @@ FROM ostris/aitoolkit:latest
 ENV HF_HOME=/workspace/hf MODELS_PATH=/workspace/models HF_HUB_ENABLE_HF_TRANSFER=1
 RUN pip install -q --break-system-packages --ignore-installed cryptography runpod "huggingface_hub[hf_transfer]" \
  && python3 -c "from huggingface_hub import snapshot_download as s; \
-s('ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16'); \
 s('Wan-AI/Wan2.2-T2V-A14B-Diffusers', ignore_patterns=['transformer/*', 'transformer_2/*'])"
+# One layer per expert, so they push and pull in parallel.
+RUN python3 -c "from huggingface_hub import snapshot_download as s; \
+s('ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16', ignore_patterns=['transformer_2/*'])"
+RUN python3 -c "from huggingface_hub import snapshot_download as s; \
+s('ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16', allow_patterns=['transformer_2/*'])"
