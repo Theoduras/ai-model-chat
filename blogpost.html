@@ -12,7 +12,6 @@
 <script src="/js/skeleton.js"></script>
 <script src="/js/theme.js"></script>
 <script src="/js/site-nav.js" defer></script>
-<script src="/js/blog-posts.js"></script>
 <script src="/js/page-editor.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
@@ -175,47 +174,6 @@ article blockquote{margin:28px 0;padding:16px 22px;border-left:3px solid var(--a
 <footer>&copy; <span id="yr"></span> Velvetfunneler.com</footer>
 
 <script>
-const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
-// /blog/<slug> serves this same file, so the slug comes from the path; ?slug=
-// still works for anyone linking that way.
-function currentSlug() {
-  const q = new URLSearchParams(location.search).get('slug');
-  if (q) return q;
-  const m = location.pathname.match(/\/blog\/([^/?#]+)/);
-  return m ? decodeURIComponent(m[1]) : '';
-}
-
-function render() {
-  const posts = window.BLOG_POSTS || [];
-  const host = document.getElementById('post');
-  const slug = currentSlug();
-  const p = posts.find(x => x.slug === slug) || posts[0];
-  if (!p) {
-    host.innerHTML = '<p class="missing">That article could not be found.</p>';
-    return;
-  }
-  document.title = p.title + ' · Velvetfunneler.com';
-
-  const rest = posts.filter(x => x.slug !== p.slug).slice(0, 3);
-  host.innerHTML =
-    '<div class="post-head">' +
-      '<div class="meta"><span class="pill">' + esc(p.category) + '</span>' +
-      '<span class="date">' + esc(p.date) + '</span></div>' +
-      '<h1>' + esc(p.title) + '</h1></div>' +
-    '<div class="hero" style="background-image:url(&quot;' + esc(p.image) + '&quot;),linear-gradient(135deg,#ff5c38,#ff2d78 45%,#7c3aed)"></div>' +
-    '<article>' + p.body + '</article>' +
-    (rest.length ? '<section class="more"><h2>More articles</h2><div class="grid">' +
-      rest.map(x =>
-        '<a class="card" href="/blog/' + encodeURIComponent(x.slug) + '">' +
-          '<div class="meta"><span class="pill">' + esc(x.category) + '</span>' +
-          '<span class="date">' + esc(x.date) + '</span></div>' +
-          '<h3>' + esc(x.title) + '</h3><p>' + esc(x.excerpt) + '</p></a>').join('') +
-      '</div></section>' : '');
-}
-
-render();
 document.getElementById('yr').textContent = new Date().getFullYear();
 </script>
 </body>

@@ -6,6 +6,7 @@ import functools
 import platform_pages
 import help_pages
 import free_tools
+import blog_posts
 import copy
 import json
 import html as html_mod
@@ -1121,12 +1122,6 @@ def _block_source_files():
 # routes rather than files on disk.
 
 # Public, crawlable pages. Everything else is app surface behind the paywall.
-# Blog post slugs are duplicated from js/blog-posts.js (the client-side source
-# of truth) since the sitemap is generated server-side; keep the two in sync
-# when adding a post.
-_BLOG_SLUGS = ['from-fan-to-buyer', 'writing-a-voice', 'phases-that-convert',
-               'photos-that-earn']
-
 _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/pricing', '0.9', 'weekly'),
                  ('/register', '0.6', 'monthly'),
@@ -1134,7 +1129,7 @@ _PUBLIC_PAGES = [('/', '1.0', 'weekly'),
                  ('/blog', '0.7', 'weekly'),
                  ('/privacy', '0.2', 'yearly'),
                  ('/tos', '0.2', 'yearly')]
-_PUBLIC_PAGES += [(f'/blog/{slug}', '0.5', 'monthly') for slug in _BLOG_SLUGS]
+_PUBLIC_PAGES += [(f"/blog/{p['slug']}", '0.5', 'monthly') for p in blog_posts.POSTS]
 _PUBLIC_PAGES += [('/' + t['slug'], '0.8' if t['track'] else '0.6', 'monthly')
                   for t in free_tools.TOOLS]
 _PUBLIC_PAGES += [(f'/{slug}', '0.9' if slug == 'ai-image-generator' else '0.8', 'monthly')
@@ -3060,7 +3055,7 @@ AUTH_NAV_HTML = """<header class="site-nav">
 REGISTER_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
-<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create your free account</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Create your free account · Velvet Funneler</title><meta name="description" content="Sign up to Velvet Funneler free: build an AI character, generate on-brand photos and video, and grow her audience.">
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """body{padding-top:80px}
@@ -3086,7 +3081,7 @@ h1 em.free{font-style:normal;color:#22c55e}
 SIGNIN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>
-<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Sign in · Velvet Funneler</title><meta name="description" content="Sign in to your Velvet Funneler account.">
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """body{padding-top:80px}</style><script src="/js/analytics.js" defer></script></head><body data-page="login">""" + AUTH_NAV_HTML + """<div class="wrap"><div class="card">
@@ -3141,7 +3136,7 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
-<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Choose a plan</title>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Pricing · Velvet Funneler</title><meta name="description" content="Velvet Funneler plans and prices: start free with AI character building and content generation, then add the AI chatbot and social funnel when you are ready.">
 <script src="/js/analytics.js" defer></script>
 <script src="/js/page-editor.js" defer></script>
 <style>""" + ACCOUNT_CSS + """
@@ -9237,7 +9232,11 @@ def vault_page():
 
 @app.route('/blog', methods=['GET'])
 def blog_page():
-    return send_from_directory(BASE_DIR, 'blog.html')
+    with open(os.path.join(BASE_DIR, 'blog.html'), encoding='utf-8') as f:
+        html = f.read()
+    html = html.replace('<div id="posts"></div>',
+                        '<div id="posts">' + blog_posts.list_html() + '</div>', 1)
+    return Response(html, mimetype='text/html')
 
 
 @app.route('/privacy', methods=['GET'])
@@ -9341,9 +9340,34 @@ def free_tool_generate():
 
 @app.route('/blog/<slug>', methods=['GET'])
 def blog_post_page(slug):
-    # The post is picked from the path client-side, so every slug serves the
-    # same file rather than needing a route per article.
-    return send_from_directory(BASE_DIR, 'blogpost.html')
+    post = blog_posts.get(slug)
+    if not post:
+        return ('Not found', 404)
+    with open(os.path.join(BASE_DIR, 'blogpost.html'), encoding='utf-8') as f:
+        html = f.read()
+    origin = _site_origin()
+    title = html_mod.escape(post['title'])
+    desc = html_mod.escape(post['excerpt'])
+    article = json.dumps({
+        '@context': 'https://schema.org', '@type': 'BlogPosting',
+        'headline': post['title'], 'description': post['excerpt'],
+        'image': post['image'], 'datePublished': blog_posts.iso_date(post),
+        'mainEntityOfPage': origin + '/blog/' + post['slug'],
+        'author': {'@type': 'Organization', 'name': 'Velvet Funneler', 'url': origin + '/'},
+        'publisher': {'@type': 'Organization', 'name': 'Velvet Funneler', 'url': origin + '/'},
+    }).replace('</', '<\\/')
+    head = (f'<title>{title} · Velvet Funneler</title>\n'
+            f'<meta name="description" content="{desc}">\n'
+            f'<meta property="og:type" content="article">\n'
+            f'<meta property="og:site_name" content="Velvet Funneler">\n'
+            f'<meta property="og:title" content="{title}">\n'
+            f'<meta property="og:description" content="{desc}">\n'
+            f'<meta property="og:image" content="{html_mod.escape(post["image"])}">\n'
+            f'<script type="application/ld+json">{article}</script>')
+    html = html.replace('<title>Blog · Velvetfunneler.com</title>', head, 1)
+    html = html.replace('<div id="post"></div>',
+                        '<div id="post">' + blog_posts.post_html(post) + '</div>', 1)
+    return Response(html, mimetype='text/html')
 
 
 @app.route('/', methods=['GET'])

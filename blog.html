@@ -3,8 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Blog · Velvetfunneler.com</title>
-<meta name="description" content="Notes on personas, funnels and turning conversations into sales.">
+<title>Blog · Velvet Funneler</title>
+<meta name="description" content="The Velvet Funneler blog: notes on AI personas, fan funnels and turning conversations into sales.">
 <link rel="icon" href="/favicon.png">
 <!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
      page flashes dark for a user who chose light. -->
@@ -13,7 +13,6 @@
 <script src="/js/skeleton.js"></script>
 <script src="/js/theme.js"></script>
 <script src="/js/site-nav.js" defer></script>
-<script src="/js/blog-posts.js"></script>
 <script src="/js/page-editor.js" defer></script>
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
@@ -153,35 +152,6 @@ footer{border-top:1px solid var(--hair);padding:28px 24px;text-align:center;
 <footer>&copy; <span id="yr"></span> Velvetfunneler.com</footer>
 
 <script>
-const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;')
-  .replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-
-function render() {
-  const posts = window.BLOG_POSTS || [];
-  const host = document.getElementById('posts');
-  if (!posts.length) { host.innerHTML = ''; return; }
-  const [lead, ...rest] = posts;
-
-  const meta = p => '<div class="meta"><span class="pill">' + esc(p.category) +
-    '</span><span class="date">' + esc(p.date) + '</span></div>';
-
-  host.innerHTML =
-    '<a class="featured" href="/blog/' + encodeURIComponent(lead.slug) + '">' +
-      '<div class="featured-img" style="background-image:url(&quot;' + esc(lead.image) + '&quot;),linear-gradient(135deg,#ff5c38,#ff2d78 45%,#7c3aed)"></div>' +
-      '<div class="featured-body">' + meta(lead) +
-        '<h2>' + esc(lead.title) + '</h2>' +
-        '<p>' + esc(lead.excerpt) + '</p>' +
-        '<div class="read"><span>Read the full article ' +
-          '<svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" ' +
-          'stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">' +
-          '<path d="M5 12h14M13 6l6 6-6 6"/></svg></span></div>' +
-      '</div></a>' +
-    (rest.length ? '<div class="grid">' + rest.map(p =>
-      '<a class="card" href="/blog/' + encodeURIComponent(p.slug) + '">' + meta(p) +
-        '<h3>' + esc(p.title) + '</h3><p>' + esc(p.excerpt) + '</p></a>').join('') + '</div>' : '');
-}
-
-render();
 document.getElementById('yr').textContent = new Date().getFullYear();
 </script>
 </body>
