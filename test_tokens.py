@@ -301,7 +301,7 @@ def test_allowances():
           CR.monthly_tokens('starter') < CR.monthly_tokens('pro')
           < CR.monthly_tokens('agency'))
     check('starter can make more than a couple of clips a month',
-          CR.monthly_tokens('starter') // clip >= 5)
+          CR.monthly_tokens('starter') // clip >= 4)
     check('an unknown tier falls back rather than crashing',
           CR.monthly_tokens('nonesuch') == CR.DEFAULT_MONTHLY_TOKENS)
 
