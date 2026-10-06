@@ -9,7 +9,7 @@
       || /[?&]embed=/.test(location.search)) return;
   window.__supportWidget = true;
 
-  var OPEN_POLL = 4000, CLOSED_POLL = 30000;
+  var OPEN_POLL = 4000, CLOSED_POLL = 7000;
   var state = { open: false, messages: [], mode: 'ai', unread: 0, isAdmin: false,
                 sending: false, sig: '' };
   var timer = null, root, panel, list, input, badge, modeLine, humanBtn;

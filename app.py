@@ -4919,14 +4919,23 @@ body{display:block;padding:24px 16px}
 .convo-head .name{font-weight:700;display:flex;align-items:center;gap:8px}
 .convo-head .meta{font-size:.78rem;color:var(--text-muted);margin-top:3px}
 .hbtns{display:flex;gap:8px}
-.watchwrap{position:fixed;inset:0;background:rgba(0,0,0,.72);z-index:999;display:none;flex-direction:column;padding:20px}
+.watchwrap{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:999;display:none;flex-direction:column;padding:14px}
 .watchwrap.on{display:flex}
 .watchwrap .bar{display:flex;justify-content:space-between;align-items:center;color:#fff;font-size:.85rem;margin-bottom:10px;gap:12px}
 .watchwrap .bar b{font-weight:700}
+.watchwrap .bar .live{color:#4ade80;font-weight:700;margin-right:8px}
+.watchwrap .bar .live::before{content:"\\25CF ";animation:wblink 1.4s infinite}
+@keyframes wblink{0%,100%{opacity:1}50%{opacity:.25}}
 .watchwrap .bar button{width:auto;padding:7px 14px;border-radius:9px;font-size:.8rem}
+.watchwrap .stage{flex:1;display:flex;gap:12px;min-height:0}
 .watchwrap .frame{flex:1;background:#fff;border-radius:12px;overflow:hidden;position:relative}
-.watchwrap iframe{position:absolute;top:0;left:0;border:0;transform-origin:top left}
+.watchwrap iframe{position:absolute;top:0;left:0;border:0;transform-origin:top left;pointer-events:none}
 .watchwrap .idle{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#64748b;font-size:.9rem;background:rgba(255,255,255,.9)}
+.watchwrap .wchat{width:340px;flex:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+.watchwrap .wmsgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.watchwrap .wc-form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border)}
+.watchwrap .wc-form textarea{flex:1;margin:0;min-height:44px;max-height:120px;font-size:.85rem;resize:none}
+.watchwrap .wc-form button{width:auto;padding:0 16px;border-radius:9px}
 .msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:72%;padding:9px 13px;border-radius:14px;font-size:.88rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
 .m.user{align-self:flex-start;background:var(--surface);color:var(--text)}
@@ -5107,19 +5116,25 @@ var p=new URLSearchParams(location.search);
 if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
 loadAlerts(); loadList(); if(current)loadConvo(true);
 setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
-var watchKey=null, watchHv='', watchTimer=null, watchDoc=null;
+var watchKey=null, watchHv='', watchTimer=null, watchChatTimer=null, watchScroll={x:0,y:0};
 function watchScreen(k){
   if(watchKey){stopWatch();return;}
   watchKey=k; watchHv='';
   var w=document.getElementById('watchwrap');
   if(!w){w=document.createElement('div');w.className='watchwrap';w.id='watchwrap';
-    w.innerHTML='<div class="bar"><div>Watching <b id="wkey"></b> &middot; <span id="wurl"></span></div><button class="ghost" id="wclose">Stop watching</button></div><div class="frame"><iframe id="wframe" sandbox=""></iframe><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>';
+    w.innerHTML='<div class="bar"><div><span class="live">LIVE</span>Watching <b id="wkey"></b> &middot; <span id="wurl"></span></div><button class="ghost" id="wclose">Stop watching</button></div>'
+      +'<div class="stage"><div class="frame"><iframe id="wframe" sandbox="allow-same-origin"></iframe><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>'
+      +'<div class="wchat"><div class="wmsgs" id="wmsgs"></div><form class="wc-form" id="wcf"><textarea id="wreply" placeholder="Reply to them while you watch\\u2026"></textarea><button type="submit">Send</button></form></div></div>';
     document.body.appendChild(w);
-    document.getElementById('wclose').onclick=stopWatch;}
+    document.getElementById('wclose').onclick=stopWatch;
+    document.getElementById('wcf').onsubmit=function(e){e.preventDefault();wsend();};
+    document.getElementById('wreply').onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();wsend();}};
+    var f=document.getElementById('wframe'); f.onload=function(){try{f.contentWindow.scrollTo(watchScroll.x,watchScroll.y);}catch(e){}};
+  }
   document.getElementById('wkey').textContent=k;
-  w.classList.add('on'); pollWatch();
+  w.classList.add('on'); pollWatch(); loadWatchChat();
 }
-function stopWatch(){watchKey=null;clearTimeout(watchTimer);var w=document.getElementById('watchwrap');if(w)w.classList.remove('on');}
+function stopWatch(){watchKey=null;clearTimeout(watchTimer);clearTimeout(watchChatTimer);var w=document.getElementById('watchwrap');if(w)w.classList.remove('on');}
 function fitWatch(v){
   var fr=document.querySelector('.watchwrap .frame'), f=document.getElementById('wframe');
   if(!fr||!f||!v||!v.w)return;
@@ -5135,12 +5150,31 @@ function pollWatch(){
       var v=d.view||{}, f=document.getElementById('wframe'), idle=document.getElementById('widle');
       var fresh=v.at&&(d.now?d.now:Math.floor(Date.now()/1000))-v.at<15;
       idle.style.display=(v.at&&fresh)?'none':'flex';
-      if(d.html){watchDoc=d.html; watchHv=v.hv||watchHv; var doc=f.contentWindow.document; doc.open();doc.write(d.html);doc.close();}
+      watchScroll={x:v.x||0,y:v.y||0};
+      if(d.html){watchHv=v.hv||watchHv; f.srcdoc=d.html;}
       else if(v.hv){watchHv=v.hv;}
       if(v.url)document.getElementById('wurl').textContent=v.url;
       fitWatch(v);
-      try{if(f.contentWindow)f.contentWindow.scrollTo(v.x||0,v.y||0);}catch(e){}
-    },function(){}).then(function(){if(watchKey===k)watchTimer=setTimeout(pollWatch,2000);});
+      try{if(f.contentWindow)f.contentWindow.scrollTo(watchScroll.x,watchScroll.y);}catch(e){}
+    },function(){}).then(function(){if(watchKey===k)watchTimer=setTimeout(pollWatch,1000);});
+}
+function loadWatchChat(){
+  if(!watchKey)return; var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(watchKey!==k||!d.ok)return;
+      var box=document.getElementById('wmsgs'); if(!box)return;
+      var atEnd=box.scrollTop+box.clientHeight>=box.scrollHeight-40,h='';
+      (d.messages||[]).forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+'</span>'+esc(m.content)+'</div>';});
+      box.innerHTML=h||'<div class="empty">No messages yet. Write below &mdash; it shows in their chat bubble.</div>';
+      if(atEnd)box.scrollTop=box.scrollHeight;
+    },function(){}).then(function(){if(watchKey===k)watchChatTimer=setTimeout(loadWatchChat,3000);});
+}
+function wsend(){
+  var r=document.getElementById('wreply'),text=(r.value||'').trim(); if(!text||!watchKey)return;
+  r.value=''; var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
+    .then(function(x){return x.json();}).then(function(d){if(!d.ok){r.value=text;alert(d.error||'Could not send');return;}loadWatchChat();if(current===k){lastSig='';loadConvo();}});
 }
 </script></body></html>"""
 
