@@ -15,7 +15,7 @@ foreach ($f in 'gv.Dockerfile', 'gv_steps.py', 'h3.Dockerfile', 'lora.Dockerfile
     Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing
 }
 
-$images = if ($env:IMAGES) { $env:IMAGES -split ' ' } else { 'gv', 'h3', 'lora' }
+$images = if ($env:IMAGES) { $env:IMAGES -split ' ' } else { 'gv' }
 foreach ($name in $images) {
     $tag = "ghcr.io/theoduras/vast-${name}:latest"
     Write-Host "building $name" -ForegroundColor Cyan
