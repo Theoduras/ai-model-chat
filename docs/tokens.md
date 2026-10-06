@@ -197,7 +197,7 @@ system explainable.
 ## 5. What a token costs, in euro, dollars and pounds
 
 **Euro is the base currency.** Prices are set in euro — matching the existing
-€49 / €149 / €349 plans — and the dollar and pound ladders are hand-set round
+€25 / €59 / €179 plans — and the dollar and pound ladders are hand-set round
 numbers alongside, not live conversions. A pack never costs €13.47 and never
 moves because the exchange rate did.
 

@@ -414,9 +414,9 @@ MONTHLY_TOKENS = {
     # Free never refills: its FREE_CREDITS are one grant, posted once.
     'free': 0,
     'demo': 25,
-    'starter': 150,
-    'pro': 800,
-    'agency': 2500,
+    'starter': 75,
+    'pro': 300,
+    'agency': 1000,
 }
 DEFAULT_MONTHLY_TOKENS = 100
 FREE_CREDITS = 15

@@ -39,7 +39,7 @@ which fails open:
 | Operator / persona scoping | `utils.py` — `_is_operator`, `operator_only`, `platform_scoped`, `owned_slugs` | The correct pattern, but only some routes use it |
 | Ownership | `SavedPersona.owner_id`, `_guard_persona_writes` | Per-user, so an "Agency" account cannot have a team |
 
-Prices are not changing: €49 / €149 / €349, ~25% off annual, no free tier.
+Prices changed in October 2026 to €25 / €59 / €179 (1 / 3 / 10 personas, 75 / 300 / 1,000 tokens); accounts already paying keep their old price and caps.
 
 ---
 

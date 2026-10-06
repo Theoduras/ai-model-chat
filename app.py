@@ -1627,7 +1627,7 @@ _BASE_TIERS = {
                         'ppv_reconcile': False,
                         'tokens_month': CR.MONTHLY_TOKENS[DEMO_TIER_KEY],
                     }},
-    'starter': {'name': 'Starter', 'price': 49,
+    'starter': {'name': 'Starter', 'price': 25,
                 'blurb': 'One persona on every platform, fully monetised.',
                 'features': ['1 × AI Persona', 'Unlimited Character Creator',
                              'Every social media platform integration',
@@ -1652,10 +1652,10 @@ _BASE_TIERS = {
                     'ppv_reconcile': False,
                     'tokens_month': CR.MONTHLY_TOKENS['starter'],
                 }},
-    'pro': {'name': 'Pro', 'price': 149,
-            'blurb': 'Five personas, every platform.',
+    'pro': {'name': 'Pro', 'price': 59,
+            'blurb': 'Three personas, every platform.',
             'features': ['Everything in Starter, plus:',
-                         '5 × AI Persona', 'Unlimited Character Creator',
+                         '3 × AI Persona', 'Unlimited Character Creator',
                          '2 team seats',
                          'Media tagging',
                          'Up to 10 funnel phases with photo rates',
@@ -1663,7 +1663,7 @@ _BASE_TIERS = {
                          _monthly_tokens_line('pro'),
                          'Priority support'],
             'capabilities': {
-                'personas': 5,
+                'personas': 3,
                 'chatbot': True,
                 'seats': 2,
                 'platforms': None,
@@ -1674,17 +1674,17 @@ _BASE_TIERS = {
                 'ppv_reconcile': False,
                 'tokens_month': CR.MONTHLY_TOKENS['pro'],
             }},
-    'agency': {'name': 'Agency', 'price': 349,
-               'blurb': 'Fifteen personas and a team to run them.',
+    'agency': {'name': 'Agency', 'price': 179,
+               'blurb': 'Ten personas and a team to run them.',
                'features': ['Everything in Pro, plus:',
-                            '15 × AI Persona', 'Unlimited Character Creator',
+                            '10 × AI Persona', 'Unlimited Character Creator',
                             '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
                             _monthly_tokens_line('agency'),
                             'Dedicated support'],
                'capabilities': {
-                   'personas': 15,
+                   'personas': 10,
                    'chatbot': True,
                    'seats': 6,
                    'platforms': None,
@@ -1697,12 +1697,19 @@ _BASE_TIERS = {
                }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+# Caps from before the October 2026 repricing, kept by accounts that were on
+# the plan then (users.legacy_plan) for as long as they stay on it.
+LEGACY_PLAN_CAPS = {
+    'starter': {'personas': 1, 'tokens_month': 150},
+    'pro': {'personas': 5, 'tokens_month': 800},
+    'agency': {'personas': 15, 'tokens_month': 2500},
+}
 
 # Quote-only plan: never sold self-serve, so it stays out of TIERS (nothing can
 # activate or charge for it) and is rendered as a fourth, not-yet-open card.
 CUSTOM_TIER = {
     'name': 'Custom',
-    'blurb': 'More than 15 personas, or something built to fit.',
+    'blurb': 'More than 10 personas, or something built to fit.',
     'price_label': "Let's talk",
     'features': ['Everything in Agency, plus:',
                  'Unlimited AI Personas', 'Unlimited Character Creator',
@@ -2035,6 +2042,7 @@ def _current_user():
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role, 'avatar': bool(u.avatar),
                 'onlyfans_grandfathered': bool(owner.onlyfans_grandfathered),
+                'legacy_plan': owner.legacy_plan or '',
                 'workspace_id': ws.id if ws is not None else u.id,
                 'workspace_name': (ws.name if ws is not None else '') or owner.email,
                 'workspace_owner_id': owner.id,
@@ -2295,6 +2303,12 @@ def _is_grandfathered(user):
     return until > datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _legacy_tokens(user):
+    if user.get('legacy_plan') and user.get('legacy_plan') == user.get('tier'):
+        return LEGACY_PLAN_CAPS.get(user['legacy_plan'], {}).get('tokens_month')
+    return None
+
+
 def user_capabilities(user):
     if not user:
         return dict(DENIED_CAPS)
@@ -2304,11 +2318,15 @@ def user_capabilities(user):
         # Grandfathered plans keep their limits off, but generation costs real
         # provider money, so they spend tokens from their tier like anyone.
         return dict(UNLIMITED_CAPS,
-                    tokens_month=(tier_capabilities(user.get('tier')).get('tokens_month')
+                    tokens_month=(_legacy_tokens(user)
+                                  or tier_capabilities(user.get('tier')).get('tokens_month')
                                   or CR.DEFAULT_MONTHLY_TOKENS))
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     caps = tier_capabilities(user.get('tier'))
+    legacy = LEGACY_PLAN_CAPS.get(user.get('legacy_plan') or '')
+    if legacy and user.get('legacy_plan') == user.get('tier'):
+        caps.update(legacy)
     # X is on every paid plan. Added here rather than in each tier so a super
     # admin's saved platform list cannot take it away again. Free goes nowhere.
     if (user.get('tier') != FREE_TIER_KEY and isinstance(caps.get('platforms'), list)
@@ -7224,7 +7242,8 @@ def _stripe_invoice_paid(obj):
             u.stripe_subscription_id = sub_id
         expires = _activate_plan(s, u, tier_key)
         s.add(Payment(user_id=u.id, tier=tier_key, provider='stripe',
-                      amount=str(TIERS[tier_key]['price']), currency=CURRENCY,
+                      amount=(f"{obj['amount_paid'] / 100:g}" if obj.get('amount_paid')
+                              else str(TIERS[tier_key]['price'])), currency=CURRENCY,
                       order_id=invoice_id or f'stripe-{secrets.token_hex(6)}',
                       track_id=sub_id, status='paid', paid_at=now))
         s.commit()
