@@ -153,9 +153,26 @@ def train(job, args):
 def lora_file(url):
     os.makedirs(CACHE, exist_ok=True)
     path = os.path.join(CACHE, hashlib.sha1(url.split('?')[0].encode()).hexdigest()[:16] + '.safetensors')
-    if not os.path.exists(path):
+    if os.path.exists(path):
+        os.utime(path)
+    else:
         get(url, path)
+        evict(path)
     return path
+
+
+def evict(keep):
+    # The volume bills per GB, so it holds the recently used LoRAs only; the
+    # master copies stay in the app's bucket.
+    limit = float(os.getenv('LORA_CACHE_GB', '20')) * 2**30
+    files = sorted(glob.glob(os.path.join(CACHE, '*.safetensors')), key=os.path.getmtime)
+    total = sum(os.path.getsize(f) for f in files)
+    for f in files:
+        if total <= limit:
+            break
+        if f != keep:
+            total -= os.path.getsize(f)
+            os.remove(f)
 
 
 def pipeline():
