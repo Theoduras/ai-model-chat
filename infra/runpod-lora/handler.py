@@ -20,6 +20,7 @@ import urllib.request
 import runpod
 
 BASE = os.getenv('LORA_BASE_MODEL', 'ai-toolkit/Wan2.2-T2V-A14B-Diffusers-bf16')
+PIPE_REPO = os.getenv('LORA_PIPE_REPO', 'Wan-AI/Wan2.2-T2V-A14B-Diffusers')
 TOOLKIT = '/app/ai-toolkit'
 WORK = '/tmp/char-lora'
 CACHE = os.path.join(os.getenv('HF_HOME', '/runpod-volume/hf'), 'char-loras')
@@ -112,8 +113,13 @@ def lora_file(url):
 def pipeline():
     if 'pipe' not in _pipe:
         import torch
-        from diffusers import WanPipeline
-        _pipe['pipe'] = WanPipeline.from_pretrained(BASE, torch_dtype=torch.bfloat16).to('cuda')
+        from diffusers import WanPipeline, WanTransformer3DModel
+        # BASE holds only the two bf16 experts; VAE, text encoder and scheduler
+        # come from the official repo, skipping its fp32 experts.
+        experts = {k: WanTransformer3DModel.from_pretrained(BASE, subfolder=k, torch_dtype=torch.bfloat16)
+                   for k in ('transformer', 'transformer_2')}
+        _pipe['pipe'] = WanPipeline.from_pretrained(PIPE_REPO, torch_dtype=torch.bfloat16,
+                                                    **experts).to('cuda')
         _pipe['loras'] = None
     return _pipe['pipe']
 
