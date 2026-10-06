@@ -426,11 +426,13 @@ FREE_CREDITS = 15
 # incentive bought by volume rather than by subscription tier; stacking the old
 # Pro and Agency bands on top of it would put the 5,000 pack at roughly 1.7x
 # cost.
-PACK_SIZES = (100, 500, 1000, 2000, 5000)
+PACK_SIZES = (100, 200, 300, 500, 1000, 2000, 5000)
 
 PACK_PRICES = {
     100:   {'eur': 15,  'usd': 16,  'gbp': 13},
-    500:   {'eur': 70,  'usd': 75,  'gbp': 62},
+    200:   {'eur': 29,  'usd': 31,  'gbp': 25},
+    300:   {'eur': 43,  'usd': 46,  'gbp': 37},
+    500:   {'eur': 70,  'usd': 75,  'gbp': 61},
     1000:  {'eur': 130, 'usd': 139, 'gbp': 115},
     2000:  {'eur': 220, 'usd': 235, 'gbp': 195},
     5000:  {'eur': 450, 'usd': 479, 'gbp': 395},
