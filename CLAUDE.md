@@ -30,7 +30,7 @@ app.py                          — Flask server, Gemini API, multi-persona, bui
 studio.html                     — Generation studio (admin-only while in testing)
 undress.html                    — Undress page: gallery of a persona's generated photos, one button each (no uploads)
 characters.py                   — Character catalogue: views, features, level rules, prompts
-characters.html                 — Character builder: steps (face, face angles, body, intimate), per-photo generate, required vs optional photos, menu sublists
+characters.html                 — Old character builder, admin-only at /characters-old (/characters serves character-creator.html): steps (face, face angles, body, intimate), per-photo generate, required vs optional photos, menu sublists
 js/character-visuals.js         — Option drawings for the character builder (SVG, parametric)
 js/vault-picker.js              — The one media picker: Content Vault lightbox (search, filter, sort, cards/list, folders, upload)
 js/support-widget.js            — Support bubble (AI assistant, team takeover), loaded by site-nav.js

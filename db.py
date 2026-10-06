@@ -515,6 +515,7 @@ class AppSetting(Base):
 
 GRANDFATHER_FLAG = 'entitlements_grandfather_backfill'
 OF_GRANDFATHER_FLAG = 'onlyfans_starter_grandfather_backfill'
+PLAN_2026_10_FLAG = 'plan_2026_10_legacy_backfill'
 
 
 def get_app_setting(session, key, default=None):
@@ -742,6 +743,9 @@ class User(Base):
     # OnlyFans moved to Pro and up. Accounts that had it connected before that
     # keep it on their existing plan, so the change is not a disconnection.
     onlyfans_grandfathered = Column(Boolean, default=False)
+    # The tier this account was on when plans were repriced in October 2026.
+    # While it stays on that tier it keeps the old persona and token caps.
+    legacy_plan = Column(String(16), default='')
 
     # Set when an admin hands out a time-boxed trial. One per account, ever:
     # its presence is what refuses a second one.
@@ -1658,6 +1662,23 @@ def grandfather_onlyfans_users(session):
     return n
 
 
+def grandfather_plan_2026_10(session):
+    """One-off at the October 2026 repricing: every account already on a paid
+    plan keeps that plan's old persona and token caps. Stripe keeps charging
+    them the old price on its own, so only the caps need remembering."""
+    if get_app_setting(session, PLAN_2026_10_FLAG):
+        return 0
+    n = 0
+    for u in session.query(User).filter(User.status == 'active',
+                                        User.tier.in_(('starter', 'pro', 'agency'))).all():
+        if not u.legacy_plan:
+            u.legacy_plan = u.tier
+            n += 1
+    set_app_setting(session, PLAN_2026_10_FLAG, _now().isoformat())
+    session.commit()
+    return n
+
+
 # ── PPV funnels, fan scoring and adaptive testing ─────────────────────────────
 # One fan per row per persona: who they are, what the classifier made of them,
 # and the two scores everything else keys off. Written nightly and on every
@@ -2442,6 +2463,7 @@ def init_db():
             grandfather_existing_users(s)
             backfill_workspaces(s)
             grandfather_onlyfans_users(s)
+            grandfather_plan_2026_10(s)
         finally:
             s.close()
     except Exception:

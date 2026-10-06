@@ -9,7 +9,7 @@
       || /[?&]embed=/.test(location.search)) return;
   window.__supportWidget = true;
 
-  var OPEN_POLL = 4000, CLOSED_POLL = 30000;
+  var OPEN_POLL = 4000, CLOSED_POLL = 7000;
   var state = { open: false, messages: [], mode: 'ai', unread: 0, isAdmin: false,
                 sending: false, sig: '' };
   var timer = null, root, panel, list, input, badge, modeLine, humanBtn;
@@ -36,6 +36,12 @@
     + 'background:#e11d48;color:#fff;font-size:.7rem;font-weight:700;display:none;align-items:center;justify-content:center;'
     + 'border:2px solid var(--spw-bg);}'
     + '.spw-badge.on{display:flex;}'
+    + '.spw-watch{position:fixed;right:20px;bottom:84px;max-width:240px;padding:8px 12px;border-radius:12px;'
+    + 'background:var(--spw-grad);color:#fff;font:600 .76rem Inter,system-ui,sans-serif;line-height:1.35;'
+    + 'box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:2147481999;display:none;align-items:center;gap:7px;}'
+    + '.spw-watch.on{display:flex;}'
+    + '.spw-watch .d{width:9px;height:9px;border-radius:50%;background:#fff;flex:none;animation:spwp 1.4s infinite;}'
+    + '@keyframes spwp{0%,100%{opacity:1;}50%{opacity:.3;}}'
     + '.spw-panel{position:fixed;right:20px;bottom:88px;width:370px;height:540px;max-height:calc(100vh - 110px);'
     + 'background:var(--spw-bg);color:var(--spw-text);border:1px solid var(--spw-border);border-radius:18px;'
     + 'box-shadow:0 18px 48px rgba(0,0,0,.3);z-index:2147482001;display:none;flex-direction:column;overflow:hidden;}'
@@ -178,7 +184,48 @@
     paintBadge();
   }
 
+  var mirroring = false, lastShot = '', watchBanner = null;
+
+  function setWatchBanner(on) {
+    if (!watchBanner) {
+      watchBanner = document.createElement('div');
+      watchBanner.className = 'spw-watch';
+      watchBanner.innerHTML = '<span class="d"></span><span>A support agent is viewing this page to help you.</span>';
+      (root || document.body).appendChild(watchBanner);
+    }
+    watchBanner.classList.toggle('on', !!on);
+  }
+
+  function shot() {
+    var doc = document.documentElement.cloneNode(true);
+    var live = document.querySelectorAll('input,textarea,select');
+    var copy = doc.querySelectorAll('input,textarea,select');
+    for (var i = 0; i < live.length && i < copy.length; i++) {
+      var el = live[i], c = copy[i], v = el.type === 'password' ? '••••' : el.value;
+      if (el.tagName === 'TEXTAREA') c.textContent = v;
+      else if (el.tagName === 'SELECT') { var o = c.options[el.selectedIndex]; if (o) o.setAttribute('selected', ''); }
+      else if (el.type === 'checkbox' || el.type === 'radio') { if (el.checked) c.setAttribute('checked', ''); }
+      else if (el.type !== 'file') c.setAttribute('value', v);
+    }
+    doc.querySelectorAll('script,noscript,iframe').forEach(function (n) { n.remove(); });
+    var head = doc.querySelector('head');
+    if (head) { var b = document.createElement('base'); b.href = location.origin + '/'; head.insertBefore(b, head.firstChild); }
+    return '<!DOCTYPE html>' + doc.outerHTML;
+  }
+
+  function mirror() {
+    if (document.hidden) { setTimeout(mirror, 2000); return; }
+    var html = shot(), body = { url: page(), w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
+    if (html !== lastShot && html.length < 1500000) body.html = html;
+    post('/api/support/screen', body).then(function (d) {
+      if (body.html) lastShot = html;
+      if (d && d.watch) { setWatchBanner(true); setTimeout(mirror, 2000); }
+      else { mirroring = false; lastShot = ''; setWatchBanner(false); }
+    }, function () { mirroring = false; setWatchBanner(false); });
+  }
+
   function apply(d) {
+    if (d && d.watch && !mirroring) { mirroring = true; mirror(); }
     if (!d || !d.ok) return;
     var before = state.messages.length;
     state.messages = d.messages || [];

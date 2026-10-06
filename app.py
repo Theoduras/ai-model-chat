@@ -1627,7 +1627,7 @@ _BASE_TIERS = {
                         'ppv_reconcile': False,
                         'tokens_month': CR.MONTHLY_TOKENS[DEMO_TIER_KEY],
                     }},
-    'starter': {'name': 'Starter', 'price': 49,
+    'starter': {'name': 'Starter', 'price': 25,
                 'blurb': 'One persona on every platform, fully monetised.',
                 'features': ['1 × AI Persona', 'Unlimited Character Creator',
                              'Every social media platform integration',
@@ -1652,10 +1652,10 @@ _BASE_TIERS = {
                     'ppv_reconcile': False,
                     'tokens_month': CR.MONTHLY_TOKENS['starter'],
                 }},
-    'pro': {'name': 'Pro', 'price': 149,
-            'blurb': 'Five personas, every platform.',
+    'pro': {'name': 'Pro', 'price': 59,
+            'blurb': 'Three personas, every platform.',
             'features': ['Everything in Starter, plus:',
-                         '5 × AI Persona', 'Unlimited Character Creator',
+                         '3 × AI Persona', 'Unlimited Character Creator',
                          '2 team seats',
                          'Media tagging',
                          'Up to 10 funnel phases with photo rates',
@@ -1663,7 +1663,7 @@ _BASE_TIERS = {
                          _monthly_tokens_line('pro'),
                          'Priority support'],
             'capabilities': {
-                'personas': 5,
+                'personas': 3,
                 'chatbot': True,
                 'seats': 2,
                 'platforms': None,
@@ -1674,17 +1674,17 @@ _BASE_TIERS = {
                 'ppv_reconcile': False,
                 'tokens_month': CR.MONTHLY_TOKENS['pro'],
             }},
-    'agency': {'name': 'Agency', 'price': 349,
-               'blurb': 'Fifteen personas and a team to run them.',
+    'agency': {'name': 'Agency', 'price': 179,
+               'blurb': 'Ten personas and a team to run them.',
                'features': ['Everything in Pro, plus:',
-                            '15 × AI Persona', 'Unlimited Character Creator',
+                            '10 × AI Persona', 'Unlimited Character Creator',
                             '6 team seats with roles',
                             'Conversation and revenue analytics',
                             'PPV reconciliation against Fanvue earnings',
                             _monthly_tokens_line('agency'),
                             'Dedicated support'],
                'capabilities': {
-                   'personas': 15,
+                   'personas': 10,
                    'chatbot': True,
                    'seats': 6,
                    'platforms': None,
@@ -1697,12 +1697,19 @@ _BASE_TIERS = {
                }},
 }
 DEFAULT_TIER_ORDER = ['starter', 'pro', 'agency']
+# Caps from before the October 2026 repricing, kept by accounts that were on
+# the plan then (users.legacy_plan) for as long as they stay on it.
+LEGACY_PLAN_CAPS = {
+    'starter': {'personas': 1, 'tokens_month': 150},
+    'pro': {'personas': 5, 'tokens_month': 800},
+    'agency': {'personas': 15, 'tokens_month': 2500},
+}
 
 # Quote-only plan: never sold self-serve, so it stays out of TIERS (nothing can
 # activate or charge for it) and is rendered as a fourth, not-yet-open card.
 CUSTOM_TIER = {
     'name': 'Custom',
-    'blurb': 'More than 15 personas, or something built to fit.',
+    'blurb': 'More than 10 personas, or something built to fit.',
     'price_label': "Let's talk",
     'features': ['Everything in Agency, plus:',
                  'Unlimited AI Personas', 'Unlimited Character Creator',
@@ -2035,6 +2042,7 @@ def _current_user():
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role, 'avatar': bool(u.avatar),
                 'onlyfans_grandfathered': bool(owner.onlyfans_grandfathered),
+                'legacy_plan': owner.legacy_plan or '',
                 'workspace_id': ws.id if ws is not None else u.id,
                 'workspace_name': (ws.name if ws is not None else '') or owner.email,
                 'workspace_owner_id': owner.id,
@@ -2295,6 +2303,12 @@ def _is_grandfathered(user):
     return until > datetime.now(timezone.utc).replace(tzinfo=None)
 
 
+def _legacy_tokens(user):
+    if user.get('legacy_plan') and user.get('legacy_plan') == user.get('tier'):
+        return LEGACY_PLAN_CAPS.get(user['legacy_plan'], {}).get('tokens_month')
+    return None
+
+
 def user_capabilities(user):
     if not user:
         return dict(DENIED_CAPS)
@@ -2304,11 +2318,15 @@ def user_capabilities(user):
         # Grandfathered plans keep their limits off, but generation costs real
         # provider money, so they spend tokens from their tier like anyone.
         return dict(UNLIMITED_CAPS,
-                    tokens_month=(tier_capabilities(user.get('tier')).get('tokens_month')
+                    tokens_month=(_legacy_tokens(user)
+                                  or tier_capabilities(user.get('tier')).get('tokens_month')
                                   or CR.DEFAULT_MONTHLY_TOKENS))
     if user.get('status') != 'active':
         return dict(DENIED_CAPS)
     caps = tier_capabilities(user.get('tier'))
+    legacy = LEGACY_PLAN_CAPS.get(user.get('legacy_plan') or '')
+    if legacy and user.get('legacy_plan') == user.get('tier'):
+        caps.update(legacy)
     # X is on every paid plan. Added here rather than in each tier so a super
     # admin's saved platform list cannot take it away again. Free goes nowhere.
     if (user.get('tier') != FREE_TIER_KEY and isinstance(caps.get('platforms'), list)
@@ -4451,9 +4469,65 @@ def api_support_get():
             t.last_page = page
         _support_seen(s, t, user)
         s.commit()
-        return jsonify(_support_payload(s, t, user))
+        out = _support_payload(s, t, user)
+        out['watch'] = _screen_watched(_screen_key(user, vid))
+        return jsonify(out)
     finally:
         s.close()
+
+
+# Screen mirror: while an admin has a thread open, the bubble posts a DOM
+# snapshot every 2s. Kept in app settings, not memory, because Cloud Run may
+# answer the user and the admin from different instances.
+SCREEN_WATCH_FOR = 20
+
+
+def _screen_key(user, vid):
+    return user['id'] if user else 'v:' + (vid or '')
+
+
+def _screen_watched(key):
+    try:
+        return float(_get_setting('screen_watch:' + key) or 0) > time.time()
+    except ValueError:
+        return False
+
+
+@app.route('/api/support/screen', methods=['POST'])
+def api_support_screen():
+    user, vid = _support_caller()
+    key = _screen_key(user, vid)
+    if not _screen_watched(key):
+        return jsonify({'ok': True, 'watch': False})
+    d = request.get_json(silent=True) or {}
+    snap = {k: d.get(k) for k in ('url', 'w', 'h', 'x', 'y')}
+    snap['at'] = int(time.time())
+    if isinstance(d.get('html'), str) and len(d['html']) < 1500000:
+        _set_setting('screen_html:' + key, d['html'])
+        snap['hv'] = str(time.time())
+    else:
+        try:
+            snap['hv'] = json.loads(_get_setting('screen_view:' + key) or '{}').get('hv')
+        except ValueError:
+            pass
+    _set_setting('screen_view:' + key, json.dumps(snap))
+    return jsonify({'ok': True, 'watch': True})
+
+
+@app.route('/api/admin/support/<key>/screen')
+def api_admin_support_screen(key):
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    _set_setting('screen_watch:' + key, str(time.time() + SCREEN_WATCH_FOR))
+    try:
+        view = json.loads(_get_setting('screen_view:' + key) or '{}')
+    except ValueError:
+        view = {}
+    if request.args.get('hv') and view.get('hv') == request.args['hv']:
+        return jsonify({'ok': True, 'view': view, 'same': True})
+    return jsonify({'ok': True, 'view': view,
+                    'html': _get_setting('screen_html:' + key) or ''})
 
 
 @app.route('/api/support', methods=['POST'])
@@ -4844,6 +4918,24 @@ body{display:block;padding:24px 16px}
 .convo-head{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;justify-content:space-between;gap:12px;align-items:flex-start;flex-wrap:wrap}
 .convo-head .name{font-weight:700;display:flex;align-items:center;gap:8px}
 .convo-head .meta{font-size:.78rem;color:var(--text-muted);margin-top:3px}
+.hbtns{display:flex;gap:8px}
+.watchwrap{position:fixed;inset:0;background:rgba(0,0,0,.82);z-index:999;display:none;flex-direction:column;padding:14px}
+.watchwrap.on{display:flex}
+.watchwrap .bar{display:flex;justify-content:space-between;align-items:center;color:#fff;font-size:.85rem;margin-bottom:10px;gap:12px}
+.watchwrap .bar b{font-weight:700}
+.watchwrap .bar .live{color:#4ade80;font-weight:700;margin-right:8px}
+.watchwrap .bar .live::before{content:"\\25CF ";animation:wblink 1.4s infinite}
+@keyframes wblink{0%,100%{opacity:1}50%{opacity:.25}}
+.watchwrap .bar button{width:auto;padding:7px 14px;border-radius:9px;font-size:.8rem}
+.watchwrap .stage{flex:1;display:flex;gap:12px;min-height:0}
+.watchwrap .frame{flex:1;background:#fff;border-radius:12px;overflow:hidden;position:relative}
+.watchwrap iframe{position:absolute;top:0;left:0;border:0;transform-origin:top left;pointer-events:none}
+.watchwrap .idle{position:absolute;inset:0;display:none;align-items:center;justify-content:center;color:#64748b;font-size:.9rem;background:rgba(255,255,255,.9)}
+.watchwrap .wchat{width:340px;flex:none;background:var(--panel);border:1px solid var(--border);border-radius:12px;display:flex;flex-direction:column;min-height:0}
+.watchwrap .wmsgs{flex:1;overflow-y:auto;padding:12px;display:flex;flex-direction:column;gap:8px}
+.watchwrap .wc-form{display:flex;gap:8px;padding:10px;border-top:1px solid var(--border)}
+.watchwrap .wc-form textarea{flex:1;margin:0;min-height:44px;max-height:120px;font-size:.85rem;resize:none}
+.watchwrap .wc-form button{width:auto;padding:0 16px;border-radius:9px}
 .msgs{flex:1;overflow-y:auto;padding:16px;display:flex;flex-direction:column;gap:8px}
 .m{max-width:72%;padding:9px 13px;border-radius:14px;font-size:.88rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word}
 .m.user{align-self:flex-start;background:var(--surface);color:var(--text)}
@@ -4939,7 +5031,7 @@ function loadConvo(scroll){
     var times=presence(d.seen)+(d.seen&&!on?' ('+esc(full(d.seen))+')':'')+' · '+(u?'joined ':'first seen ')+esc(full(d.joined));
     if(d.page)times+=' · on '+esc(d.page);
     var h='<div class="convo-head"><div><div class="name"><span class="dot'+(on?' on':'')+'"></span>'+esc(u?(u.name?u.name+' · '+u.email:u.email):'Visitor')+'</div><div class="meta">'+esc(meta)+'</div><div class="meta">'+times+'</div></div>'
-      +'<div>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
+      +'<div class="hbtns"><button class="ghost" id="watch" type="button">Watch screen</button>'+(d.mode==='human'?'<button class="ghost" id="mode" data-m="ai">Hand back to AI</button>':'<button class="ghost" id="mode" data-m="human">Take over</button>')+'</div></div><div class="msgs" id="msgs">';
     if(!d.messages.length)h+='<div class="empty">No messages yet. Write first &mdash; it appears in their chat bubble with a badge.</div>';
     d.messages.forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+' · '+when(m.at)+'</span>'+esc(m.content)+'</div>';});
     h+='</div><form class="compose" id="f"><textarea id="reply" placeholder="Write as the team (Enter to send, Shift+Enter for a new line)"></textarea><button type="submit">Send</button></form>';
@@ -4948,6 +5040,7 @@ function loadConvo(scroll){
     var box=document.getElementById('msgs'); box.scrollTop=box.scrollHeight;
     r.onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();send();}};
     document.getElementById('f').onsubmit=function(e){e.preventDefault();send();};
+    document.getElementById('watch').onclick=function(){watchScreen(k);};
     document.getElementById('mode').onclick=function(){
       fetch('/api/admin/support/'+encodeURIComponent(k)+'/mode',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({mode:this.getAttribute('data-m')})})
         .then(function(){lastSig='';loadConvo();loadList();});
@@ -5023,6 +5116,66 @@ var p=new URLSearchParams(location.search);
 if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
 loadAlerts(); loadList(); if(current)loadConvo(true);
 setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
+var watchKey=null, watchHv='', watchTimer=null, watchChatTimer=null, watchScroll={x:0,y:0};
+function watchScreen(k){
+  if(watchKey){stopWatch();return;}
+  watchKey=k; watchHv='';
+  var w=document.getElementById('watchwrap');
+  if(!w){w=document.createElement('div');w.className='watchwrap';w.id='watchwrap';
+    w.innerHTML='<div class="bar"><div><span class="live">LIVE</span>Watching <b id="wkey"></b> &middot; <span id="wurl"></span></div><button class="ghost" id="wclose">Stop watching</button></div>'
+      +'<div class="stage"><div class="frame"><iframe id="wframe" sandbox="allow-same-origin"></iframe><div class="idle" id="widle">Waiting for the user to open a page&hellip;</div></div>'
+      +'<div class="wchat"><div class="wmsgs" id="wmsgs"></div><form class="wc-form" id="wcf"><textarea id="wreply" placeholder="Reply to them while you watch\\u2026"></textarea><button type="submit">Send</button></form></div></div>';
+    document.body.appendChild(w);
+    document.getElementById('wclose').onclick=stopWatch;
+    document.getElementById('wcf').onsubmit=function(e){e.preventDefault();wsend();};
+    document.getElementById('wreply').onkeydown=function(e){if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();wsend();}};
+    var f=document.getElementById('wframe'); f.onload=function(){try{f.contentWindow.scrollTo(watchScroll.x,watchScroll.y);}catch(e){}};
+  }
+  document.getElementById('wkey').textContent=k;
+  w.classList.add('on'); pollWatch(); loadWatchChat();
+}
+function stopWatch(){watchKey=null;clearTimeout(watchTimer);clearTimeout(watchChatTimer);var w=document.getElementById('watchwrap');if(w)w.classList.remove('on');}
+function fitWatch(v){
+  var fr=document.querySelector('.watchwrap .frame'), f=document.getElementById('wframe');
+  if(!fr||!f||!v||!v.w)return;
+  var sc=Math.min(fr.clientWidth/v.w, fr.clientHeight/(v.h||v.w));
+  f.style.width=v.w+'px'; f.style.height=(v.h||v.w)+'px'; f.style.transform='scale('+sc+')';
+}
+function pollWatch(){
+  if(!watchKey)return;
+  var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k)+'/screen'+(watchHv?'?hv='+encodeURIComponent(watchHv):''),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(watchKey!==k)return;
+      var v=d.view||{}, f=document.getElementById('wframe'), idle=document.getElementById('widle');
+      var fresh=v.at&&(d.now?d.now:Math.floor(Date.now()/1000))-v.at<15;
+      idle.style.display=(v.at&&fresh)?'none':'flex';
+      watchScroll={x:v.x||0,y:v.y||0};
+      if(d.html){watchHv=v.hv||watchHv; f.srcdoc=d.html;}
+      else if(v.hv){watchHv=v.hv;}
+      if(v.url)document.getElementById('wurl').textContent=v.url;
+      fitWatch(v);
+      try{if(f.contentWindow)f.contentWindow.scrollTo(watchScroll.x,watchScroll.y);}catch(e){}
+    },function(){}).then(function(){if(watchKey===k)watchTimer=setTimeout(pollWatch,1000);});
+}
+function loadWatchChat(){
+  if(!watchKey)return; var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k),{credentials:'same-origin'})
+    .then(function(r){return r.json();}).then(function(d){
+      if(watchKey!==k||!d.ok)return;
+      var box=document.getElementById('wmsgs'); if(!box)return;
+      var atEnd=box.scrollTop+box.clientHeight>=box.scrollHeight-40,h='';
+      (d.messages||[]).forEach(function(m){h+='<div class="m '+m.role+'"><span class="by">'+esc(m.role==='user'?'them':m.role==='ai'?'AI assistant':(m.author||'admin'))+'</span>'+esc(m.content)+'</div>';});
+      box.innerHTML=h||'<div class="empty">No messages yet. Write below &mdash; it shows in their chat bubble.</div>';
+      if(atEnd)box.scrollTop=box.scrollHeight;
+    },function(){}).then(function(){if(watchKey===k)watchChatTimer=setTimeout(loadWatchChat,3000);});
+}
+function wsend(){
+  var r=document.getElementById('wreply'),text=(r.value||'').trim(); if(!text||!watchKey)return;
+  r.value=''; var k=watchKey;
+  fetch('/api/admin/support/'+encodeURIComponent(k),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({message:text})})
+    .then(function(x){return x.json();}).then(function(d){if(!d.ok){r.value=text;alert(d.error||'Could not send');return;}loadWatchChat();if(current===k){lastSig='';loadConvo();}});
+}
 </script></body></html>"""
 
 
@@ -7224,7 +7377,8 @@ def _stripe_invoice_paid(obj):
             u.stripe_subscription_id = sub_id
         expires = _activate_plan(s, u, tier_key)
         s.add(Payment(user_id=u.id, tier=tier_key, provider='stripe',
-                      amount=str(TIERS[tier_key]['price']), currency=CURRENCY,
+                      amount=(f"{obj['amount_paid'] / 100:g}" if obj.get('amount_paid')
+                              else str(TIERS[tier_key]['price'])), currency=CURRENCY,
                       order_id=invoice_id or f'stripe-{secrets.token_hex(6)}',
                       track_id=sub_id, status='paid', paid_at=now))
         s.commit()
@@ -35797,21 +35951,22 @@ def characters_page():
     blocked = _require_active()
     if blocked:
         return blocked
+    return send_from_directory(BASE_DIR, 'character-creator.html')
+
+
+@app.route('/characters-old')
+def characters_old_page():
+    # The previous builder, kept for admins only; nothing links here.
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     return send_from_directory(BASE_DIR, 'characters.html')
 
 
 @app.route('/character-creator')
 def character_creator_page():
-    # The new step-by-step creator: admins and Pro and up while it is tested
-    # beside /characters.
-    user = _current_user()
-    tier = ((user or {}).get('tier') or '').replace(ANNUAL_SUFFIX, '')
-    if not (user and (user.get('is_admin') or (tier in ('pro', 'agency')
-                                               and user.get('status') == 'active'))):
-        blocked = _require_admin()
-        if blocked:
-            return blocked
-    return send_from_directory(BASE_DIR, 'character-creator.html')
+    qs = request.query_string.decode()
+    return redirect('/characters' + ('?' + qs if qs else ''), code=302)
 
 
 @app.route('/characters-v2')
