@@ -35,18 +35,18 @@
       sfw: [['Full body', 'Made from her approved face.', ['body_front', 'body_back']]],
       moderate: [['Details', 'Made from her approved face.', ['breasts', 'nipples']],
                  ['Topless full body', 'Made from her approved face and detail photos.', ['nude_front', 'rear_nude']], DRESSED],
-      explicit: [['Details', 'Made from her approved face.', ['breasts', 'nipples', 'pubic', 'vulva_closed']],
-                 ['Nude full body', 'Made from her approved face and detail photos.', ['nude_front', 'rear_nude']], DRESSED]},
+      explicit: [['Details', 'Made from her approved face.', ['breasts', 'nipples', 'pubic', 'vulva_closed', 'vulva_open']],
+                 ['Nude full body', 'Made from her approved face and detail photos.', ['nude_front', 'rear_nude', 'anus_closed']], DRESSED]},
     own: {
       sfw: [],
       moderate: [['Details', 'Made from your nude photos.', ['breasts', 'nipples']], DRESSED],
-      explicit: [['Details', 'Made from your nude photos.', ['breasts', 'nipples', 'pubic', 'vulva_closed']], DRESSED]}};
+      explicit: [['Details', 'Made from your nude photos.', ['breasts', 'nipples', 'pubic', 'vulva_closed', 'vulva_open', 'anus_closed']], DRESSED]}};
   const OWN_SLOTS = {sfw: [['face_front', 0], ['body_front', 0], ['body_back', 1]],
                      moderate: [['face_front', 0], ['nude_front', 0], ['rear_nude', 0]],
                      explicit: [['face_front', 0], ['nude_front', 0], ['rear_nude', 0]]};
   const PAIRS = {hands: ['hands', 'hands_palms'], feet: ['feet', 'feet_soles']};
   const PAIRED = new Set(['hands_palms', 'feet_soles']);
-  const SHORT = {breasts: 'Breasts', nipples: 'Nipples', pubic: 'Pubic area', vulva_closed: 'Vagina, closed',
+  const SHORT = {breasts: 'Breasts', nipples: 'Nipples', pubic: 'Pubic area', vulva_closed: 'Vagina, closed', vulva_open: 'Vagina, open', anus_closed: 'Anus, closed (bending forward)',
                  hands: 'Hands', feet: 'Feet', hands_palms: 'Palm', feet_soles: 'Sole'};
   const SIDE = {hands: 'Back of hand', hands_palms: 'Palm', feet: 'Top of foot', feet_soles: 'Sole'};
 
@@ -100,7 +100,7 @@
                   sheet: Object.assign({}, sheet(), extraSheet || {})};
     if (S.level === 'sfw') delete body.sheet.order;
     C = (await api('/api/characters', {body})).character;
-    history.replaceState(null, '', '/character-creator?id=' + C.id);
+    remember(C.id);
   }
 
   // ── Generation, with an estimate of how long it takes ───────────────────────
@@ -234,7 +234,7 @@
 
   // ── Navigation ──────────────────────────────────────────────────────────────
   function go(s) { if (s !== S.step) S.hist.push(S.step); S.step = s; if (s === 'done' && C) loadLora(); say(''); render(); el('cc-card').scrollIntoView({block: 'start'}); }
-  function back() { const s = S.hist.pop() || 'start'; if (s === 'start') S.mode = ''; S.step = s; say(''); render(); }
+  function back() { const s = S.hist.pop() || 'start'; if (s === 'start') { S.mode = ''; loadList(); } S.step = s; say(''); render(); }
   const FLOW = {fast: ['basics', 'look', 'faces', 'body', 'photos'], adv: ['basics', 'look', 'body', 'adv'], own: ['own', 'photos']};
 
   function render() {
@@ -279,6 +279,11 @@
       `<button type="button" class="tile ${tile(v) ? 'sel' : ''}" onclick="CC.look(${attr(k)},${attr(v)})" aria-label="${esc(title)}: ${esc(cap)}">${art}<span class="cap">${esc(cap)}</span></button>`).join('')}</div></div>`;
   }
   const vulvaLook = () => ((S.cat && S.cat.looks) || []).find(l => l.key === 'vulva_look');
+  const EXTRA_LOOKS = [['vulva_open_look', 'Vagina, open'], ['anus_look', 'Anus, closed (bending forward)']];
+  const extraLooks = () => EXTRA_LOOKS.map(([k, t]) => [((S.cat && S.cat.looks) || []).find(l => l.key === k), t]).filter(x => x[0]);
+  const extraTiles = () => extraLooks().map(([lk, t]) => lookTiles(lk.key, t, 'Pick the closest look.',
+    lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), v => sheet()[lk.key] === v)).join('');
+  const extraDone = () => S.level !== 'explicit' || extraLooks().every(([lk]) => sheet()[lk.key]);
   const exImg = (k, o) => S.ex && S.ex.approved.includes(k) && S.ex.sets[k][o]
     ? `<img src="${esc(S.ex.sets[k][o])}" alt="" loading="lazy">` : '';
   function examplesPanel() {
@@ -312,13 +317,14 @@
       const lk = vulvaLook();
       if (lk) out.push(lookTiles('vulva_look', 'Vagina, closed', 'Pick the shape. Her photo is made in her own skin tone from this.',
         lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), v => s.vulva_look === v));
+      out.push(extraTiles());
     }
     return out.join('');
   }
   function looksDone() {
     const s = sheet();
     if (RANK[S.level] >= 1 && !(s.cup && s.nipple_size && s.nipple_shape)) return false;
-    if (S.level === 'explicit' && !(s.pubic_style && (s.vulva_look || !vulvaLook()))) return false;
+    if (S.level === 'explicit' && !(s.pubic_style && (s.vulva_look || !vulvaLook()) && extraDone())) return false;
     return true;
   }
 
@@ -410,7 +416,9 @@
         <button type="button" class="choice" onclick="CC.begin('fast')"><b>Fast</b><span>A few picks, 4 faces to choose from, then every required photo makes itself.</span></button>
         <button type="button" class="choice" onclick="CC.begin('adv')"><b>Advanced</b><span>Every photo, with how many options to make and your own images to generate from.</span></button>
         <button type="button" class="choice" onclick="CC.begin('own')"><b>I already have a character</b><span>Start from your own photos of her.</span></button>
-      </div>`,
+      </div>
+      ${(S.list || []).length ? `<div class="fld"><div class="fl">Your characters</div><div class="looks">${S.list.map(c =>
+        `<button type="button" class="tile" onclick="CC.open(${attr(c.id)})" aria-label="Open ${esc(c.name)}">${c.face_url ? `<img src="${esc(c.face_url)}" alt="">` : ''}<span class="cap">${esc(c.name)}</span></button>`).join('')}</div></div>` : ''}`,
 
     basics: () => `<h2>Basics</h2>
       <div class="row">${nameInput()}${levelSelect()}</div>${levelInfo()}
@@ -443,14 +451,17 @@
       const groups = (GROUPS[order()] || GROUPS.nude_first)[S.level] || [];
       const done = groups.flatMap(g => g[2]).every(k => canon(k));
       const faceImg = canon('face_front');
-      return `<h2>Required photos</h2><p>One image each. Approve them, or redo a single photo. Each group is built from the approved photos above it, so the bodies match her exact choices.</p>
+      const missing = S.level === 'explicit' ? [['vulva_look', 'Vagina, closed'], ...EXTRA_LOOKS].map(([k, t]) => [((S.cat && S.cat.looks) || []).find(l => l.key === k), t]).filter(([lk]) => lk && !sheet()[lk.key]) : [];
+      const pickLooks = missing.length ? `<div class="stage"><div class="sh"><b>Pick her looks first</b><small>These photos are made from an example look.</small></div>${missing.map(([lk, t]) => lookTiles(lk.key, t, 'Pick the closest look.',
+        lk.options.map((n, i) => [n, 'Look ' + (i + 1), `<img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy">`]), () => false)).join('')}</div>` : '';
+      return `<h2>Required photos</h2>${pickLooks}<p>One image each. Approve them, or redo a single photo. Each group is built from the approved photos above it, so the bodies match her exact choices.</p>
       <div class="view"><div class="th zoom" role="button" tabindex="0" onclick="CC.lbView('face_front')">${faceImg ? `<img src="${esc(faceImg.url)}" alt="">` : ''}</div><div class="nm">Face, front<small>${S.mode === 'own' ? 'Your upload' : 'Chosen in the previous step'}</small></div><span class="pill ok">Approved</span></div>
       ${groups.map(([title, why, vs], n) => {
         const open = n === 0 || groups[n - 1][2].every(k => canon(k));
         return `<div class="stage ${open ? '' : 'locked'}"><div class="sh"><b>${n + 1}. ${esc(title)}</b><small>${open ? esc(why) : 'Waiting for group ' + n + ' to be approved'}<span data-left="${esc(JSON.stringify(vs))}">${groupLeft(vs)}</span></small></div>
           <div class="views">${vs.map((k, i) => viewRow(k, n, i)).join('')}</div></div>`;
       }).join('')}
-      <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button>${S.mode === 'own' ? '' : '<button type="button" class="btn btn-ghost" onclick="CC.toAdv()">Switch to Advanced</button>'}</span>
+      <div class="nav"><span><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-ghost" onclick="CC.toAdv()">Switch to Advanced</button></span>
         <button type="button" class="btn btn-primary" ${done ? '' : 'disabled'} onclick="CC.go('done')">Finish</button></div>`;
     },
 
@@ -468,7 +479,7 @@
       const slots = OWN_SLOTS[S.level];
       const need = slots.filter(x => !x[1]).every(x => S.own[x[0]]);
       const vulva = S.level !== 'explicit' || S.own.vulva_closed || S.ownLook;
-      const ok = need && vulva && S.attest;
+      const ok = need && vulva && extraDone() && S.attest;
       const lk = vulvaLook();
       const rest = ((GROUPS.own[S.level]) || []).flatMap(g => g[2]).map(label);
       return `<h2>Add your own character</h2><p>Photos of the same adult person.${rest.length ? ' The rest is made from these: ' + esc(rest.join(', ')) + '.' : ''}</p>
@@ -476,7 +487,7 @@
       <div class="grid">${slots.map(([k, opt]) => `<label class="drop ${S.own[k] ? 'done' : ''}">${S.own[k] ? `<img src="${esc(S.own[k])}" alt=""><span class="dl">✓ ${esc(label(k))}</span>` : `Upload ${esc(label(k).toLowerCase())}${opt ? '<small>Optional</small>' : ''}`}<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.ownFile(${attr(k)},this)"></label>`).join('')}</div>
       ${S.level === 'explicit' ? `<div class="fld"><div class="fl">Vagina, closed</div><p>Upload a close-up, or pick the closest look.</p><div class="looks">
         <label class="drop ${S.own.vulva_closed ? 'done' : ''}" style="width:78px">${S.own.vulva_closed ? `<img src="${esc(S.own.vulva_closed)}" alt=""><span class="dl">✓</span>` : 'Upload'}<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.ownFile('vulva_closed',this)"></label>
-        ${lk ? lk.options.map((n, i) => `<button type="button" class="tile ${S.ownLook === n ? 'sel' : ''}" onclick="CC.ownLook(${attr(n)})"><img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy"><span class="cap">Look ${i + 1}</span></button>`).join('') : ''}</div></div>` : ''}
+        ${lk ? lk.options.map((n, i) => `<button type="button" class="tile ${S.ownLook === n ? 'sel' : ''}" onclick="CC.ownLook(${attr(n)})"><img src="/api/characters/looks/${esc(lk.folder)}/${esc(n)}.jpg" alt="" loading="lazy"><span class="cap">Look ${i + 1}</span></button>`).join('') : ''}</div></div>${extraTiles()}` : ''}
       <label class="fl attest"><input type="checkbox" ${S.attest ? 'checked' : ''} onchange="CC.S.attest=this.checked;CC.render()"> I have the rights to these photos, and the person shown is 18+ and agreed.</label>
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-primary" ${ok && !S.saving ? '' : 'disabled'} onclick="CC.saveOwn()">${S.saving ? esc(S.saving) : rest.length ? 'Generate the rest' : 'Save character'}</button></div>`;
     },
@@ -506,7 +517,7 @@
     const body = l.status === 'ready' ? '<span class="pill ok">Trained</span>'
       : l.status === 'training' ? '<span class="pill">Training…</span>'
       : l.photos < l.min_photos ? `<small>Needs ${l.min_photos} approved photos, she has ${l.photos}.</small>`
-      : `<button type="button" class="btn btn-primary btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">${l.status === 'failed' ? 'Try again' : 'Train LoRA'} · ${esc(l.price)} tokens</button>`;
+      : `<button type="button" class="btn btn-primary btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">${l.status === 'failed' ? 'Try again' : 'Train LoRA'} · ${+l.price ? esc(l.price) + ' tokens' : 'free'}</button>`;
     return `<div class="fld"><div class="fl">Character LoRA</div><p>Trains a model on her approved photos so videos keep her look.${l.error ? ' Last try failed: ' + esc(l.error) : ''}</p>${body}</div>`;
   }
   async function loadLora() {
@@ -547,7 +558,8 @@
 
   window.CC = {
     S, render, back, go, lbClose,
-    begin(mode) { S.mode = mode; C = null; S.sheet = {}; S.faces = []; S.face = -1; S.own = {}; S.ownLook = ''; go(mode === 'own' ? 'own' : 'basics'); loadCat(S.level).then(render).catch(fail); },
+    async open(id) { say(''); try { await resume(id); } catch (e) { fail(e); } },
+    begin(mode) { remember(''); S.mode = mode; C = null; S.sheet = {}; S.faces = []; S.face = -1; S.own = {}; S.ownLook = ''; go(mode === 'own' ? 'own' : 'basics'); loadCat(S.level).then(render).catch(fail); },
     async setLevel(v) { S.level = v; try { await loadCat(v); } catch (e) { return fail(e); } render(); },
     async basicsNext() {
       try {
@@ -608,8 +620,9 @@
       if (p) Object.assign(sheet(), p.values);
       render();
     },
-    look(k, v) {
+    async look(k, v) {
       const s = sheet();
+      if (C && S.step === 'photos') { s[k] = v; try { await saveSheet(); } catch (e) { return fail(e); } say(''); await drive(); return render(); }
       if (k === 'nipples') { const n = NIPPLES.find(x => x[0] === v); s.nipple_size = n[1]; s.nipple_shape = n[2]; }
       else s[k] = v;
       render();
@@ -652,7 +665,7 @@
       lbOpen(items, Math.max(0, items.findIndex(x => x.k === k)));
     },
     toAdv() { S.mode = 'adv'; go('adv'); },
-    toFast() { S.mode = 'fast'; go(canon('face_front') ? 'photos' : 'look'); drive().then(render); },
+    toFast() { S.mode = C && C.sheet.order === 'own' ? 'own' : 'fast'; go(canon('face_front') ? 'photos' : 'look'); drive().then(render); },
     advSet(k, f, v) {
       S.adv[k] = Object.assign({}, S.adv[k], {[f]: v});
       if (f !== 'qty') render();
@@ -704,6 +717,7 @@
         S.saving = 'Creating her…'; render();
         await loadCat(S.level);
         if (!C) await create(Object.assign({order: S.level === 'sfw' ? undefined : 'own'}, S.ownLook ? {vulva_look: S.ownLook} : {}));
+        else await saveSheet();
         for (const k of steps) {
           if (canon(k)) continue;
           S.saving = 'Checking ' + label(k).toLowerCase() + '…'; render();
@@ -746,22 +760,34 @@
     },
   };
 
-  // Reopening a character made here picks up where it was left.
+  // A reload, or picking one from the start screen, carries on where she was left.
+  async function resume(id) {
+    C = (await api('/api/characters/' + id)).character;
+    S.level = C.nsfw_level; S.name = C.name;
+    S.mode = (C.sheet || {}).order === 'own' ? 'own' : 'fast';
+    await loadCat(S.level);
+    S.hist = ['start'];
+    S.step = canon('face_front') ? 'photos' : 'look';
+    remember(C.id);
+    render();
+    await drive();
+    render();
+  }
+  function remember(id) {
+    try { id ? localStorage.setItem('cc_last', id) : localStorage.removeItem('cc_last'); } catch (e) {}
+    history.replaceState(null, '', '/character-creator' + (id ? '?id=' + id : ''));
+  }
+  async function loadList() {
+    try { S.list = (await api('/api/characters')).characters || []; } catch (e) { S.list = []; }
+    if (S.step === 'start') render();
+  }
   async function boot() {
     loadEx().then(render);
-    const id = new URLSearchParams(location.search).get('id');
+    let id = new URLSearchParams(location.search).get('id');
+    try { id = id || localStorage.getItem('cc_last'); } catch (e) {}
+    loadList();
     if (!id) return render();
-    try {
-      C = (await api('/api/characters/' + id)).character;
-      S.level = C.nsfw_level; S.name = C.name;
-      S.mode = C.sheet.order === 'own' ? 'own' : 'fast';
-      await loadCat(S.level);
-      S.hist = ['start'];
-      S.step = canon('face_front') ? 'photos' : 'look';
-      render();
-      await drive();
-    } catch (e) { say(e.message); }
-    render();
+    try { await resume(id); } catch (e) { remember(''); render(); }
   }
   boot();
 })();
