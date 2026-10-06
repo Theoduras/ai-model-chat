@@ -838,7 +838,7 @@
   }
   function remember(id) {
     try { id ? localStorage.setItem('cc_last', id) : localStorage.removeItem('cc_last'); } catch (e) {}
-    history.replaceState(null, '', '/character-creator' + (id ? '?id=' + id : ''));
+    history.replaceState(null, '', '/characters' + (id ? '?id=' + id : ''));
   }
   async function loadList() {
     try { S.list = (await api('/api/characters')).characters || []; } catch (e) { S.list = []; }
@@ -846,8 +846,10 @@
   }
   async function boot() {
     loadEx().then(render);
-    let id = new URLSearchParams(location.search).get('id');
-    try { id = id || localStorage.getItem('cc_last'); } catch (e) {}
+    const q = new URLSearchParams(location.search);
+    let id = q.get('id');
+    if (q.get('persona')) { S.persona = 'link'; S.link = q.get('persona'); }
+    if (!id && !q.get('new')) { try { id = localStorage.getItem('cc_last'); } catch (e) {} }
     loadList();
     if (!id) return render();
     try { await resume(id); } catch (e) { remember(''); render(); }

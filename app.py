@@ -35797,21 +35797,22 @@ def characters_page():
     blocked = _require_active()
     if blocked:
         return blocked
+    return send_from_directory(BASE_DIR, 'character-creator.html')
+
+
+@app.route('/characters-old')
+def characters_old_page():
+    # The previous builder, kept for admins only; nothing links here.
+    blocked = _require_admin()
+    if blocked:
+        return blocked
     return send_from_directory(BASE_DIR, 'characters.html')
 
 
 @app.route('/character-creator')
 def character_creator_page():
-    # The new step-by-step creator: admins and Pro and up while it is tested
-    # beside /characters.
-    user = _current_user()
-    tier = ((user or {}).get('tier') or '').replace(ANNUAL_SUFFIX, '')
-    if not (user and (user.get('is_admin') or (tier in ('pro', 'agency')
-                                               and user.get('status') == 'active'))):
-        blocked = _require_admin()
-        if blocked:
-            return blocked
-    return send_from_directory(BASE_DIR, 'character-creator.html')
+    qs = request.query_string.decode()
+    return redirect('/characters' + ('?' + qs if qs else ''), code=302)
 
 
 @app.route('/characters-v2')
