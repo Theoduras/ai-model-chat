@@ -37379,7 +37379,8 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
         original = ''
         if data is not raw:
             try:
-                original = storage.put(slug, raw, raw_mime)
+                # Under raw/, so the studio can tell which copy Look is showing.
+                original = storage.put(slug + '/raw', raw, raw_mime)
             except Exception:
                 logger.exception('unfiltered copy upload failed job=%s', job_id)
         s = SessionLocal()
@@ -37989,6 +37990,7 @@ def _job_json(job, session_db):
                    f'?v={hashlib.md5((row.gcs_path or "").encode()).hexdigest()[:8]}',
             'approved': row.approved is not False,
             'has_original': bool(row.original_path),
+            'look': 'original' if '/raw/' in (row.gcs_path or '') else 'phone',
             'expires_at': row.expires_at.isoformat() if row.expires_at else '',
         })
     try:

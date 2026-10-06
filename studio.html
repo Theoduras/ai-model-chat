@@ -263,6 +263,7 @@
     .gen-keep { background: var(--accent); color: var(--accent-ink) !important; }
     .gen-drop { background: rgba(0,0,0,.55); }
     .gen-drop:hover { background: rgba(0,0,0,.75); }
+    .gen-card .gen-acts button[aria-pressed="true"] { background: rgba(255,255,255,.24); }
     .gen-ttl {
       position: absolute; top: 4px; left: 4px; padding: 1px 6px; border-radius: 999px;
       background: rgba(0,0,0,.62); color: #fff; font-size: 0.62rem;
@@ -3266,7 +3267,7 @@ function renderGenStaging() {
           <div class="gen-acts">
             <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
-            ${m.has_original ? `<button type="button" class="gen-drop" title="Switch between phone look and the unfiltered original" onclick="event.stopPropagation(); switchLook('${m.id}')">Look</button>` : ''}
+            ${m.has_original ? `<button type="button" class="gen-drop" aria-pressed="${m.look === 'original'}" title="Showing the ${m.look === 'original' ? 'unfiltered original, tap for the phone look' : 'phone look, tap for the unfiltered original'}" onclick="event.stopPropagation(); switchLook('${m.id}')">${m.look === 'original' ? 'Original' : 'Phone'}</button>` : ''}
             ${clip ? '' : `<button type="button" class="gen-drop" title="Fully nude version of this photo — 1 token" onclick="event.stopPropagation(); undressMedia('${m.id}')">Undress</button>`}
           </div>
         </div>`]);
