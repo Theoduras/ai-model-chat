@@ -1,4 +1,4 @@
-# Builds the three Vast worker images with Docker Desktop and pushes them to
+# Builds the Vast gv worker image with Docker Desktop and pushes them to
 # ghcr.io/theoduras. Run in PowerShell:  .\build.ps1
 # Asks for the GitHub token (classic, write:packages) unless GHCR_TOKEN is set.
 $ErrorActionPreference = 'Stop'
@@ -11,7 +11,7 @@ $base = 'https://raw.githubusercontent.com/Theoduras/ai-model-chat/develop/infra
 $dir = Join-Path $env:USERPROFILE 'vast-build'
 New-Item -ItemType Directory -Force $dir | Out-Null
 Set-Location $dir
-foreach ($f in 'gv.Dockerfile', 'gv_steps.py', 'h3.Dockerfile', 'lora.Dockerfile') {
+foreach ($f in 'gv.Dockerfile', 'gv_steps.py') {
     Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing
 }
 

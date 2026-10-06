@@ -24,7 +24,7 @@ KEY = os.environ.get('VAST_API_KEY', '')
 
 WORKERS = {
     'wan-2-2-gv': {
-        'image': 'wlsdml1114/engui_genai-base_blackwell:1.1', 'disk': 150,
+        'image': 'ghcr.io/theoduras/vast-gv:latest', 'disk': 150,
         'gpus': 'gpu_name in [RTX_6000Ada,L40,L40S,RTX_PRO_6000_S,RTX_PRO_6000_WS] cuda_max_good>=12.8', 'env': {}},
     'h3-gv': {
         'image': h3.IMAGE, 'disk': 120,
