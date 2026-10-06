@@ -35028,7 +35028,8 @@ def _char_views_state(s, row):
     dicts = {k: _char_view_dict(cv) for k, cv in rows.items()}
     for k, d in dicts.items():
         d['has_photo'] = k in canon
-    shown = CH.resolve_all(dicts, row.body_type, row.nsfw_level)
+    shown = CH.resolve_all(dicts, row.body_type, row.nsfw_level,
+                           CH.order_of(_char_json_sheet(row), row.nsfw_level))
     refs = {}
     ids = [cv.id for cv in rows.values()]
     for r in s.query(ViewReference).filter(ViewReference.view_id.in_(ids)).all() if ids else []:
@@ -35335,7 +35336,8 @@ def _character_view_refs(char_id, view_key, outfit_image=None, look=None):
             picked = [by_id[r['image_id']] for r in now if r['image_id'] in by_id]
         picked_by_creator = bool(chosen and picked)
         if not picked_by_creator:
-            picked = [canon[d] for d in CH.level_parents(v, row.nsfw_level) if d in canon]
+            order = CH.order_of(_char_json_sheet(row), row.nsfw_level)
+            picked = [canon[d] for d in CH.level_parents(v, row.nsfw_level, order) if d in canon]
         picked += _char_images(s, char_id, view=view_key, role='reference')
         if not picked_by_creator:
             # Only the default set carries extras the drawer does not list: a
@@ -35575,6 +35577,15 @@ def characters_page():
     if blocked:
         return blocked
     return send_from_directory(BASE_DIR, 'characters.html')
+
+
+@app.route('/character-creator')
+def character_creator_page():
+    # The new step-by-step creator, admin-only while it is tested beside /characters.
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    return send_from_directory(BASE_DIR, 'character-creator.html')
 
 
 @app.route('/characters-v2')
@@ -36054,7 +36065,8 @@ def api_character_upload(char_id):
                 cv = CharacterView(character_id=row.id, view_key=view_key)
                 s.add(cv)
             cv.status = 'review'
-            cv.parent_versions_json = json.dumps({p: state[p]['version'] for p in v['parents']})
+            order = CH.order_of(_char_json_sheet(row), row.nsfw_level)
+            cv.parent_versions_json = json.dumps({p: state[p]['version'] for p in CH.level_parents(v, row.nsfw_level, order)})
         if not as_crop:
             row.attested_at = datetime.now(timezone.utc).replace(tzinfo=None)
         s.commit()
@@ -36158,8 +36170,10 @@ def api_character_generate(char_id):
             return jsonify({'ok': False, 'error': 'That view is not available at this level.'}), 400
         rows, state = _char_views_state(s, row)
         shown = state[view_key]['display']
+        order = CH.order_of(_char_json_sheet(row), row.nsfw_level)
+        tree = CH.level_parents(v, row.nsfw_level, order)
         if shown == 'locked':
-            waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
+            waiting = [CH.view(d, row.body_type)['label'] for d in tree
                        if not state.get(d, {}).get('has_photo')]
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if shown == 'generating':
@@ -36168,7 +36182,7 @@ def api_character_generate(char_id):
         crop = body.get('crop_b64') if mode == 'crop' else None
         if mode == 'crop' and not crop:
             return jsonify({'ok': False, 'error': 'Send the cropped parent for a crop view.'}), 400
-        has_ref = bool(v['parents']) or bool(
+        has_ref = bool(tree) or bool(
             _char_images(s, row.id, view=view_key, role='reference')
             or _char_images(s, row.id, view='', role='reference'))
         sheet = _char_json_sheet(row)
@@ -36194,19 +36208,23 @@ def api_character_generate(char_id):
             ref_views = tuple(by_img.get(r['image_id']) for r in chosen_refs)
         else:
             canon_views = set(_char_canonicals(s, row.id))
-            ref_views = tuple(d for d in CH.level_parents(v, row.nsfw_level) if d in canon_views)
+            ref_views = tuple(d for d in tree if d in canon_views)
         prompts = [CH.build_view_prompt(view_key, sheet, row.age, has_ref, row.body_type, mode=mode,
                                         strength=state[view_key]['strength'],
                                         outfit=o, blend=blend,
                                         match=match, look=bool(look), level=row.nsfw_level,
                                         ref_views=ref_views) for o in dressed]
-        parent_versions = {p: state[p]['version'] for p in v['parents']}
+        parent_versions = {p: state[p]['version'] for p in tree}
+        # A clothed photo dressed over her nude is still safe work, but its
+        # references are not, and nothing explicit goes to Google.
+        bare_refs = any((CH.view(d, row.body_type) or {}).get('rating', 'sfw') != 'sfw' for d in ref_views)
         key = row.key
     finally:
         s.close()
-    specs = [{'kind': 'image', 'slug': key, 'job': '', 'model': _char_model(v, body.get('sfw_model')),
+    specs = [{'kind': 'image', 'slug': key, 'job': '',
+              'model': CHAR_MODEL if bare_refs else _char_model(v, body.get('sfw_model')),
               'resolution': CHAR_RESOLUTION, 'batch': batch, 'addons': [],
-              'shot': 'portrait', 'explicit': v['rating'] != 'sfw',
+              'shot': 'portrait', 'explicit': v['rating'] != 'sfw' or bare_refs,
               'rating': v['rating'], 'character_id': char_id,
               'character_view': view_key, 'prompt': prompt,
               'parent_versions': parent_versions,
@@ -36352,7 +36370,8 @@ def api_character_approve(char_id, img_id):
         canon = _char_canonicals(s, row.id)
         rows, state = _char_views_state(s, row)
         if state[img.view]['display'] == 'locked':
-            waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level)
+            order = CH.order_of(_char_json_sheet(row), row.nsfw_level)
+            waiting = [CH.view(d, row.body_type)['label'] for d in CH.level_parents(v, row.nsfw_level, order)
                        if not state.get(d, {}).get('has_photo')]
             return jsonify({'ok': False, 'error': 'Approve ' + ' and '.join(waiting) + ' first.'}), 409
         if img.view in CH.AGE_CHECKED_VIEWS:

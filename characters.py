@@ -465,10 +465,31 @@ def resolve_reference_images(refs, canon_by_view, image_view):
     return out
 
 
-def level_parents(v, level=None):
+# The new creator builds the intimate photos first and dresses her last, so
+# every clothed photo carries the body she was approved with. `own` starts from
+# her uploaded nudes instead. Only a character whose sheet names the order uses
+# it; the original builder keeps the tree above.
+ORDERS = {
+    'nude_first': {'breasts': ('face_front',), 'pubic': ('face_front',), 'vulva_closed': ('pubic',),
+                   'nude_front': ('face_front', 'breasts', 'nipples', 'pubic', 'vulva_closed'),
+                   'rear_nude': ('nude_front',), 'body_front': ('face_front', 'nude_front'),
+                   'body_back': ('body_front', 'rear_nude')},
+    'own': {'nude_front': ('face_front',), 'rear_nude': ('nude_front',), 'breasts': ('nude_front',),
+            'pubic': ('nude_front',), 'vulva_closed': ('pubic',),
+            'body_front': ('face_front', 'nude_front'), 'body_back': ('body_front', 'rear_nude')},
+}
+
+
+def order_of(sheet, level):
+    """The tree a character is built in. SFW has no nudes to start from."""
+    o = (sheet or {}).get('order')
+    return o if o in ORDERS and _rank(level) > _rank('sfw') else None
+
+
+def level_parents(v, level=None, order=None):
     """The parents of a view that exist at `level`. The nude is built from the
     pubic and vagina photos only where those are shown; at Topless it is not."""
-    ps = tuple(v['parents'])
+    ps = tuple(ORDERS.get(order, {}).get(v['key'], v['parents']))
     if level is None:
         return ps
     return tuple(p for p in ps if (view(p) or {}).get('rating') is None or _rank(view(p)['rating']) <= _rank(level))
@@ -613,6 +634,18 @@ def validate(data, body_type='female'):
             if raw[k] not in LOOK_FILES[k]:
                 raise CharacterError(f'Unknown {label.lower()} example.')
             sheet[k] = raw[k]
+    if raw.get('order') in ORDERS:
+        sheet['order'] = raw['order']
+    hl = raw.get('highlights')
+    if hl:
+        if hl != 'Custom' and hl not in HIGHLIGHTS:
+            raise CharacterError(f'"{hl}" is not an option for highlights.')
+        if hl == 'Custom':
+            hexcode = str(raw.get('highlights_hex') or '').lower()
+            if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
+                raise CharacterError('Pick a custom highlight colour.')
+            sheet['highlights_hex'] = hexcode
+        sheet['highlights'] = hl
     if sheet.get('hair_colour') == 'Custom':
         hexcode = str(raw.get('hair_colour_hex') or '').lower()
         if not re.fullmatch(r'#[0-9a-f]{6}', hexcode):
@@ -656,6 +689,11 @@ def _fragments(sheet, groups, body_type='female'):
         frag = dict(opts).get(val, '')
         if k == 'hair_colour' and val == 'Custom':
             frag = hair_words(sheet.get('hair_colour_hex')) + ' hair' if sheet.get('hair_colour_hex') else ''
+        if k == 'hair_colour' and frag and (sheet or {}).get('highlights'):
+            hl = sheet['highlights']
+            words = hair_words(sheet.get('highlights_hex')) if hl == 'Custom' else hl.lower()
+            if words:
+                frag += f' with {words} highlights'
         if k == 'pubic_colour' and val == 'Matches hair':
             frag = 'pubic hair matching her hair colour'
         if k == 'pubic_density' and frag:
@@ -720,6 +758,7 @@ def hair_words(hexcode):
     return f'{tone} {hue}'.strip()
 
 
+HIGHLIGHTS = ('Black', 'Dark brown', 'Light brown', 'Auburn', 'Red', 'Strawberry blonde', 'Blonde', 'Platinum')
 BLEND_KEEP = ('ethnicity', 'apparent_age', 'hair_colour', 'hair_texture', 'makeup')
 DEFAULT_MAKEUP = 'Natural glam'
 FACE_MODES = ('build', 'blend')
@@ -781,8 +820,8 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
     groups = tuple(g for g in uses if _rank(GROUP_LEVEL[g]) <= _rank(level))
     keep = set(traits(key, body_type))
     kept = {k: x for k, x in (sheet or {}).items() if k in keep}
-    if 'hair_colour' in kept and (sheet or {}).get('hair_colour_hex'):
-        kept['hair_colour_hex'] = sheet['hair_colour_hex']
+    if 'hair_colour' in kept:
+        kept.update({k: sheet[k] for k in ('hair_colour_hex', 'highlights', 'highlights_hex') if sheet.get(k)})
     frags = _fragments(kept, groups, body_type)
     if ('body' in uses and 'breasts' not in groups and not v.get('zoom') and (sheet or {}).get('cup')
             and _rank(level) >= _rank('moderate')):
@@ -850,6 +889,10 @@ def build_view_prompt(key, sheet, age, has_reference, body_type='female',
 # What a reference photo is for, said in the prompt only when that photo is one
 # of the references actually sent. Keyed by view: (views that must be sent, level, text).
 REF_CLAUSES = {
+    'body_front': (('nude_front',), 'moderate',
+                   'The nude reference only shows her body: she is fully dressed as described, with no nudity.'),
+    'body_back': (('rear_nude',), 'moderate',
+                  'The nude reference only shows her body: she is fully dressed as described, with no nudity.'),
     'nude_front': (('pubic', 'vulva_closed'), 'explicit',
                    'Her pubic area and vulva match the close-up reference images exactly.'),
     'vulva_closed': (('pubic',), 'explicit',
@@ -920,7 +963,7 @@ def resolve_status(view, parents):
     return view['status']
 
 
-def resolve_all(rows, body_type='female', level=None):
+def resolve_all(rows, body_type='female', level=None, order=None):
     """{key: display status} for rows keyed by view key. A view whose parent
     has no row is locked. Parents above `level` do not count."""
     out = {}
@@ -928,7 +971,7 @@ def resolve_all(rows, body_type='female', level=None):
         if k not in rows:
             continue
         ps = [rows.get(p) or {'view_key': p, 'status': 'not_started', 'version': 0}
-              for p in level_parents(view(k, body_type), level)]
+              for p in level_parents(view(k, body_type), level, order)]
         out[k] = resolve_status(rows[k], ps)
     return out
 
