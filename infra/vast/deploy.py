@@ -45,7 +45,7 @@ ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora /opt/va
            '(pip install -q --target /opt/pw vastai >/var/log/pyworker.log 2>&1; '
            'PYTHONPATH=/opt/pw nohup python3 worker.py >>/var/log/pyworker.log 2>&1 &); '
            'cd /; PYTHONPATH=/opt/vast_jobs nohup bash /opt/vast_jobs/start/$VJ_NAME.sh '
-           '>>/var/log/vast-jobs.log 2>&1 &; tail -F /var/log/vast-jobs.log /var/log/pyworker.log &')
+           '>>/var/log/vast-jobs.log 2>&1 & tail -F /var/log/vast-jobs.log /var/log/pyworker.log &')
 
 
 def call(method, path, body=None):
