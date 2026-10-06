@@ -3798,18 +3798,18 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 {% if deleted %}<div class="ok">Deleted {{ deleted }}.</div>{% endif %}
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>IP</th><th>Last online</th><th></th><th></th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Last online</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>IP</th><th>Team</th><th></th><th></th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
 <td><span class="pill role {{ u.role }}">{{ u.role }}</span></td>
-<td>{% if u.team %}seat of {{ u.team }}{% elif u.seats %}{{ u.seats }} / {{ u.seat_cap }} seats{% else %}—{% endif %}</td>
+<td data-seen="{{ u.seen_at }}">—</td>
 <td>{{ u.tier or '—' }}{% if u.grandfathered %} <span class="pill legacy" title="No plan limits until {{ u.grandfathered }}">legacy</span>{% endif %}
 {% if u.trial %} <span class="pill trial" title="Trial granted {{ u.trial }}">trial</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td data-at="{{ u.joined_at }}">{{ u.created or '—' }}</td>
 <td>{{ u.ip or '—' }}{% if u.ip_count > 1 %} <span class="pill legacy" title="Accounts from this IP">×{{ u.ip_count }}</span>{% endif %}</td>
-<td data-seen="{{ u.seen_at }}">—</td>
+<td>{% if u.team %}seat of {{ u.team }}{% elif u.seats %}{{ u.seats }} / {{ u.seat_cap }} seats{% else %}—{% endif %}</td>
 <td><a class="email" href="/admin/support?user={{ u.id }}">Message</a></td>
 <td><a class="email" style="color:#f87171" href="/admin/users/{{ u.id }}#delete">Delete</a></td>
 </tr>{% endfor %}
