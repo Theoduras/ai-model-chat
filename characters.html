@@ -405,6 +405,7 @@
     .crop-box { position: absolute; border: 2px solid var(--accent); box-shadow: 0 0 0 9999px rgba(0,0,0,.4); cursor: move; }
     .crop-handle { position: absolute; width: 16px; height: 16px; border-radius: 50%; background: var(--accent); border: 2px solid #fff; }
     .crop-handle[data-c="nw"] { left: -9px; top: -9px; cursor: nwse-resize; } .crop-handle[data-c="ne"] { right: -9px; top: -9px; cursor: nesw-resize; }
+    @media (pointer: coarse) { .crop-handle { width: 22px; height: 22px; margin: -3px; } .crop-handle::after { content: ''; position: absolute; inset: -11px; } }
     .crop-handle[data-c="sw"] { left: -9px; bottom: -9px; cursor: nesw-resize; } .crop-handle[data-c="se"] { right: -9px; bottom: -9px; cursor: nwse-resize; }
     .crop-acts { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-top: 4px; }
 
@@ -521,6 +522,22 @@
       #ch-rail .pw-stages::-webkit-scrollbar { display: none; }
       #ch-rail .ob-rstage { flex-shrink: 0; }
       #ch-rail .ob-rstage-t { min-height: 40px; white-space: nowrap; }
+      /* Four labelled stages overflowed and hid the current one off the edge:
+         only the current stage keeps its name, the rest are their badge. */
+      #ch-rail .pw-stages { gap: 6px; }
+      #ch-rail .ob-rstage-t:not(:has(.ob-rnum.now)) { font-size: 0; gap: 0; min-width: 40px; justify-content: center; }
+      #ch-rail .ob-rnum { width: 22px; height: 22px; font-size: 0.66rem; }
+      .fin-shots { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+      .fin-shots figcaption { font-size: 0.7rem; }
+      #fin-accept-row .btn { width: 100%; min-height: 44px; justify-content: center; }
+      .vp-next { flex-wrap: wrap; }
+      .crop-acts { display: flex; flex-direction: column; align-items: stretch; gap: 8px; }
+      /* The arrows covered the photo's edges; they move under it. */
+      .lightbox img { max-width: calc(100vw - 32px); max-height: calc(100% - 180px); }
+      .lightbox .lb-prev, .lightbox .lb-next { top: auto; bottom: max(20px, env(safe-area-inset-bottom)); transform: none; }
+      .lightbox .lb-bar { bottom: max(20px, env(safe-area-inset-bottom)); max-width: calc(100vw - 140px); }
+      .crop-acts .btn { min-height: 42px; justify-content: center; }
+      .vp-next .btn { flex: 1 1 100%; min-height: 42px; justify-content: center; white-space: nowrap; }
       #ch-foot .ob-alt:not(:has(.ob-skip ~ .ob-skip)) .ob-skip { min-height: 42px; border-radius: var(--r); font-size: .88rem; }
       #ch-foot .ob-alt:has(.ob-skip ~ .ob-skip) .ob-skip { border-color: transparent; background: transparent; min-height: 32px; color: var(--text-muted); }
       /* Per-photo rows: the label had ~77px beside the Generate button. */

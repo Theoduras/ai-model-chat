@@ -179,6 +179,17 @@
     .gen-lb-prev { left: 16px; }
     .gen-lb-next { right: 16px; }
     .gen-lb-close { top: 16px; right: 16px; transform: none; font-size: 1.25rem; }
+    /* These borrowed .gen-card's button look, which only applies inside a card,
+       so in the viewer they rendered as bare browser buttons. */
+    #gen-lb-actions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+    #gen-lb-actions[hidden] { display: none; }
+    #gen-lb-actions button {
+      border: none; border-radius: var(--r-sm); cursor: pointer; font: 600 0.9rem var(--font);
+      padding: 10px 28px; min-height: 44px; color: #fff;
+    }
+    #gen-lb-actions .gen-drop { background: rgba(28,28,32,.88); box-shadow: inset 0 0 0 1px rgba(255,255,255,.18); }
+    #gen-lb-actions .gen-drop:hover { background: rgba(48,48,54,.92); }
+    .gen-lightbox:has(#gen-lb-actions:not([hidden])) { padding-bottom: 88px; }
 
     .gen-quote { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
     .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
@@ -334,6 +345,10 @@
       .gen-del { width: 32px; height: 32px; font-size: 0.8rem; }
       .gen-adv summary { min-height: 40px; }
       .gen-panel .btn-sm, .vault .btn-sm, .gen-panel .btn-ai { min-height: 38px; }
+      .gen-lightbox, .gen-lightbox:has(#gen-lb-actions:not([hidden])) { padding: 72px 16px 136px; }
+      #gen-lb-actions { left: 16px; right: 16px; transform: none; bottom: max(20px, env(safe-area-inset-bottom)); }
+      #gen-lb-actions button { flex: 1 1 0; padding: 10px 0; }
+      .gen-lb-prev, .gen-lb-next { top: auto; bottom: calc(max(20px, env(safe-area-inset-bottom)) + 56px); transform: none; }
     }
   </style>
 </head>
@@ -772,11 +787,10 @@
   <img decoding="async" id="gen-lightbox-img" src="" alt="">
   <video id="gen-lightbox-video" src="" controls autoplay playsinline hidden
          onclick="event.stopPropagation()"></video>
-  <div id="gen-lb-actions" hidden onclick="event.stopPropagation()"
-       style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);display:flex;gap:10px">
-    <button type="button" class="gen-keep" id="gen-lb-keep" style="padding:10px 28px" onclick="lightboxKeep(true)">Keep</button>
-    <button type="button" class="gen-drop" id="gen-lb-drop" style="padding:10px 28px" onclick="lightboxKeep(false)">Drop</button>
-    <button type="button" class="gen-drop" id="gen-lb-undress" style="padding:10px 28px" title="Fully nude version of this photo — 1 token"
+  <div id="gen-lb-actions" hidden onclick="event.stopPropagation()">
+    <button type="button" class="gen-keep" id="gen-lb-keep" onclick="lightboxKeep(true)">Keep</button>
+    <button type="button" class="gen-drop" id="gen-lb-drop" onclick="lightboxKeep(false)">Drop</button>
+    <button type="button" class="gen-drop" id="gen-lb-undress" title="Fully nude version of this photo — 1 token"
             onclick="undressMedia(lbItems[lbIdx].dataset.undress)">Undress</button>
   </div>
   <button type="button" class="gen-lb-nav gen-lb-prev" id="gen-lb-prev" aria-label="Previous"
