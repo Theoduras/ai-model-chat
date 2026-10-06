@@ -2615,14 +2615,36 @@ class VastProvider(RunPodProvider):
                 return e.get('api_key') or self.key
         raise GenerationError(f'no Vast endpoint named {name}', fatal=True)
 
+    def _drop_unavailable(self, name, key):
+        """A stopped worker whose host was rented away reports unavailable,
+        and Vast keeps counting it, so it never hires a replacement."""
+        import requests
+        try:
+            ep = next(e for e in requests.get(
+                'https://console.vast.ai/api/v0/endptjobs/', headers=self._headers(),
+                timeout=TIMEOUT).json().get('results') or () if e.get('endpoint_name') == name)
+            workers = requests.post('https://run.vast.ai/get_endpoint_workers/',
+                                    json={'id': ep['id'], 'api_key': key}, timeout=TIMEOUT).json()
+            for w in workers if isinstance(workers, list) else ():
+                if w.get('status') == 'unavail':
+                    logger.warning('vast %s: deleting unavailable worker %s', name, w['id'])
+                    requests.delete(f'https://console.vast.ai/api/v0/instances/{w["id"]}/',
+                                    headers=self._headers(), timeout=TIMEOUT)
+        except Exception as e:
+            logger.warning('vast %s: worker check failed: %s', name, e)
+
     def _route(self, name):
         key = self._endpoint_key(name)
         body, idx, deadline, first = {}, None, time.time() + VAST_ROUTE_WAIT, True
+        checked = time.time()
         while not body.get('url'):
             if time.time() > deadline:
                 raise GenerationError(f'no Vast worker for {name} came up', fatal=True)
             if not first:
                 time.sleep(5)
+                if time.time() - checked > 60:
+                    checked = time.time()
+                    self._drop_unavailable(name, key)
             first = False
             try:
                 body = self._post('https://run.vast.ai/route/', {
