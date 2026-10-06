@@ -154,7 +154,7 @@
         if (failed && !media.length) say(label(r.view) + ': ' + (failed.error || 'generation failed') + ' Your tokens were refunded.');
         if (key.startsWith('face')) {
           const ids = media.map(m => m.id);
-          if (key === 'face') S.faces = ids.slice(0, 4);
+          if (key === 'face') S.faces = ids.slice(0, 2);
           else if (ids[0]) S.faces[+key.split(':')[1]] = ids[0];
         }
         if (S.fabric.pending && S.fabric.pending[key]) {
@@ -458,7 +458,7 @@
   const STEPS = {
     start: () => `<h2>How do you want to start?</h2>
       <div class="choices">
-        <button type="button" class="choice" onclick="CC.begin('fast')"><b>Fast</b><span>A few picks, 4 faces to choose from, then every required photo makes itself.</span></button>
+        <button type="button" class="choice" onclick="CC.begin('fast')"><b>Fast</b><span>A few picks, 2 faces to choose from, then every required photo makes itself.</span></button>
         <button type="button" class="choice" onclick="CC.begin('adv')"><b>Advanced</b><span>Every photo, with how many options to make and your own images to generate from.</span></button>
         <button type="button" class="choice" onclick="CC.begin('own')"><b>I already have a character</b><span>Start from your own photos of her.</span></button>
       </div>
@@ -473,16 +473,16 @@
       ${optRow('ethnicity', 'Ethnicity')}${optRow('apparent_age', 'Looks')}${optRow('skin_tone', 'Skin tone')}${optRow('hair_colour', 'Hair colour')}${highlightsRow()}${optRow('hair_texture', 'Hair style and length')}
       ${S.mode === 'adv' ? optRow('eye_colour', 'Eye colour') + makeupRow() : ''}
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button>${S.mode === 'fast'
-        ? `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 4 faces</button>`
+        ? `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 2 faces</button>`
         : `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.lookNext()">Next</button>`}</div>`,
 
     faces: () => {
       const all = RUN.face;
       return `<h2>Pick her face</h2><p>This face is used for every other photo.</p>
-      ${all ? `<div class="genbox"><b>Generating 4 faces</b><span>Usually about ${RUN.face.est} seconds. You can keep this page open.</span></div>` : ''}
-      <div class="grid">${[0, 1, 2, 3].map(faceTile).join('')}</div>
+      ${all ? `<div class="genbox"><b>Generating 2 faces</b><span>Usually about ${RUN.face.est} seconds. You can keep this page open.</span></div>` : ''}
+      <div class="grid">${[0, 1].map(faceTile).join('')}</div>
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><span>
-        <button type="button" class="btn btn-ghost" ${Object.keys(RUN).some(k => k.startsWith('face')) ? 'disabled' : ''} onclick="CC.genFaces()">Redo all 4</button>
+        <button type="button" class="btn btn-ghost" ${Object.keys(RUN).some(k => k.startsWith('face')) ? 'disabled' : ''} onclick="CC.genFaces()">Redo both</button>
         <button type="button" class="btn btn-primary" ${S.face < 0 || !S.faces[S.face] ? 'disabled' : ''} onclick="CC.useFace()">Use this face</button></span></div>`;
     },
 
@@ -637,7 +637,7 @@
         await CC.ensureChar();
         S.face = -1; S.faces = [];
         if (S.step !== 'faces') go('faces');
-        await startJob('face', 'face_front', 4);
+        await startJob('face', 'face_front', 2);
       } catch (e) { return fail(e); }
       render();
     },
@@ -646,9 +646,9 @@
       render();
     },
     lbFace(i) {
-      const items = [0, 1, 2, 3].filter(j => S.faces[j] && !RUN.face && !RUN['face:' + j]).map(j => ({
+      const items = [0, 1].filter(j => S.faces[j] && !RUN.face && !RUN['face:' + j]).map(j => ({
         title: 'Face, option ' + (j + 1), url: (C.images.find(x => x.id === S.faces[j]) || {}).url,
-        acts: act(`CC.redoFace(${j})`, 'Redo this face') + act('CC.genFaces()', 'Redo all 4') + act(`CC.S.face=${j};CC.render()`, 'Choose this face', true)}));
+        acts: act(`CC.redoFace(${j})`, 'Redo this face') + act('CC.genFaces()', 'Redo both') + act(`CC.S.face=${j};CC.render()`, 'Choose this face', true)}));
       lbOpen(items, Math.max(0, items.findIndex(x => x.title.endsWith(' ' + (i + 1)))));
     },
     async useFace() {

@@ -35089,7 +35089,9 @@ import characters as CH
 
 CHAR_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 CHAR_MODEL = imagegen.EXPLICIT_MODEL
-CHAR_SFW_MODEL = 'nano-banana-pro'
+CHAR_SFW_MODEL = 'nano-banana-2'
+# Only her front face runs on Pro; every other safe-work view is fine on NB2.
+CHAR_FACE_MODEL = 'nano-banana-pro'
 
 
 # Google's moderation sometimes refuses a safe-work view outright; the next
@@ -35131,8 +35133,10 @@ def _char_model(v, sfw_model=None):
     # Google refuses nudity, so only safe-work views go to Nano Banana.
     if v.get('rating') != 'sfw':
         return CHAR_MODEL
+    if v.get('key') == 'face_front':
+        return CHAR_FACE_MODEL
     return sfw_model if sfw_model in CHAR_SFW_CHOICES else CHAR_SFW_MODEL
-CHAR_RESOLUTION = '4k'
+CHAR_RESOLUTION = '1k'
 # Cropped parents for crop views, held from submit until the job sends them.
 _CHAR_CROPS = {}
 
@@ -35818,6 +35822,7 @@ def api_characters_catalogue():
         level = 'sfw'
     return jsonify(dict(CH.catalogue(level), ok=True,
                         price_per_image=CR.image_price(CHAR_SFW_MODEL, CHAR_RESOLUTION),
+                        price_per_face=CR.image_price(CHAR_FACE_MODEL, CHAR_RESOLUTION),
                         price_per_image_nb2=CR.image_price('nano-banana-2', CHAR_RESOLUTION),
                         price_per_image_nsfw=CR.image_price(CHAR_MODEL, CHAR_RESOLUTION)))
 
