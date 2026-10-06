@@ -39,7 +39,10 @@ def deploy(dc):
         handler = base64.b64encode(f.read()).decode()
     body = {'name': 'char-lora-worker', 'imageName': IMAGE, 'isServerless': True,
             'containerDiskInGb': 60,
-            'env': {'LORA_HANDLER': handler, 'HF_HOME': '/runpod-volume/hf'},
+            # MODELS_PATH: ai-toolkit puts H3's Comfy-layout weights there, by default
+            # on the container disk, which they overflow.
+            'env': {'LORA_HANDLER': handler, 'HF_HOME': '/runpod-volume/hf',
+                    'MODELS_PATH': '/runpod-volume/models'},
             'dockerStartCmd': start_cmd()}
     tpl = find('/templates', 'char-lora-worker')
     if tpl:
