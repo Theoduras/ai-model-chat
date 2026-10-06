@@ -68,7 +68,7 @@ FEATURES = {
                                               ('Rectangle', 'long rectangular face'),
                                               ('Triangle', 'triangle-shaped face, wide forehead and narrow pointed chin'),
                                               ('Base-down triangle', 'base-down triangle face, narrow forehead and wide jaw')]),
-        'skin_tone': ('Skin tone', 'face', _opts('skin', 'Fair', 'Light', 'Light olive', 'Olive', 'Tan', 'Brown', 'Deep brown', 'Dark')),
+        'skin_tone': ('Skin tone', 'face', _opts('skin', 'Fair', 'Light', 'Light olive', 'Olive', 'Tan', 'Brown', 'Deep brown', 'Dark', 'Rich espresso', 'Very dark', 'Ebony')),
         'marks': ('Freckles or moles', 'face', [('None', 'clear skin'), ('Light freckles, nose', 'light freckles across the nose'),
                                                  ('Heavy freckles', 'heavy freckles'), ('Beauty mark, cheek', 'a small beauty mark on the cheek'),
                                                  ('Beauty mark, lip', 'a small beauty mark above the lip')]),

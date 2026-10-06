@@ -154,7 +154,7 @@
         if (failed && !media.length) say(label(r.view) + ': ' + (failed.error || 'generation failed') + ' Your tokens were refunded.');
         if (key.startsWith('face')) {
           const ids = media.map(m => m.id);
-          if (key === 'face') S.faces = ids.slice(0, 4);
+          if (key === 'face') S.faces = ids.slice(0, 2);
           else if (ids[0]) S.faces[+key.split(':')[1]] = ids[0];
         }
         if (S.fabric.pending && S.fabric.pending[key]) {
@@ -261,8 +261,10 @@
     el('cc-title').hidden = !side.hidden;
     if (side.hidden) return;
     const steps = railSteps(), idx = Math.max(0, steps.findIndex(x => x.key === S.step));
-    const done = i => i < idx || S.step === 'done' || (['photos', 'adv', 'done'].includes(steps[i].key) && reqDone());
-    const reachable = i => i <= idx || steps.slice(0, i).every((x, j) => done(j));
+    // Steps already reached stay open, so the rail goes back and forth freely.
+    S.max = Math.max(S.max || 0, idx);
+    const done = i => i < S.max || S.step === 'done' || (['photos', 'adv', 'done'].includes(steps[i].key) && reqDone());
+    const reachable = i => i <= S.max || steps.slice(0, i).every((x, j) => done(j));
     const req = reqViews(), ok = C ? req.filter(k => canon(k)).length : 0;
     const sub = i => {
       if (!['photos', 'adv'].includes(steps[i].key) || !C) return '';
@@ -299,6 +301,14 @@
     const hex = hair ? (s.hair_colour === 'Custom' ? s.hair_colour_hex : '') : (s.highlights === 'Custom' ? s.highlights_hex : '');
     return `<label class="opt ${hex ? 'sel' : ''}"><input type="color" value="${esc(hex || '#7a4a8c')}" aria-label="Own colour" onchange="CC.ownColour('${kind}',this.value)">${
       hex ? CharacterVisuals.render('hair_colour', 'Custom', {hair_colour: 'Custom', hair_colour_hex: hex}) : '<span class="plus">+</span>'}<span>Own colour</span></label>`;
+  }
+  // Makeup is picked from example photos; only its words reach the prompt.
+  const MAKEUP_PHOTOS = {'Natural glam': 1, 'Smoky red': 2, 'Gold winged': 3, 'Bronze glam': 4, 'Emerald glitter': 5};
+  function makeupRow() {
+    const s = sheet();
+    return `<div class="fld sect"><div class="fl">Makeup</div><div class="looks">${featOpts('makeup').map(o =>
+      `<button type="button" class="tile ${s.makeup === o ? 'sel' : ''}" onclick="CC.pick('makeup',${attr(o)})" aria-label="Makeup: ${esc(o)}">${MAKEUP_PHOTOS[o]
+        ? `<img src="/img/makeup/${MAKEUP_PHOTOS[o]}.jpg" alt="" loading="lazy">` : ''}<span class="cap">${esc(o)}</span></button>`).join('')}</div></div>`;
   }
   function highlightsRow() {
     const s = sheet();
@@ -404,7 +414,7 @@
   const qtyOf = k => (S.adv[k] || {}).qty || 1;
   function advViews() {
     const all = ((S.cat && S.cat.views) || []).map(v => v.key).filter(k => !PAIRED.has(k));
-    const first = ['face_front', ...fastViews()];
+    const first = ['face_front', 'face_three_quarter', 'face_profile', 'face_smile', ...fastViews()];
     return [...first.filter(k => all.includes(k)), ...all.filter(k => !first.includes(k))];
   }
   function upBtn(k) {
@@ -439,8 +449,8 @@
     return `<div class="view">${th}<div class="nm">${esc(label(k))}<small>${esc(sub)}</small>${img ? wearTag(k, img) : ''}</div>
       <div class="acts">${run ? (views.map(v => RUN[v] ? bar(v) : '').join('') || '<span class="pill">Generating</span>') : all ? '<span class="pill ok">Approved</span>' : ''}
       <select class="qty" aria-label="How many of ${esc(label(k))}" onchange="CC.advSet(${attr(k)},'qty',+this.value)">${[1, 2, 4, 8].map(n => `<option ${q === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
-      ${upBtn(k)}
       <button type="button" class="btn btn-sm ${img ? 'btn-ghost' : 'btn-primary'}" ${locked || run ? 'disabled' : ''} onclick="CC.advGen(${attr(k)})">${img ? 'Generate again' : 'Generate'}</button></div>
+      <div class="refs">${upBtn(k)}</div>
       ${wear}${PAIRS[k] ? `<div class="pairs">${views.map(v => strip(v, SIDE[v])).join('')}</div>`
         : optsOf(k).length > 1 ? `<div class="pairs">${strip(k, '', img && img.id)}</div>` : ''}</div>`;
   }
@@ -448,7 +458,7 @@
   const STEPS = {
     start: () => `<h2>How do you want to start?</h2>
       <div class="choices">
-        <button type="button" class="choice" onclick="CC.begin('fast')"><b>Fast</b><span>A few picks, 4 faces to choose from, then every required photo makes itself.</span></button>
+        <button type="button" class="choice" onclick="CC.begin('fast')"><b>Fast</b><span>A few picks, 2 faces to choose from, then every required photo makes itself.</span></button>
         <button type="button" class="choice" onclick="CC.begin('adv')"><b>Advanced</b><span>Every photo, with how many options to make and your own images to generate from.</span></button>
         <button type="button" class="choice" onclick="CC.begin('own')"><b>I already have a character</b><span>Start from your own photos of her.</span></button>
       </div>
@@ -461,17 +471,18 @@
 
     look: () => `<h2>Her look</h2><p>A few quick picks. Everything else gets a sensible default you can change in the original builder.</p>
       ${optRow('ethnicity', 'Ethnicity')}${optRow('apparent_age', 'Looks')}${optRow('skin_tone', 'Skin tone')}${optRow('hair_colour', 'Hair colour')}${highlightsRow()}${optRow('hair_texture', 'Hair style and length')}
+      ${S.mode === 'adv' ? optRow('eye_colour', 'Eye colour') + makeupRow() : ''}
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button>${S.mode === 'fast'
-        ? `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 4 faces</button>`
+        ? `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 2 faces</button>`
         : `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.lookNext()">Next</button>`}</div>`,
 
     faces: () => {
       const all = RUN.face;
       return `<h2>Pick her face</h2><p>This face is used for every other photo.</p>
-      ${all ? `<div class="genbox"><b>Generating 4 faces</b><span>Usually about ${RUN.face.est} seconds. You can keep this page open.</span></div>` : ''}
-      <div class="grid">${[0, 1, 2, 3].map(faceTile).join('')}</div>
+      ${all ? `<div class="genbox"><b>Generating 2 faces</b><span>Usually about ${RUN.face.est} seconds. You can keep this page open.</span></div>` : ''}
+      <div class="grid">${[0, 1].map(faceTile).join('')}</div>
       <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><span>
-        <button type="button" class="btn btn-ghost" ${Object.keys(RUN).some(k => k.startsWith('face')) ? 'disabled' : ''} onclick="CC.genFaces()">Redo all 4</button>
+        <button type="button" class="btn btn-ghost" ${Object.keys(RUN).some(k => k.startsWith('face')) ? 'disabled' : ''} onclick="CC.genFaces()">Redo both</button>
         <button type="button" class="btn btn-primary" ${S.face < 0 || !S.faces[S.face] ? 'disabled' : ''} onclick="CC.useFace()">Use this face</button></span></div>`;
     },
 
@@ -595,7 +606,7 @@
   window.CC = {
     S, render, back, go, lbClose,
     async open(id) { say(''); try { await resume(id); } catch (e) { fail(e); } },
-    begin(mode) { remember(''); S.mode = mode; C = null; S.sheet = {}; S.faces = []; S.face = -1; S.own = {}; S.ownLook = ''; go(mode === 'own' ? 'own' : 'basics'); loadCat(S.level).then(render).catch(fail); },
+    begin(mode) { remember(''); S.mode = mode; S.max = 0; C = null; S.sheet = {}; S.faces = []; S.face = -1; S.own = {}; S.ownLook = ''; go(mode === 'own' ? 'own' : 'basics'); loadCat(S.level).then(render).catch(fail); },
     async setLevel(v) { S.level = v; try { await loadCat(v); } catch (e) { return fail(e); } render(); },
     async basicsNext() {
       try {
@@ -626,7 +637,7 @@
         await CC.ensureChar();
         S.face = -1; S.faces = [];
         if (S.step !== 'faces') go('faces');
-        await startJob('face', 'face_front', 4);
+        await startJob('face', 'face_front', 2);
       } catch (e) { return fail(e); }
       render();
     },
@@ -635,9 +646,9 @@
       render();
     },
     lbFace(i) {
-      const items = [0, 1, 2, 3].filter(j => S.faces[j] && !RUN.face && !RUN['face:' + j]).map(j => ({
+      const items = [0, 1].filter(j => S.faces[j] && !RUN.face && !RUN['face:' + j]).map(j => ({
         title: 'Face, option ' + (j + 1), url: (C.images.find(x => x.id === S.faces[j]) || {}).url,
-        acts: act(`CC.redoFace(${j})`, 'Redo this face') + act('CC.genFaces()', 'Redo all 4') + act(`CC.S.face=${j};CC.render()`, 'Choose this face', true)}));
+        acts: act(`CC.redoFace(${j})`, 'Redo this face') + act('CC.genFaces()', 'Redo both') + act(`CC.S.face=${j};CC.render()`, 'Choose this face', true)}));
       lbOpen(items, Math.max(0, items.findIndex(x => x.title.endsWith(' ' + (i + 1)))));
     },
     async useFace() {
@@ -710,7 +721,7 @@
       if (!img) return go(S.mode === 'adv' ? 'adv' : 'photos');
       S.mode === 'adv' ? CC.lbVar(k, img.id) : (S.step === 'photos' ? CC.lbView(k) : (go('photos'), CC.lbView(k)));
     },
-    home() { remember(''); C = null; S.mode = ''; S.hist = []; S.step = 'start'; S.fresh = {}; say(''); loadList(); render(); },
+    home() { remember(''); C = null; S.mode = ''; S.hist = []; S.max = 0; S.step = 'start'; S.fresh = {}; say(''); loadList(); render(); },
     async del() {
       if (!C || !confirm(`Delete ${C.name || 'this character'}? Every photo made for her character is deleted too. This cannot be undone.`)) return;
       try { await api('/api/characters/' + C.id, {method: 'DELETE'}); } catch (e) { return fail(e); }
@@ -818,6 +829,7 @@
     S.mode = (C.sheet || {}).order === 'own' ? 'own' : 'fast';
     await loadCat(S.level);
     S.hist = ['start'];
+    S.max = 0;
     S.step = canon('face_front') ? 'photos' : 'look';
     remember(C.id);
     render();

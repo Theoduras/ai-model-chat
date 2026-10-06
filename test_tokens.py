@@ -122,7 +122,7 @@ def test_prices_track_cost():
     check('holding her face is free — identity is inside the one call',
           CR.IMAGE_PRICES['seedream-4-5']['2k'] == 1)
     check('a premium still costs more, in single digits',
-          CR.IMAGE_PRICES['nano-banana-pro'] == {'2k': 4, '4k': 7})
+          CR.IMAGE_PRICES['nano-banana-pro'] == {'1k': 4, '2k': 4, '4k': 7})
     import imagegen as IG
     check('imagegen runs explicit on exactly the models credits offers for it',
           set(CR.models_for_rating('nsfw')) == set(IG.EXPLICIT_MODELS))

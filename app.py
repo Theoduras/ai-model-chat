@@ -3792,7 +3792,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 .pill.legacy{background:#3b2f14;color:#fcd34d}
 .scroll{overflow-x:auto}
 </style></head><body><div class="wrap wide" style="max-width:1100px">
-<div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }}</span>
+<div class="bar"><span>Admin · {{ users|length }} user{{ '' if users|length == 1 else 's' }} · <span id="online-n" style="color:#16a34a">0 online</span></span>
 <a href="/admin/trials">Trial links</a>
 <a href="/admin/support">Support inbox</a>
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
@@ -3819,9 +3819,12 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 var skew={{ now }}-Date.now()/1000, win={{ online_window }};
 function full(t){return new Date(t*1000).toLocaleString([], {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});}
 document.querySelectorAll('[data-at]').forEach(function(td){var t=+td.dataset.at;if(t)td.textContent=full(t);});
+var on=0;
 document.querySelectorAll('[data-seen]').forEach(function(td){var t=+td.dataset.seen;if(!t)return;
-  if(Date.now()/1000+skew-t<win){td.innerHTML='<span style="color:#16a34a;font-weight:600">&#9679; Online now</span>';}
-  else td.textContent=full(t);});
+  var s=Date.now()/1000+skew-t;
+  if(s<win){td.innerHTML='<span style="color:#16a34a;font-weight:600">&#9679; Online now</span>';on++;}
+  else{td.textContent=s<3600?Math.round(s/60)+' min ago':s<86400?Math.round(s/3600)+' h ago':s<86400*30?Math.round(s/86400)+' d ago':full(t);td.title=full(t);}});
+document.getElementById('online-n').textContent=on+' online';
 </script></body></html>"""
 
 ADMIN_DEMOS_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -3913,6 +3916,11 @@ h2{font-size:1rem;margin-bottom:14px}
 {% if error %}<div class="err">{{ error }}</div>{% endif %}
 
 <div class="card"><h2>Account</h2>
+<p id="seen" data-seen="{{ u.seen_at }}" style="margin:-6px 0 14px;font-size:.85rem;color:var(--text-muted)">Not seen online yet</p>
+<script>(function(){var n=document.getElementById('seen'),t=+n.dataset.seen;if(!t)return;
+var ago=Date.now()/1000+({{ now }}-Date.now()/1000)-t;
+if(ago<{{ online_window }}){n.innerHTML='<span style="color:#16a34a;font-weight:600">&#9679; Online now</span>';return;}
+n.textContent='Last online '+new Date(t*1000).toLocaleString([], {day:'numeric',month:'short',year:'numeric',hour:'2-digit',minute:'2-digit'});})();</script>
 <form method="post" action="/admin/users/{{ u.id }}">
 <input type="hidden" name="action" value="account">
 <label>Email</label><input type="email" name="email" value="{{ u.email }}" required>
@@ -5426,6 +5434,7 @@ def admin_user_detail(uid):
         gws = s.get(Workspace, guest.workspace_id) if guest else None
         owner = s.get(User, gws.owner_id) if gws else None
         view = {'id': u.id, 'email': u.email, 'role': u.role or 'user',
+                'seen_at': _support_seen_epoch(u),
                 'team_owner': owner.email if owner else '',
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
@@ -5453,6 +5462,7 @@ def admin_user_detail(uid):
     finally:
         s.close()
     return render_template_string(ADMIN_USER_HTML, u=view, p=p, saved=saved,
+                                  now=int(time.time()), online_window=SUPPORT_ONLINE_WINDOW,
                                   super_admin=bool(me.get('is_super_admin')),
                                   error=error, tiers=TIERS, order=DEFAULT_TIER_ORDER,
                                   roles=ADMIN_ROLES, demo_key=DEMO_TIER_KEY,
@@ -35079,7 +35089,9 @@ import characters as CH
 
 CHAR_IMAGE_MAX_BYTES = 8 * 1024 * 1024
 CHAR_MODEL = imagegen.EXPLICIT_MODEL
-CHAR_SFW_MODEL = 'nano-banana-pro'
+CHAR_SFW_MODEL = 'nano-banana-2'
+# Only her front face runs on Pro; every other safe-work view is fine on NB2.
+CHAR_FACE_MODEL = 'nano-banana-pro'
 
 
 # Google's moderation sometimes refuses a safe-work view outright; the next
@@ -35121,8 +35133,10 @@ def _char_model(v, sfw_model=None):
     # Google refuses nudity, so only safe-work views go to Nano Banana.
     if v.get('rating') != 'sfw':
         return CHAR_MODEL
+    if v.get('key') == 'face_front':
+        return CHAR_FACE_MODEL
     return sfw_model if sfw_model in CHAR_SFW_CHOICES else CHAR_SFW_MODEL
-CHAR_RESOLUTION = '4k'
+CHAR_RESOLUTION = '1k'
 # Cropped parents for crop views, held from submit until the job sends them.
 _CHAR_CROPS = {}
 
@@ -35808,6 +35822,7 @@ def api_characters_catalogue():
         level = 'sfw'
     return jsonify(dict(CH.catalogue(level), ok=True,
                         price_per_image=CR.image_price(CHAR_SFW_MODEL, CHAR_RESOLUTION),
+                        price_per_face=CR.image_price(CHAR_FACE_MODEL, CHAR_RESOLUTION),
                         price_per_image_nb2=CR.image_price('nano-banana-2', CHAR_RESOLUTION),
                         price_per_image_nsfw=CR.image_price(CHAR_MODEL, CHAR_RESOLUTION)))
 

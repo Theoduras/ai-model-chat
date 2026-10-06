@@ -43,7 +43,7 @@ MIN_MARGIN_MULTIPLE = 2.25
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2',
                 'wan-2-2-char')
-RESOLUTIONS = ('2k', '4k')
+RESOLUTIONS = ('1k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
 # priced and accepted -- these are the three worth one click.
@@ -51,7 +51,7 @@ VIDEO_DURATIONS = (3, 5, 10)
 VIDEO_SECONDS_MIN = 2
 
 DEFAULT_IMAGE_MODEL = 'nano-banana-pro'
-DEFAULT_RESOLUTION = '2k'
+DEFAULT_RESOLUTION = '1k'
 DEFAULT_VIDEO_RESOLUTION = '720p'
 DEFAULT_VIDEO_DURATION = 5
 
@@ -83,13 +83,13 @@ CHAIN_MODELS = ('wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv', 'h3-gv')
 # set. At the old 15x margin a 2x over-estimate was invisible; at 2.3x on the
 # largest pack these are load-bearing.
 PROVIDER_COST_USD = {
-    'seedream-4-5':    {'2k': 0.04, '4k': 0.04},
-    'seedream-5-pro':  {'2k': 0.04, '4k': 0.04},
-    'nano-banana-2':   {'2k': 0.10255, '4k': 0.2051},
-    'nano-banana-pro': {'2k': 0.138, '4k': 0.276},
+    'seedream-4-5':    {'1k': 0.04, '2k': 0.04, '4k': 0.04},
+    'seedream-5-pro':  {'1k': 0.04, '2k': 0.04, '4k': 0.04},
+    'nano-banana-2':   {'1k': 0.06895, '2k': 0.10255, '4k': 0.2051},
+    'nano-banana-pro': {'1k': 0.138, '2k': 0.138, '4k': 0.276},
     # A still on our char-lora endpoint (infra/runpod-lora). Unmeasured guess:
     # ~1 min of an 80-96 GB card plus its share of cold starts.
-    'wan-2-2-char': {'2k': 0.08},
+    'wan-2-2-char': {'1k': 0.08, '2k': 0.08},
 }
 
 # Training one character LoRA on the same endpoint: about an hour of an
@@ -146,7 +146,7 @@ VIDEO_COST_USD_PER_SECOND = {
 
 PROVIDER_COST_MEASURED = {
     'images': {'seedream-4-5': ('2k', '4k'),
-               'nano-banana-2': ('2k',),
+               'nano-banana-2': ('1k', '2k'),
                'nano-banana-pro': ('2k',)},
     'videos': {'wan-2-5': ('720p',), 'wan-2-7': ('720p',), 'wan-2-2-gv': ('720p',)},
 }

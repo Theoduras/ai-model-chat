@@ -422,12 +422,13 @@ MODELSLAB_FACESWAP_FACE_FIELD = os.getenv('ML_FACESWAP_FACE_FIELD', 'target_imag
 # A tier is therefore a name for "about this big on whichever model is running",
 # and RESOLUTION_PX is the fallback for anything not listed.
 MODEL_PX = {
-    'seedream-4-5':    {'2k': (1664, 2432), '4k': (3072, 4096)},
-    'seedream-5-pro':  {'2k': (1664, 2432), '4k': (3072, 4096)},
-    'nano-banana-pro': {'2k': (1696, 2528), '4k': (3392, 5096)},
-    'nano-banana-2':   {'2k': (1696, 2528), '4k': (3392, 5096)},
+    'seedream-4-5':    {'1k': (1664, 2432), '2k': (1664, 2432), '4k': (3072, 4096)},
+    'seedream-5-pro':  {'1k': (1664, 2432), '2k': (1664, 2432), '4k': (3072, 4096)},
+    'nano-banana-pro': {'1k': (848, 1264), '2k': (1696, 2528), '4k': (3392, 5096)},
+    'nano-banana-2':   {'1k': (848, 1264), '2k': (1696, 2528), '4k': (3392, 5096)},
 }
 RESOLUTION_PX = {
+    '1k': (1664, 2432),
     '2k': (1664, 2432),
     '4k': (3072, 4096),
 }
@@ -462,7 +463,9 @@ def dimensions(model_key, resolution, aspect=None):
     if aspect not in IMAGE_ASPECTS:
         return base
     if model_key in ('nano-banana-pro', 'nano-banana-2'):
-        return GOOGLE_PX_2K[aspect]
+        w, h = GOOGLE_PX_2K[aspect]
+        # Google's 1K list is its 2K list halved.
+        return (w // 2, h // 2) if resolution == '1k' else (w, h)
     rw, rh = (int(x) for x in aspect.split(':'))
     budget = max(base[0] * base[1], SEEDREAM_MIN_PX)
     # The pair on the 64 grid closest to the shape that neither drops under
