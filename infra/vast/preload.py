@@ -1,7 +1,7 @@
 # Downloads every enabled video LoRA of one family at worker boot, under the
 # name the handler's own fetcher would give it, so no clip waits on one:
 #   python3 preload.py wan|h3 <loras dir> <prefix>
-# Needs VJ_APP_URL and VJ_LORA_KEY (the app's CRON_SECRET); without them it skips.
+# Needs VJ_APP_URL and VJ_LORA_KEY (the app's VAST_LORA_KEY); without them it skips.
 import hashlib
 import json
 import os
