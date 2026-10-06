@@ -919,6 +919,10 @@ LIGHTING = {
     'studio': 'studio lighting',
     'shower-light': 'diffused light through steam',
     'phone-flash': 'harsh direct phone flash',
+    'night': 'night-time, lit only by warm lamps and city light, dark windows',
+    'dark': 'dark, moody low-key light, deep shadows, most of the frame in shade',
+    # No fixed words: the sentence depends on whether a place photo is sent.
+    'match-location': '',
 }
 
 EXPRESSIONS = {
@@ -1222,6 +1226,19 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
     who = 'the exact same woman as the reference images' if has_reference else appearance
     light = LIGHTING.get(lighting, '') or (
         f"{outfit['lighting']} lighting" if outfit.get('lighting') else '')
+    # A model told only "the same room" relights her flat and frontal; the
+    # room's own light has to be spelled out onto her.
+    matched = ''
+    if lighting == 'match-location' or (location_ref and lighting in ('', 'auto')):
+        light = ''
+        matched = (f'Light her exactly as the {location_ref} reference image is lit: the same '
+                   'light sources, direction, colour temperature, hardness and contrast fall on '
+                   'her as on the room — if it is backlit by windows she is backlit with a '
+                   'bright rim and her front in soft shadow; sun patches and shadows land on her '
+                   'body the same way; her exposure matches the room, not a separate flash or '
+                   'studio light' if location_ref else
+                   'She is lit by the same light as the setting around her, from the same '
+                   'direction and colour, with no separate studio light')
 
     body = ' '.join(filter(None, [
         _sentence(((purpose + ': ') if purpose else '')
@@ -1233,6 +1250,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                   'reference image — the same room, layout, furniture and light; the '
                   'setting must clearly match it, with nobody else in it'
                   if location_ref else ''),
+        _sentence(matched),
         (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
         _sentence(direction),
