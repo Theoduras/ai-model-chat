@@ -114,7 +114,7 @@
 }
 
 @media(max-width:600px){
-  .site-nav{gap:12px;padding:10px 14px;top:16px}
+  .site-nav{gap:12px;padding:10px 14px;top:16px;left:14px;max-width:calc(100vw - 28px)}
   .site-nav .brand{font-size:18px}
   .sn-links{gap:7px}
   .sn-links a{padding:8px 13px;font-size:13px}
@@ -155,3 +155,10 @@
 .site-nav .sn-links a.studio-cta:hover{transform:translateY(-2px);box-shadow:0 0 0 3px rgba(255,92,56,.5),0 12px 34px rgba(255,45,120,.6)}
 @keyframes studio-cta-shift{to{background-position:300% 0}}
 @media (prefers-reduced-motion:reduce){.site-nav .sn-links a.studio-cta{animation:none}}
+/* Tightening steps fitBars applies when the bar still overlaps the account pill. */
+.sn-studio-short{display:none}
+.site-nav.sn-tight .sn-studio-long,.site-nav.sn-tight a.studio-cta small{display:none}
+.site-nav.sn-tight .sn-studio-short{display:inline}
+.site-nav.sn-tighter [data-sn-suffix]{display:none}
+.site-nav.sn-tightest .sn-studio-short{display:none}
+.site-nav.sn-tightest .sn-links a.studio-cta{padding:9px 13px}

@@ -196,7 +196,8 @@
       if (i.menu) return menuHtml(i);
       // Not on the studio itself, where it would only link back to the page.
       if (i.studio) return /^\/studio/.test(location.pathname) ? '' :
-        '<a data-sn data-keep href="' + i.href + '" class="studio-cta">&#10022; Generation Studio' +
+        '<a data-sn data-keep href="' + i.href + '" class="studio-cta" aria-label="Generation Studio">&#10022;' +
+        '<span class="sn-studio-long">Generation Studio</span><span class="sn-studio-short">Studio</span>' +
         (signedIn ? '' : ' <small>15 free tokens</small>') + '</a>';
       if (i.avatar) return '<a data-sn href="' + i.href + '" class="sn-avatar" title="Account" aria-label="Account">' +
         (avatarUrl ? '<img src="' + avatarUrl + '" alt="">' : ICONS.account) + '</a>';
@@ -224,19 +225,33 @@
 
   // The page links and the account pill are two fixed bars; on a mid-width
   // screen the right one slides over the left. Drop page links from the end,
-  // keeping the ones marked data-keep, until they clear.
+  // keeping the ones marked data-keep, until they clear; then the kept ones but
+  // the studio button. On a phone that button alone is still too wide, so the
+  // bar tightens a step at a time (short label, brand without its suffix, icon
+  // only) rather than overlap.
+  var TIGHT = ['sn-tight', 'sn-tighter', 'sn-tightest'];
   function fitBars() {
+    var bar = document.querySelector('.site-nav');
     var links = document.querySelector('.site-nav .sn-links');
     var acct = document.querySelector('.sn-account');
-    if (!links || !acct) return;
+    if (!bar || !links || !acct) return;
+    TIGHT.forEach(function (c) { bar.classList.remove(c); });
     var items = [].slice.call(links.children);
     items.forEach(function (a) { a.style.display = ''; });
     var limit = acct.getBoundingClientRect().left - 12;
-    for (var i = items.length - 1; i >= 0 && links.getBoundingClientRect().right > limit; i--) {
+    function over() { return links.getBoundingClientRect().right > limit; }
+    for (var i = items.length - 1; i >= 0 && over(); i--) {
       if (!items[i].hasAttribute('data-keep')) items[i].style.display = 'none';
     }
+    for (i = items.length - 1; i >= 0 && over(); i--) {
+      if (!items[i].classList.contains('studio-cta')) items[i].style.display = 'none';
+    }
+    for (var t = 0; t < TIGHT.length && over(); t++) bar.classList.add(TIGHT[t]);
   }
   addEventListener('resize', fitBars);
+  // The widths change once the web fonts arrive, after the first measure.
+  addEventListener('load', fitBars);
+  if (document.fonts && document.fonts.addEventListener) document.fonts.addEventListener('loadingdone', fitBars);
 
   // Marketing pages get a second pill on the right for the account actions;
   // inline hosts (dashboard, consoles) keep one row and just gain the icons.
