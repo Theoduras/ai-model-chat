@@ -716,6 +716,10 @@ class User(Base):
     # Refreshed by the support bubble's poll, at most once a minute, so admins
     # can see who is on the site right now.
     last_seen_at = Column(DateTime)
+    # Where the account was made from and last used from: one person farming
+    # Free's tokens across throwaway emails shows up as one IP.
+    signup_ip = Column(String(64), default='')
+    last_ip = Column(String(64), default='')
 
     # Forgot-password flow. Single-use, cleared on consumption or replaced by
     # a fresh request; reset_token_expires makes an old, unclaimed link inert.

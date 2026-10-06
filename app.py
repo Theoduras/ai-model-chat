@@ -2002,7 +2002,7 @@ def _current_user():
     s = _db_session()
     try:
         u = s.get(User, uid)
-        if u is None or u.status == 'deleted':
+        if u is None or u.status in ('deleted', 'banned'):
             return None
         if (u.status == 'active' and u.expires_at
                 and u.expires_at < datetime.now(timezone.utc).replace(tzinfo=None)):
@@ -3150,6 +3150,24 @@ RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF
 <div class="alt"><a href="/login">Back to sign in</a></div>
 </div></div></body></html>"""
 
+# One hash per device, the same in a private window. Keys the one Free grant
+# per device for guests and registered accounts alike.
+DEVICE_FP_JS = """async function fp(){
+  const c = document.createElement('canvas'), x = c.getContext('2d');
+  x.textBaseline = 'top'; x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(10, 1, 60, 20);
+  x.fillStyle = '#069'; x.fillText('Velvet\\u2665studio', 2, 15);
+  let gl = '';
+  try { const g = document.createElement('canvas').getContext('webgl'),
+        d = g.getExtension('WEBGL_debug_renderer_info');
+        gl = d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); } catch (e) {}
+  const raw = [c.toDataURL(), gl, screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
+    Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.hardwareConcurrency,
+    navigator.deviceMemory, navigator.platform, navigator.language].join('|');
+  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
+  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
+}
+"""
+
 BILLING_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script><script src="/js/support-widget.js" defer></script>""" + WORKSPACE_JS + """
@@ -3272,6 +3290,7 @@ Unset it before going live.</p>{% endif %}
 
 </div>
 <script>
+""" + DEVICE_FP_JS + """
 document.querySelectorAll('.ptoggle button').forEach(function(tab){
   tab.addEventListener('click', function(){
     var period = tab.dataset.setPeriod;
@@ -3311,7 +3330,9 @@ document.querySelectorAll('button[data-free]').forEach(function(b){
   b.addEventListener('click', async function(){
     b.disabled = true; b.textContent = 'Starting...';
     try {
-      var r = await fetch('/api/billing/free', {method:'POST'});
+      var f = ''; try { f = await fp(); } catch (e) {}
+      var r = await fetch('/api/billing/free', {method:'POST',
+        headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fp: f})});
       var d = await r.json();
       if (d.ok) { window.top.location.href = d.redirect || '/dashboard'; return; }
       alert(d.error || 'Could not start the free plan.');
@@ -3777,7 +3798,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 <span>{% if super_admin %}<a href="/admin/permissions">Permissions</a> &nbsp; <a href="/admin/register-links">Register links</a> &nbsp; {% endif %}<a href="/admin/demos">Demo accounts</a> &nbsp; <a href="/dashboard">Dashboard</a> &nbsp; <a href="/logout">Sign out</a></span></div>
 {% if deleted %}<div class="ok">Deleted {{ deleted }}.</div>{% endif %}
 <div class="card"><div class="scroll"><table>
-<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>Last online</th><th></th><th></th></tr>
+<tr><th>Email</th><th>Name</th><th>Role</th><th>Team</th><th>Plan</th><th>Status</th><th>Renews</th><th>Joined</th><th>IP</th><th>Last online</th><th></th><th></th></tr>
 {% for u in users %}<tr>
 <td><a class="email" href="/admin/users/{{ u.id }}">{{ u.email }}</a></td>
 <td>{{ u.name or '—' }}</td>
@@ -3787,6 +3808,7 @@ a.email{color:#a78bfa;text-decoration:none;font-weight:500}
 {% if u.trial %} <span class="pill trial" title="Trial granted {{ u.trial }}">trial</span>{% endif %}</td>
 <td><span class="pill {{ u.status }}">{{ u.status }}</span></td>
 <td>{{ u.expires or '—' }}</td><td data-at="{{ u.joined_at }}">{{ u.created or '—' }}</td>
+<td>{{ u.ip or '—' }}{% if u.ip_count > 1 %} <span class="pill legacy" title="Accounts from this IP">×{{ u.ip_count }}</span>{% endif %}</td>
 <td data-seen="{{ u.seen_at }}">—</td>
 <td><a class="email" href="/admin/support?user={{ u.id }}">Message</a></td>
 <td><a class="email" style="color:#f87171" href="/admin/users/{{ u.id }}#delete">Delete</a></td>
@@ -3955,6 +3977,19 @@ h2{font-size:1rem;margin-bottom:14px}
 <label>New password</label><input type="password" name="password" required placeholder="At least 8 characters">
 <button type="submit" class="danger">Set password</button></form></div>
 
+<div class="card" id="ban" style="margin-top:16px"><h2>IP &amp; ban</h2>
+<p class="sub">Signup IP: {{ u.signup_ip or '—' }} · Last IP: {{ u.last_ip or '—' }}</p>
+{% if u.visits %}<p class="sub">Visitor log at signup: {% for v in u.visits %}<br>{{ v }}{% endfor %}</p>{% endif %}
+{% if u.same_ip %}<p class="sub">Same IP: {{ u.same_ip|join(', ') }}</p>{% endif %}
+{% if u.status == 'banned' %}<form method="post" action="/admin/users/{{ u.id }}"><input type="hidden" name="action" value="unban"><button type="submit">Unban account</button></form>
+{% else %}<form method="post" action="/admin/users/{{ u.id }}" onsubmit="return confirm('Ban this account, its IPs and free accounts on them?')">
+<input type="hidden" name="action" value="ban">
+<label><input type="checkbox" name="domain" value="1" style="width:auto"> Also block @{{ u.domain }}</label>
+<button type="submit" class="danger">Ban account + IP</button></form>{% endif %}
+{% for ip, n in u.bans.ips.items() %}<form method="post" action="/admin/users/{{ u.id }}" style="margin-top:8px"><input type="hidden" name="action" value="unbanlist"><input type="hidden" name="ip" value="{{ ip }}"><span class="sub">IP {{ ip }} ({{ n }})</span> <button type="submit" style="width:auto;padding:4px 10px">Remove</button></form>{% endfor %}
+{% for d, n in u.bans.domains.items() %}<form method="post" action="/admin/users/{{ u.id }}" style="margin-top:8px"><input type="hidden" name="action" value="unbanlist"><input type="hidden" name="dom" value="{{ d }}"><span class="sub">@{{ d }} ({{ n }})</span> <button type="submit" style="width:auto;padding:4px 10px">Remove</button></form>{% endfor %}
+</div>
+
 {% if can_delete %}<div class="card" id="delete" style="margin-top:16px;border-color:#7f1d1d"><h2>Delete account</h2>
 <p class="sub">Deletes this account and everything it made: personas and their platform connections, characters, photos and videos, chats, its team seats and its support thread. Any Stripe subscription is cancelled first. Payments and the token ledger are kept as records, with no name or email on them. This cannot be undone.</p>
 <form method="post" action="/admin/users/{{ u.id }}" onsubmit="return confirm('Delete {{ u.email }} and everything in it? This cannot be undone.')">
@@ -4058,8 +4093,13 @@ def admin_users():
             seats[m.workspace_id] = seats.get(m.workspace_id, 0) + 1
             if m.role != 'owner':
                 guest_of.setdefault(m.user_id, []).append(m.workspace_id)
+        ip_count = {}
+        for u in users:
+            for ip in {u.signup_ip, u.last_ip} - {None, ''}:
+                ip_count[ip] = ip_count.get(ip, 0) + 1
         rows = []
         for u in users:
+            ip = u.signup_ip or u.last_ip or ''
             guests = [by_id.get(ws_owner.get(w)) for w in guest_of.get(u.id, [])]
             owner = next((g for g in guests if g is not None), None)
             n = seats.get(u.id, 0) - 1
@@ -4074,6 +4114,7 @@ def admin_users():
                 'expires': _fmt_date(u.expires_at),
                 'created': _fmt_date(u.created_at),
                 'joined_at': _epoch(u.created_at),
+                'ip': ip, 'ip_count': ip_count.get(ip, 0),
                 'seen_at': _support_seen_epoch(u)})
     finally:
         s.close()
@@ -4372,6 +4413,8 @@ def _support_seen(s, t, user):
     for row in rows:
         if not row.last_seen_at or now - row.last_seen_at >= SUPPORT_SEEN_EVERY:
             row.last_seen_at = now
+            if row is not t:
+                _stamp_ip(row)
 
 
 def _support_payload(s, t, user):
@@ -5330,6 +5373,42 @@ def admin_user_detail(uid):
                                    me['email'], email, u.id, len(slugs), n)
                     return redirect('/admin/users?deleted=' + urllib.parse.quote(email))
 
+            elif action in ('ban', 'unban'):
+                if u.id == me['id'] or u.role in ('admin', 'super_admin') \
+                        or u.email == SUPER_ADMIN_EMAIL:
+                    error = 'This account cannot be banned.'
+                elif action == 'unban':
+                    u.status = 'active' if u.tier in _UNPAID_TIERS else 'expired'
+                    s.commit()
+                    saved = 'Unbanned. IP and domain bans stay until removed below.'
+                else:
+                    from sqlalchemy import or_
+                    ips = {u.signup_ip, u.last_ip} - {None, ''}
+                    bans = _ban_list(s)
+                    note = '%s by %s' % (u.email, me['email'])
+                    for ip in ips:
+                        bans['ips'][ip] = note
+                    if request.form.get('domain'):
+                        bans['domains'][_email_domain(u.email)] = note
+                    _save_ban_list(s, bans)
+                    hit = [u] + (s.query(User).filter(
+                        or_(User.signup_ip.in_(ips), User.last_ip.in_(ips)),
+                        User.role.in_(('user', '')),
+                        User.tier.in_(('', ) + _UNPAID_TIERS)).all() if ips else [])
+                    for x in hit:
+                        x.status = 'banned'
+                    s.commit()
+                    saved = 'Banned %d account(s).' % len({x.id for x in hit})
+                    logger.warning('ADMIN BAN by=%s target=%s ips=%s', me['email'], u.email, ips)
+
+            elif action == 'unbanlist':
+                bans = _ban_list(s)
+                bans['ips'].pop(request.form.get('ip', ''), None)
+                bans['domains'].pop(request.form.get('dom', ''), None)
+                _save_ban_list(s, bans)
+                s.commit()
+                saved = 'Ban removed.'
+
             elif action == 'trial':
                 err = _grant_trial(s, u)
                 if err:
@@ -5350,7 +5429,20 @@ def admin_user_detail(uid):
                 'team_owner': owner.email if owner else '',
                 'grandfathered': _fmt_date(u.grandfathered_until),
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
-                'trial_at': _fmt_date(u.trial_at)}
+                'trial_at': _fmt_date(u.trial_at),
+                'signup_ip': u.signup_ip or '', 'last_ip': u.last_ip or '',
+                'domain': _email_domain(u.email)}
+        from db import Visit
+        ips = {u.signup_ip, u.last_ip} - {None, ''}
+        view['same_ip'] = [x.email for x in s.query(User).filter(
+            User.signup_ip.in_(ips) | User.last_ip.in_(ips), User.id != u.id).limit(50)] if ips else []
+        # Accounts older than the IP columns: the visitor log near signup.
+        view['visits'] = [] if ips or not u.created_at else [
+            f'{v.ip} {v.path} {v.city or ""} {v.country or ""}' for v in s.query(Visit).filter(
+                Visit.path.in_(('/register', '/billing')),
+                Visit.created_at.between(u.created_at - timedelta(minutes=15),
+                                         u.created_at + timedelta(minutes=2))).limit(10)]
+        view['bans'] = _ban_list(s)
         if me.get('is_super_admin'):
             from db import token_balance
             view['tokens'] = token_balance(s, _owned_workspace_id(s, u))
@@ -5948,10 +6040,14 @@ def auth_google_callback():
         u = get_user_by_google_sub(s, sub) or get_user_by_email(s, email)
         claimed = None
         new = u is None
+        if (u is not None and u.status == 'banned') or _signup_banned(s, email if new else ''):
+            logger.warning('SIGNIN BLOCKED email=%s ip=%s', email, _client_ip())
+            return render_template_string(SIGNIN_HTML, error=BANNED_MSG), 403
         if u is None:
             claimed = _claim_guest(s, email, '', info.get('name') or '', google_sub=sub)
             u = claimed or create_user(s, email, '', info.get('name') or '', google_sub=sub)
             _credit_signup_link(s)
+        _stamp_ip(u, signup=new)
         # Links an existing password account to the Google account on first use.
         if not u.google_sub:
             u.google_sub = sub
@@ -5997,8 +6093,13 @@ def register():
             return render_template_string(
                 REGISTER_HTML, error='That email is already registered.',
                 email=email, name=name)
+        if _signup_banned(s, email):
+            logger.warning('SIGNUP BLOCKED email=%s ip=%s', email, _client_ip())
+            return render_template_string(REGISTER_HTML, error=BANNED_MSG,
+                                          email=email, name=name), 403
         claimed = _claim_guest(s, email, generate_password_hash(password), name)
         u = claimed or create_user(s, email, generate_password_hash(password), name)
+        _stamp_ip(u, signup=True)
         _credit_signup_link(s)
         s.commit()
         _x_signup(u)
@@ -6052,7 +6153,11 @@ def login():
         if not u or not u.password_hash or not check_password_hash(u.password_hash, password):
             return render_template_string(SIGNIN_HTML, error='Wrong email or password.',
                                           email=email)
+        if u.status == 'banned' or _signup_banned(s):
+            logger.warning('SIGNIN BLOCKED email=%s ip=%s', email, _client_ip())
+            return render_template_string(SIGNIN_HTML, error=BANNED_MSG, email=email), 403
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
+        _stamp_ip(u)
         _note_demo_signin(s, u, nxt or '')
         s.commit()
         session['user_id'] = u.id
@@ -6812,17 +6917,31 @@ def api_billing_free():
     if tier == DEMO_TIER_KEY or (user.get('status') == 'active'
                                  and tier not in ('', FREE_TIER_KEY)):
         return jsonify({'error': 'This account already has a plan.'}), 409
-    from db import User
+    from db import User, TokenLedger, token_grant
+    fp = str((request.get_json(silent=True) or {}).get('fp') or '')[:200]
+    ws = _workspace_id(user)
     s = _db_session()
     try:
+        had = s.query(TokenLedger).filter(
+            TokenLedger.workspace_id == ws, TokenLedger.kind == 'grant',
+            TokenLedger.source == 'free-grant').first()
+        granted = had is None and not _signup_banned(s, user['email']) and _free_claim(s, fp)
+        if had is None:
+            if granted:
+                _grant_free_credits(s, ws)
+            else:
+                # Claims the grant at zero, so the lazy grant on the next
+                # balance read cannot hand the tokens over anyway.
+                token_grant(s, ws, 0, 'free-grant', None, note='free-claimed-elsewhere')
         u = s.get(User, user['id'])
         _activate_plan(s, u, FREE_TIER_KEY)
+        _stamp_ip(u)
         s.commit()
-        _grant_free_credits(s, _workspace_id(user))
     finally:
         s.close()
-    logger.info('FREE PLAN STARTED user=%s', user['email'])
-    return jsonify({'ok': True, 'redirect': '/dashboard'})
+    logger.info('FREE PLAN STARTED user=%s ip=%s tokens=%s', user['email'], _client_ip(),
+                granted)
+    return jsonify({'ok': True, 'redirect': '/dashboard', 'tokens': granted})
 
 
 @app.route('/api/billing/dev-activate', methods=['POST'])
@@ -9033,6 +9152,66 @@ def _guest_key(kind, raw):
         (str(app.secret_key) + '|' + raw).encode()).hexdigest()[:40])
 
 
+BAN_SETTING = 'ban_list'
+BANNED_MSG = 'Sign-ups from this network or email provider are blocked. Contact support.'
+
+
+def _ban_list(s):
+    from db import get_app_setting
+    try:
+        d = json.loads(get_app_setting(s, BAN_SETTING) or '{}')
+    except ValueError:
+        d = {}
+    return {'ips': dict(d.get('ips') or {}), 'domains': dict(d.get('domains') or {})}
+
+
+def _save_ban_list(s, bans):
+    from db import set_app_setting
+    set_app_setting(s, BAN_SETTING, json.dumps(bans))
+
+
+def _email_domain(email):
+    return (email or '').rsplit('@', 1)[-1].strip().lower() if '@' in (email or '') else ''
+
+
+def _signup_banned(s, email=''):
+    bans = _ban_list(s)
+    ip = _client_ip()
+    return bool((ip and ip in bans['ips'])
+                or (_email_domain(email) and _email_domain(email) in bans['domains']))
+
+
+def _stamp_ip(u, signup=False):
+    ip = _client_ip()[:64]
+    if not ip:
+        return
+    u.last_ip = ip
+    if signup and not u.signup_ip:
+        u.signup_ip = ip
+
+
+def _free_claim(s, fp=''):
+    """Whether this connection and device may still take Free's one grant, and
+    marks them as having had it. The keys are the guest check's own, so a guest
+    and a registered Free account on one device or connection are one grant:
+    without that, every throwaway email was a fresh 15 tokens."""
+    from db import get_app_setting, set_app_setting
+    now = time.time()
+    window = GUEST_IP_DAYS * 86400
+    ip = _client_ip()
+    ip_key = _guest_key('ip', ip) if ip else ''
+    fp_key = _guest_key('fp', fp) if len(fp) >= 16 else ''
+    ffp_key = _guest_key('ffp', fp) if fp_key else ''
+    seen = [get_app_setting(s, k) for k in (ip_key, ffp_key) if k]
+    used = any(v and now - float(v) < window for v in seen)
+    used = used or bool(fp_key and get_app_setting(s, fp_key))
+    if not used:
+        for k in (ip_key, ffp_key):
+            if k:
+                set_app_setting(s, k, str(now))
+    return not used
+
+
 @app.before_request
 def _guest_guard():
     """A guest is an active Free account by construction, so everything the
@@ -9072,6 +9251,8 @@ def api_guest_start():
     now = time.time()
     s = _db_session()
     try:
+        if _signup_banned(s):
+            return jsonify({'ok': False, 'error': BANNED_MSG}), 403
         if fp_key:
             prior = s.get(User, get_app_setting(s, fp_key) or '')
             if prior is not None:
@@ -9084,6 +9265,7 @@ def api_guest_start():
         ip_used = bool(ip_seen) and now - float(ip_seen) < GUEST_IP_DAYS * 86400
         u = create_user(s, 'guest-%s%s' % (secrets.token_hex(8), GUEST_DOMAIN), '', '')
         _activate_plan(s, u, FREE_TIER_KEY)
+        _stamp_ip(u, signup=True)
         if fp_key:
             set_app_setting(s, fp_key, u.id)
         if ip_key and not ip_used:
@@ -9148,21 +9330,7 @@ GUEST_START_HTML = """<!doctype html><html><head><meta charset="utf-8">
 color:#eee;font:16px system-ui,sans-serif}</style></head>
 <body><p id="m">Opening the studio…</p>
 <script>
-async function fp(){
-  const c = document.createElement('canvas'), x = c.getContext('2d');
-  x.textBaseline = 'top'; x.font = '16px Arial'; x.fillStyle = '#f60'; x.fillRect(10, 1, 60, 20);
-  x.fillStyle = '#069'; x.fillText('Velvet\\u2665studio', 2, 15);
-  let gl = '';
-  try { const g = document.createElement('canvas').getContext('webgl'),
-        d = g.getExtension('WEBGL_debug_renderer_info');
-        gl = d ? g.getParameter(d.UNMASKED_RENDERER_WEBGL) : g.getParameter(g.RENDERER); } catch (e) {}
-  const raw = [c.toDataURL(), gl, screen.width + 'x' + screen.height + 'x' + screen.colorDepth,
-    Intl.DateTimeFormat().resolvedOptions().timeZone, navigator.hardwareConcurrency,
-    navigator.deviceMemory, navigator.platform, navigator.language].join('|');
-  const h = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(raw));
-  return [...new Uint8Array(h)].map(b => b.toString(16).padStart(2, '0')).join('');
-}
-(async () => {
+""" + DEVICE_FP_JS + """(async () => {
   try {
     const r = await fetch('/api/guest/start', {method: 'POST',
       headers: {'Content-Type': 'application/json'}, body: JSON.stringify({fp: await fp()})});
