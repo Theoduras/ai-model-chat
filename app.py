@@ -1176,16 +1176,8 @@ def _site_origin():
     return explicit or _request_origin()
 
 
-def _seo_noindex_all():
-    """Whole-environment opt-out. The dev service is a public copy of the live
-    site, and an indexed copy competes with the real one in search."""
-    return (os.getenv('SEO_NOINDEX_ALL') or '').strip() == '1'
-
-
 @app.route('/robots.txt')
 def robots_txt():
-    if _seo_noindex_all():
-        return Response('User-agent: *\nDisallow: /\n', mimetype='text/plain')
     lines = ['User-agent: *']
     lines += ['Disallow: ' + p for p in _CRAWL_DISALLOW]
     # Disallow matches by prefix, so '/fanvue' also shut out /fanvue-ai-chatter.
@@ -1198,8 +1190,6 @@ def robots_txt():
 
 @app.route('/sitemap.xml')
 def sitemap_xml():
-    if _seo_noindex_all():
-        return ('Not found', 404)
     origin = _site_origin()
     today = datetime.now(timezone.utc).strftime('%Y-%m-%d')
     urls = ''.join(
@@ -1393,7 +1383,7 @@ def _x_signup(user_row):
 
 @app.after_request
 def _noindex_fan_pages(resp):
-    if _seo_noindex_all() or (request.path or '/').lower().startswith(_NOINDEX_PATHS):
+    if (request.path or '/').lower().startswith(_NOINDEX_PATHS):
         resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
     return resp
 
