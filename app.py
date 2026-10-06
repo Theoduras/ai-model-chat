@@ -3030,6 +3030,31 @@ button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
 .vtoggle{display:flex;gap:4px;margin:8px 0 4px;background:var(--surface);border-radius:99px;padding:3px;width:max-content}
 .vtoggle button{border:0;background:transparent;color:var(--text-2);border-radius:99px;padding:4px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
 .vtoggle button.active{background:var(--accent);color:#fff}
+.vtoggle .vplus{position:relative;overflow:visible}
+.vtoggle .vplus .gem{color:#a5b4fc}
+.vtoggle .vplus.active{color:#1e1b4b;background:linear-gradient(110deg,#e0f2fe 0%,#a5b4fc 35%,#f0abfc 55%,#e0f2fe 75%,#a5b4fc 100%);background-size:250% 100%;box-shadow:0 0 12px #a5b4fc88}
+.vtoggle .vplus.active .gem{color:#4338ca}
+.vtoggle .vplus i{position:absolute;width:5px;height:5px;background:#fff;opacity:0;pointer-events:none;
+  clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%)}
+.vtoggle .vplus i:nth-of-type(1){top:-3px;right:4px}
+.vtoggle .vplus i:nth-of-type(2){bottom:-2px;left:10px;width:4px;height:4px}
+.vtoggle .vplus i:nth-of-type(3){top:2px;left:-3px;width:6px;height:6px}
+.vtoggle .vplus.active i{opacity:1}
+.tier.is-plus{position:relative;border-color:transparent;box-shadow:0 0 0 1px #a5b4fc66 inset,0 10px 34px #a5b4fc44,0 0 22px #f0abfc22}
+.tier.is-plus:before{content:'';position:absolute;inset:-1px;border-radius:15px;padding:1.5px;pointer-events:none;
+  background:linear-gradient(120deg,#e0f2fe,#a5b4fc,#f0abfc,#e0f2fe,#a5b4fc);background-size:300% 300%;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+.tier.is-plus .price{background:linear-gradient(110deg,var(--text) 40%,#a5b4fc 50%,var(--text) 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.tier.is-plus .price span{-webkit-text-fill-color:var(--text-2)}
+@keyframes vshine{0%{background-position:100% 0}100%{background-position:-150% 0}}
+@keyframes vtwinkle{0%,100%{transform:scale(.2) rotate(0);opacity:0}50%{transform:scale(1) rotate(45deg);opacity:1}}
+@media (prefers-reduced-motion:no-preference){
+.vtoggle .vplus.active{animation:vshine 3.2s linear infinite}
+.vtoggle .vplus.active i{animation:vtwinkle 1.8s ease-in-out infinite}
+.vtoggle .vplus.active i:nth-of-type(2){animation-delay:.6s}
+.vtoggle .vplus.active i:nth-of-type(3){animation-delay:1.2s}
+.tier.is-plus:before{animation:vshine 5s linear infinite}
+.tier.is-plus .price{animation:vshine 4s linear infinite}}
 .plusval{color:#4ec9a0}
 .tier ul{flex:1}
 .tier .cta{margin-top:auto;padding-top:4px}
@@ -3299,10 +3324,10 @@ plan paid by card — <span data-offer-left="{{ offer.seconds_left }}">{{ offer.
  role="radio" aria-checked="false" tabindex="0" aria-label="{{ t.name }} plan">
 <div class="pick"><span class="off">Select</span><span class="on">Selected</span>
 {% if base_key == 'pro' %}<span class="tag">Most popular</span>{% endif %}</div>
-<h2>{{ t.name }}</h2>
+<h2 data-std="{{ t.name }}"{% if plus_of.get(base_key) %} data-plus="{{ tiers[plus_of[base_key]].name }}"{% endif %}>{{ t.name }}</h2>
 {% if plus_of.get(base_key) %}<div class="vtoggle" role="group" aria-label="Plan size">
 <button type="button" class="active" data-set-variant="std">Standard</button>
-<button type="button" data-set-variant="plus">Plus</button></div>{% endif %}<div class="blurb">{{ t.blurb }}</div>
+<button type="button" class="vplus" data-set-variant="plus"><span class="gem">&#9670;</span> Plus<i></i><i></i><i></i></button></div>{% endif %}<div class="blurb">{{ t.blurb }}</div>
 {% set verb = 'Renew' if user.status == 'expired' else 'Pay' %}{% set card_verb = 'Resubscribe' if user.status == 'expired' else 'Subscribe' %}
 {% for variant, key in [('std', base_key), ('plus', plus_of.get(base_key))] if key %}{% set t = tiers[key] %}{% set ta = tiers[key + annual_suffix] %}
 <div data-period="month" data-variant="{{ variant }}"{{ ' hidden' if variant == 'plus' }}>
@@ -3375,6 +3400,12 @@ function showPlans(){
   document.querySelectorAll('.tier').forEach(function(card){
     var on = card.querySelector('[data-set-variant].active');
     var variant = on ? on.dataset.setVariant : 'std';
+    var h = card.querySelector('h2[data-plus]');
+    if (h) {
+      h.textContent = variant === 'plus' ? h.dataset.plus : h.dataset.std;
+      card.setAttribute('aria-label', h.textContent + ' plan');
+    }
+    card.classList.toggle('is-plus', variant === 'plus');
     card.querySelectorAll(':scope>[data-period]').forEach(function(el){
       el.hidden = el.dataset.period !== period
         || (el.dataset.variant && el.dataset.variant !== variant);
