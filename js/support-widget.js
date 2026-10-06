@@ -40,6 +40,15 @@
     + 'background:var(--spw-grad);color:#fff;font:600 .76rem Inter,system-ui,sans-serif;line-height:1.35;'
     + 'box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:2147481999;display:none;align-items:center;gap:7px;}'
     + '.spw-watch.on{display:flex;}'
+    + '.spw-peek{position:fixed;right:16px;bottom:86px;max-width:min(280px,calc(100vw - 32px));padding:10px 30px 10px 12px;'
+    + 'border-radius:14px 14px 4px 14px;background:var(--spw-bg);color:var(--spw-text);border:1px solid var(--spw-border);'
+    + 'box-shadow:0 8px 24px rgba(0,0,0,.22);z-index:2147481999;font-size:.84rem;line-height:1.4;cursor:pointer;'
+    + 'opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .25s,transform .25s;}'
+    + '.spw-peek.on{opacity:1;transform:none;pointer-events:auto;}'
+    + '.spw-peek .w{font-size:.7rem;font-weight:700;color:var(--spw-accent);margin-bottom:2px;}'
+    + '.spw-peek .b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}'
+    + '.spw-peek .c{position:absolute;top:4px;right:4px;width:22px;height:22px;border:none;background:none;'
+    + 'color:var(--spw-muted);font-size:.95rem;cursor:pointer;padding:0;line-height:1;}'
     + '.spw-watch .d{width:9px;height:9px;border-radius:50%;background:#fff;flex:none;animation:spwp 1.4s infinite;}'
     + '@keyframes spwp{0%,100%{opacity:1;}50%{opacity:.3;}}'
     + '.spw-panel{position:fixed;right:20px;bottom:88px;width:370px;height:540px;max-height:calc(100vh - 110px);'
@@ -128,7 +137,32 @@
     });
   }
 
+  var MOBILE = window.matchMedia('(max-width: 640px)'), peekEl = null, peekTimer = null;
+
+  function peek(m) {
+    if (!peekEl) {
+      peekEl = document.createElement('div');
+      peekEl.className = 'spw-peek';
+      root.appendChild(peekEl);
+      peekEl.onclick = function (e) {
+        hidePeek();
+        if (!e.target.classList.contains('c')) setOpen(true);
+      };
+    }
+    peekEl.innerHTML = '<button class="c" aria-label="Dismiss">\u00d7</button>'
+      + '<div class="w">Support</div><div class="b">' + esc(m.content) + '</div>';
+    peekEl.classList.add('on');
+    clearTimeout(peekTimer);
+    peekTimer = setTimeout(hidePeek, 8000);
+  }
+
+  function hidePeek() {
+    clearTimeout(peekTimer);
+    if (peekEl) peekEl.classList.remove('on');
+  }
+
   function setOpen(open) {
+    if (open) hidePeek();
     state.open = open;
     panel.classList.toggle('on', open);
     root.classList.toggle('spw-open', open);
@@ -241,7 +275,10 @@
       try { seen = localStorage.getItem(SEEN_KEY); } catch (e) {}
       if (seen !== lastAdmin.id) {
         try { localStorage.setItem(SEEN_KEY, lastAdmin.id); } catch (e) {}
-        if (before > 0 || !document.hidden) { setOpen(true); return; }
+        // On a phone the open panel covers the page and raises the keyboard,
+        // so a new message only peeks above the button there.
+        if (MOBILE.matches) peek(lastAdmin);
+        else if (before > 0 || !document.hidden) { setOpen(true); return; }
       }
     }
     if (state.open) markRead();
