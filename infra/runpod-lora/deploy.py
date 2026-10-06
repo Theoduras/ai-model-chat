@@ -45,12 +45,12 @@ def deploy(dc):
     else:
         tpl = call('POST', '/templates', body)
     print('template', tpl['id'], flush=True)
-    # A training run takes about an hour; three is the ceiling before RunPod
+    # Wan then H3 takes about two hours; six is the ceiling before RunPod
     # calls it timed out and the app refunds it.
     settings = {'templateId': tpl['id'], 'networkVolumeId': vol['id'], 'dataCenterIds': [vol.get('dataCenterId') or dc],
                 'computeType': 'GPU', 'gpuTypeIds': GPUS, 'gpuCount': 1, 'workersMin': 0,
                 'workersMax': 2, 'idleTimeout': 120, 'flashboot': True,
-                'executionTimeoutMs': 3 * 3600 * 1000, 'allowedCudaVersions': ['13.0']}
+                'executionTimeoutMs': 6 * 3600 * 1000, 'allowedCudaVersions': ['13.0']}
     ep = find('/endpoints', 'char-lora')
     ep = call('PATCH', f'/endpoints/{ep["id"]}', {k: v for k, v in settings.items()
                                                  if k != 'computeType'}) if ep else call(
