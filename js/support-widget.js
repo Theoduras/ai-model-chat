@@ -222,9 +222,14 @@
       inner.querySelectorAll('script,noscript').forEach(function (n) { n.remove(); });
       var wrap = document.createElement('div');
       var cs = srcF[i].getBoundingClientRect();
+      var sy = 0, sx = 0;
+      try { sy = srcF[i].contentWindow.scrollY || 0; sx = srcF[i].contentWindow.scrollX || 0; } catch (e) {}
       wrap.setAttribute('style', 'all:initial;display:block;width:' + Math.round(cs.width) +
         'px;height:' + Math.round(cs.height) + 'px;overflow:hidden');
-      wrap.innerHTML = inner.innerHTML;
+      var off = document.createElement('div');
+      off.setAttribute('style', 'transform:translate(-' + sx + 'px,-' + sy + 'px)');
+      off.innerHTML = inner.innerHTML;
+      wrap.appendChild(off);
       dstF[i].parentNode.replaceChild(wrap, dstF[i]);
     }
   }
@@ -239,14 +244,48 @@
     return '<!DOCTYPE html>' + doc.outerHTML;
   }
 
+  var dirty = true;
+  function markDirty() { dirty = true; }
+
+  // Re-send the page only when something actually changed, so an idle screen
+  // costs nothing and a busy one stays responsive. Scroll inside a framed page
+  // changes what the agent should see, so it counts as a change too.
+  function watchChanges() {
+    if (!window.__spwObs) {
+      try {
+        new MutationObserver(markDirty).observe(document, { subtree: true, childList: true, attributes: true, characterData: true });
+      } catch (e) {}
+      document.addEventListener('input', markDirty, true);
+      document.addEventListener('scroll', markDirty, true);
+      window.__spwObs = 1;
+    }
+    var frames = document.querySelectorAll('iframe');
+    for (var i = 0; i < frames.length; i++) {
+      var f = frames[i];
+      if (f.__spwObs) continue;
+      try {
+        var d = f.contentDocument;
+        if (!d) continue;
+        new MutationObserver(markDirty).observe(d, { subtree: true, childList: true, attributes: true, characterData: true });
+        d.addEventListener('input', markDirty, true);
+        d.addEventListener('scroll', markDirty, true);
+        f.__spwObs = 1;
+      } catch (e) {}
+    }
+  }
+
   function mirror() {
-    if (document.hidden) { setTimeout(mirror, 2000); return; }
-    var html = shot(), body = { url: page(), w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
-    if (html !== lastShot && html.length < 1500000) body.html = html;
+    if (document.hidden) { setTimeout(mirror, 1500); return; }
+    watchChanges();
+    var body = { url: page(), w: innerWidth, h: innerHeight, x: scrollX, y: scrollY };
+    if (dirty) {
+      dirty = false;
+      var html = shot();
+      if (html !== lastShot && html.length < 1500000) { body.html = html; lastShot = html; }
+    }
     post('/api/support/screen', body).then(function (d) {
-      if (body.html) lastShot = html;
-      if (d && d.watch) { setWatchBanner(true); setTimeout(mirror, 2000); }
-      else { mirroring = false; lastShot = ''; setWatchBanner(false); }
+      if (d && d.watch) { setWatchBanner(true); setTimeout(mirror, 700); }
+      else { mirroring = false; lastShot = ''; dirty = true; setWatchBanner(false); }
     }, function () { mirroring = false; setWatchBanner(false); });
   }
 
