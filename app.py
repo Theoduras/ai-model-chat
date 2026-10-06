@@ -3115,6 +3115,9 @@ body[data-page="pricing"]{padding-top:80px}}
 @media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}
 .wrap.wide:has(.tiers.five){max-width:1480px}.tiers.five{grid-template-columns:repeat(5,1fr)}}
 .in-workspace body>header.site-nav{display:none}
+.in-embed body>header.site-nav,.in-embed .bar,.in-embed [data-edit-id="h1"],.in-embed [data-edit-id="sub"],.in-embed .ok,.in-embed .err,.in-embed .spw{display:none!important}
+.in-embed body[data-page="pricing"]{padding:4px 0 8px;background:transparent}
+.in-embed body[data-page="pricing"] .wrap{max-width:none!important}
 .in-workspace body[data-page="pricing"]{padding-top:32px}
 .in-workspace body[data-page="pricing"] .wrap{max-width:none!important}
 .in-workspace body[data-page="pricing"] .bar{display:none}
@@ -3127,6 +3130,22 @@ body[data-page="pricing"]{padding-top:80px}}
 # would bounce straight back to /billing.
 WORKSPACE_JS = """<script>
 (function () {
+  {% if embed %}if (window.self !== window.top) {
+    // The homepage shows these same plan cards in a frame: no chrome, and the
+    // frame grows to fit so the cards never scroll on their own.
+    document.documentElement.classList.add('in-embed');
+    var fit = function () {
+      window.parent.postMessage({ type: 'plans-height',
+        height: document.documentElement.scrollHeight }, location.origin);
+    };
+    window.addEventListener('load', fit);
+    window.addEventListener('resize', fit);
+    document.addEventListener('click', function () { setTimeout(fit, 30); });
+    if (window.ResizeObserver) document.addEventListener('DOMContentLoaded', function () {
+      new ResizeObserver(fit).observe(document.body);
+    });
+    return;
+  }{% endif %}
   if (window.self === window.top) {
     {% if workspace_ok() %}location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));{% endif %}
     return;
@@ -6581,6 +6600,7 @@ def pricing():
                                'expires_at': None}
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
                                   plus_of=PLUS_OF, plus_value=_plus_value(),
+                                  embed=request.args.get('embed') == '1',
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),
@@ -6622,6 +6642,7 @@ def billing():
         return redirect('/login?next=/billing')
     return render_template_string(BILLING_HTML, user=user, tiers=TIERS,
                                   plus_of=PLUS_OF, plus_value=_plus_value(),
+                                  embed=request.args.get('embed') == '1',
                                   order=DEFAULT_TIER_ORDER,
                                   dev_mode=_dev_payments_enabled(),
                                   oxapay_enabled=bool(_oxapay_key()),

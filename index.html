@@ -384,6 +384,14 @@ p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;
 </div>
 
 <section class="features" id="pricing">
+  <iframe id="plans-frame" src="/pricing?embed=1" title="Plans"
+    style="display:block;width:100%;max-width:1480px;height:760px;margin:0 auto 64px;border:0;background:transparent"></iframe>
+  <script>
+  window.addEventListener('message', function(e){
+    if (e.origin !== location.origin || !e.data || e.data.type !== 'plans-height') return;
+    document.getElementById('plans-frame').style.height = Math.ceil(e.data.height) + 'px';
+  });
+  </script>
   <div class="sec-head">
     <div class="sec-eyebrow"><span class="d"></span><span data-edit-id="features-eyebrow">What you get</span></div>
     <h2><span data-edit-id="features-title-a">What each plan</span> <em data-edit-id="features-title-b">includes</em></h2>
