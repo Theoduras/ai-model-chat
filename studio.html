@@ -340,7 +340,28 @@
       #gen-lb-actions button { flex: 1 1 100px; padding: 10px 0; }
       .gen-lb-prev, .gen-lb-next { top: auto; bottom: calc(max(20px, env(safe-area-inset-bottom)) + 56px); transform: none; }
     }
-  </style>
+  .st-sides { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; max-width: 640px; }
+.st-side { display: flex; flex-direction: column; align-items: flex-start; gap: 4px; padding: 18px 20px; text-align: left; cursor: pointer;
+  border: 2px solid var(--border-soft); border-radius: 14px; background: var(--surface); color: var(--text-2); transition: border-color .15s, box-shadow .15s, transform .15s; }
+.st-side svg { width: 30px; height: 30px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linejoin: round; margin-bottom: 6px; }
+.st-side b { font-size: 1.25rem; color: var(--text); }
+.st-side small { font-size: .85rem; }
+.st-side:hover { border-color: var(--accent-line); transform: translateY(-1px); }
+.st-side.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); box-shadow: 0 0 0 4px var(--accent-soft), 0 8px 28px -10px var(--accent); }
+.st-who { display: flex; gap: 16px; align-items: center; }
+.st-who > .gen-f { flex: 1; min-width: 0; }
+.st-who select { width: 100%; max-width: 480px; min-height: 42px; font-size: 1rem; }
+.st-who-pic { flex: 0 0 96px; height: 120px; border-radius: 12px; overflow: hidden; border: 2px dashed var(--border-soft); background: var(--surface-2)
+  url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='%23888' opacity='.45'%3E%3Ccircle cx='12' cy='8' r='4'/%3E%3Cpath d='M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7z'/%3E%3C/svg%3E") center/44px no-repeat; }
+.st-who-pic:has(img) { border-style: solid; border-color: var(--accent-line); }
+.st-who-pic img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.st-adv summary { cursor: pointer; color: var(--text-2); font-size: .9rem; padding: 4px 0; }
+.st-adv summary b { color: var(--text); font-weight: 600; }
+.st-src { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 8px; margin: 8px 0 6px; }
+.st-src .gen-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; height: auto; padding: 10px 12px; text-align: left; white-space: normal; border-radius: 10px; }
+.st-src .gen-chip small { font-weight: 400; color: var(--text-2); line-height: 1.35; }
+@media (max-width: 520px) { .st-side { padding: 14px; } .st-who-pic { flex-basis: 72px; height: 90px; } }
+</style>
 </head>
 <body class="page-dashboard">
 
@@ -366,9 +387,13 @@
 
       <div class="gen-panel st-sec" id="gen-p-type" data-title="Photo or video">
         <div class="gen-head"><b>1</b><h2>Photo or video</h2></div>
-        <div class="pg-toggle" role="group" aria-label="Photo or video">
-          <button type="button" id="make-photo" class="active" aria-pressed="true" onclick="setMedia('image')">Photo</button>
-          <button type="button" id="make-video" aria-pressed="false" onclick="setMedia('video')">Video</button>
+        <div class="st-sides" role="group" aria-label="Photo or video">
+          <button type="button" id="make-photo" class="st-side active" aria-pressed="true" onclick="setMedia('image')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="12" cy="12" r="3.5"/><path d="M8 5l1.5-2h5L16 5"/></svg>
+            <b>Photo</b><small>Stills from her look</small></button>
+          <button type="button" id="make-video" class="st-side" aria-pressed="false" onclick="setMedia('video')">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="6" width="13" height="12" rx="2"/><path d="M16 10l5-3v10l-5-3z"/></svg>
+            <b>Video</b><small>Clips from an approved photo</small></button>
         </div>
         <div class="gen-jobs" id="gen-jobs"></div>
       </div>
@@ -403,16 +428,21 @@
 
       <div class="gen-panel st-sec" id="gen-p-character" data-title="Character">
         <div class="gen-head"><b>4</b><h2>Character</h2></div>
-        <label class="gen-f"><span>Whose photos are we generating?</span>
-          <select id="persona" onchange="studioSlugFor().then(loadPersona)"></select></label>
-        <div class="gen-f" id="gen-identity-src" style="display:none"><span>Her look comes from</span>
-          <div class="gen-chips">
-            <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')">Her character</button>
-            <button type="button" class="gen-chip" id="gen-src-vault" onclick="setIdentitySrc('vault')">Face &amp; body photos</button>
-            <button type="button" class="gen-chip" id="gen-src-both" onclick="setIdentitySrc('both')">Both</button>
+        <div class="st-who">
+          <div class="st-who-pic" id="gen-char-pic" aria-hidden="true"></div>
+          <label class="gen-f"><span>Whose photos are we generating?</span>
+            <select id="persona" onchange="renderCharPic(); studioSlugFor().then(loadPersona)"></select>
+            <span class="hint">Pick a character to generate her. "No character" makes content without anyone's look.</span></label>
+        </div>
+        <details class="st-adv" id="gen-identity-src" style="display:none">
+          <summary>Advanced: her look comes from <b id="gen-identity-cur"></b></summary>
+          <div class="st-src">
+            <button type="button" class="gen-chip" id="gen-src-character" onclick="setIdentitySrc('character')"><b>Her character</b><small>Approved views and features from the character builder. Most consistent.</small></button>
+            <button type="button" class="gen-chip" id="gen-src-vault" onclick="setIdentitySrc('vault')"><b>Face &amp; body photos</b><small>Only the vault photos you pick below. Her character is left out.</small></button>
+            <button type="button" class="gen-chip" id="gen-src-both" onclick="setIdentitySrc('both')"><b>Both</b><small>Her character first, your photos as extra references. Default when she has both.</small></button>
           </div>
           <span class="hint" id="gen-identity-note"></span>
-        </div>
+        </details>
         <div class="note-box" id="gen-character" hidden></div>
         <div id="gen-refs-wrap" style="display:flex; flex-direction:column; gap:11px;">
           <div class="gen-f">
@@ -952,15 +982,23 @@ async function init() {
       chars = ((await (await fetch('/api/characters')).json()).characters || [])
         .filter(c => !c.persona);
     } catch (e) {}
-    el('persona').innerHTML = '<option value="own:">No character — Your Content</option>' + rows.map(p =>
-      `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`).join('')
-      + chars.map(c => `<option value="char:${esc(c.id)}">${esc(c.name || 'Character')} (character)</option>`).join('');
+    const untitledLast = (a, b) => (/^untitled/i.test(a.name || '') - /^untitled/i.test(b.name || ''))
+      || (a.name || '').localeCompare(b.name || '');
+    rows.forEach(p => { if (p.avatar) genCharPics[p.slug] = p.avatar; });
+    chars.forEach(c => { if (c.face_url) genCharPics['char:' + c.id] = c.face_url; });
+    const opts = (label, list) => list.length ? `<optgroup label="${esc(label)}">${list.join('')}</optgroup>` : '';
+    const charOpt = c => `<option value="char:${esc(c.id)}">${esc(c.name || 'Character')}${c.owner ? ' — ' + esc(c.owner) : ''}</option>`;
+    el('persona').innerHTML = '<option value="own:">No character — your own content</option>'
+      + opts('Your personas', rows.sort(untitledLast).map(p => `<option value="${esc(p.slug)}">${esc(p.name || p.slug)}</option>`))
+      + opts('Your characters', chars.filter(c => !c.owner).sort(untitledLast).map(charOpt))
+      + opts('Other accounts', chars.filter(c => c.owner).sort((a, b) => (a.owner || '').localeCompare(b.owner || '') || untitledLast(a, b)).map(charOpt));
     // Nothing is picked for her unless she picked it before: the default is
     // her own content, with no character's look forced on it.
     const want = new URLSearchParams(location.search).get('persona')
       || (studioSaved() || {}).persona;
     if (want && [...el('persona').options].some(o => o.value === want)) el('persona').value = want;
     else el('persona').value = 'own:';
+    renderCharPic();
     await studioSlugFor();
   } catch (e) {
     el('persona-hint').textContent = 'Could not load personas.';
@@ -1038,6 +1076,12 @@ document.addEventListener('change', e => {
 // the character's views first, the slots after them. Both is the default when
 // she has each, the character when she has only that, until she picks.
 let genIdentity = 'vault';
+const genCharPics = {};
+
+function renderCharPic() {
+  const url = genCharPics[el('persona').value];
+  el('gen-char-pic').innerHTML = url ? `<img src="${esc(url)}" alt="">` : '';
+}
 let genIdentityTouched = false;
 
 function setIdentitySrc(v) {
@@ -1062,6 +1106,7 @@ function renderIdentitySrc() {
   el('gen-src-character').setAttribute('aria-pressed', String(genIdentity === 'character'));
   el('gen-src-vault').setAttribute('aria-pressed', String(genIdentity === 'vault'));
   el('gen-src-both').setAttribute('aria-pressed', String(genIdentity === 'both'));
+  el('gen-identity-cur').textContent = { character: 'her character', vault: 'face & body photos', both: 'both' }[genIdentity];
   el('gen-identity-note').innerHTML = !c ? ''
     : !has ? `Nothing approved on ${esc(c.name)} yet — <a href="/characters?id=${esc(c.id)}">approve a view</a> to use her character.`
     : genIdentity === 'both' ? 'Her character, plus the face and body photos below as extra references.'
@@ -4388,7 +4433,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 // mirror it and set it through a real change event, so nothing sent changes.
 (function () {
   const TILED = {
-    'persona': 'chips', 'gen-scene': 'place', 'gen-scene-nsfw': 'slot', 'gen-shot': 'frame', 'gen-style': 'slot',
+    'gen-scene': 'place', 'gen-scene-nsfw': 'slot', 'gen-shot': 'frame', 'gen-style': 'slot',
     'gen-expression': 'slot', 'gen-zoom': 'frame', 'gen-camera': 'slot', 'gen-lighting': 'light', 'gen-quality': 'slot',
     'gen-angle': 'chips', 'gen-pose': 'chips', 'gen-gaze': 'chips', 'gen-hair': 'chips', 'gen-makeup': 'chips',
     'gen-skin': 'chips', 'gen-lens': 'chips', 'gen-grade': 'chips', 'gen-res': 'small', 'gen-batch': 'small', 'gen-vres': 'small', 'gen-vsecs': 'small', 'gen-sres': 'small',
