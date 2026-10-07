@@ -51,6 +51,16 @@ def load_workflow(workflow_path):
         prompt['834']['inputs']['steps'] = steps
         # High-noise model for the first half, low-noise for the rest.
         prompt['829']['inputs']['step'] = steps // 2
+    # torch.compile breaks on the newer ComfyUI's fp8 requantize: route each
+    # compile node's consumers straight to the model it was handed.
+    for cid, node in list(prompt.items()):
+        if 'Compile' in node.get('class_type', '') and isinstance(node['inputs'].get('model'), list):
+            src = node['inputs']['model']
+            for other in prompt.values():
+                for k, v in other.get('inputs', {}).items():
+                    if isinstance(v, list) and len(v) == 2 and str(v[0]) == cid:
+                        other['inputs'][k] = src
+            del prompt[cid]
     # Newer ComfyUI-Frame-Interpolation (the Vast image) made these required.
     for node in prompt.values():
         if node.get('class_type') == 'RIFE VFI':
