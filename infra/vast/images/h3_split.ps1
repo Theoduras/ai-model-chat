@@ -17,12 +17,12 @@ Get-ChildItem $src -Recurse -Filter *.safetensors | Where-Object { $_.FullName -
     while ($in.Position -lt $in.Length) {
         $name = '{0}.part{1:D3}' -f $rel, $n
         $dest = Join-Path $parts $name
-        [long]$want = [Math]::Min([long]$size, [long]($in.Length - $in.Position))
+        [long]$want = $in.Length - $in.Position; if ($want -gt $size) { $want = $size }
         if ((Test-Path $dest) -and (Get-Item $dest).Length -eq $want) {
             $in.Seek($want, 'Current') | Out-Null
         } else {
             $o = [IO.File]::Create($dest); [long]$left = $want
-            while ($left -gt 0) { $r = $in.Read($buf, 0, [int][Math]::Min([long]$buf.Length, $left)); $o.Write($buf, 0, $r); $left -= $r }
+            while ($left -gt 0) { $n2 = $buf.Length; if ($left -lt $n2) { $n2 = [int]$left }; $r = $in.Read($buf, 0, $n2); $o.Write($buf, 0, $r); $left -= $r }
             $o.Close()
         }
         $lines += "COPY --link parts/$name /h3parts/$name"
