@@ -31,3 +31,49 @@
 
   document.addEventListener('DOMContentLoaded', function () { window.setTheme(window.getTheme()); });
 })();
+
+// Covers the page until its first data has landed, so nothing pops in after it
+// is shown: gone once the page has loaded and no fetch has been in flight for a
+// moment, and after 4s whatever happens, because some pages poll forever.
+(function () {
+  var root = document.documentElement;
+  var css = document.createElement('style');
+  css.textContent = '#page-loader{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;'
+    + 'background:var(--bg,#0e0e0e);transition:opacity .2s ease}'
+    + '#page-loader.out{opacity:0;pointer-events:none}'
+    + '#page-loader i{width:34px;height:34px;border-radius:50%;border:3px solid rgba(255,92,56,.18);border-top-color:#ff5c38;animation:pl-spin .8s linear infinite}'
+    + '@keyframes pl-spin{to{transform:rotate(360deg)}}'
+    + '@media (prefers-reduced-motion: reduce){#page-loader i{animation:none;border-color:#ff5c38}}';
+  document.head.appendChild(css);
+  var cover = document.createElement('div');
+  cover.id = 'page-loader';
+  cover.setAttribute('aria-hidden', 'true');
+  cover.innerHTML = '<i></i>';
+  root.appendChild(cover);
+
+  var inFlight = 0, loaded = false, done = false, timer = null;
+  function finish() {
+    if (done) return;
+    done = true;
+    cover.classList.add('out');
+    setTimeout(function () { cover.remove(); }, 250);
+  }
+  function settle() {
+    clearTimeout(timer);
+    if (loaded && !inFlight) timer = setTimeout(finish, 250);
+  }
+  var realFetch = window.fetch;
+  if (realFetch) {
+    window.fetch = function () {
+      var p = realFetch.apply(this, arguments);
+      if (done) return p;
+      inFlight++;
+      clearTimeout(timer);
+      var end = function () { inFlight--; settle(); };
+      p.then(end, end);
+      return p;
+    };
+  }
+  window.addEventListener('load', function () { loaded = true; settle(); });
+  setTimeout(finish, 4000);
+})();

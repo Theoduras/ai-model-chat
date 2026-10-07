@@ -798,8 +798,6 @@
         <span class="hint">Anything your prompt asks for (say, zoom in) is dropped from it automatically; child, teen and underage never are.</span>
       </details>
     </div>
-    <div class="st-nav" id="st-nav"><button type="button" class="btn btn-ghost" id="st-back">Back</button>
-      <span id="st-step-of"></span><button type="button" class="btn btn-primary" id="st-next">Next</button></div>
   </div>
 
   <aside class="st-side" aria-label="Summary and cost">
@@ -4348,8 +4346,22 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-levels .gen-chip { flex-direction: column; align-items: flex-start; min-width: 150px; }
 .st-levels small { color: var(--text-muted); }
 #gen-p-rating .pg-toggle, #gen-p-rating > .hint { display: none; }
-.st-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 24px; }
-.st-nav span { color: var(--text-muted); font-size: 13px; }
+#gen-level4 { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; max-width: 760px; width: 100%; margin: 0 auto; }
+.st-lvl { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; min-height: 96px; padding: 14px 12px; text-align: center;
+  border: 1px solid #2e2e2e; border-radius: 12px; color: #fff; cursor: pointer; transition: border-color .15s, box-shadow .15s, transform .15s; }
+.st-lvl b { font-family: Sora, Inter, sans-serif; font-size: 17px; font-weight: 700; }
+.st-lvl small { font-size: 12px; line-height: 16px; color: rgba(255,255,255,.72); }
+.st-lvl-sfw { background: linear-gradient(180deg, #20302a, #141414); }
+.st-lvl-tease { background: linear-gradient(180deg, #3a2430, #141414); }
+.st-lvl-spicy { background: linear-gradient(180deg, #4a2028, #141414); }
+.st-lvl-explicit { background: linear-gradient(180deg, #5a1420, #141414); }
+.st-lvl:hover:not(:disabled) { border-color: #ff5c3880; transform: translateY(-1px); }
+.st-lvl[aria-pressed="true"] { border-color: #ff5c38; box-shadow: 0 0 0 3px #ff5c381f, 0 8px 24px -10px #ff5c38; }
+.st-lvl:disabled { opacity: .45; cursor: not-allowed; }
+.st-sides { margin: 0 auto; width: 100%; }
+.st-side { align-items: center; text-align: center; }
+.st-rail [aria-current="true"] { background: var(--panel-2); }
+.st-rail button:not(.st-warn):not(.st-err) .st-n { color: #22a35a !important; border-color: #22a35a66 !important; }
 .st-tile { position: relative; }
 .st-edit { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 50%; background: #000a; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
 #ex-edit { background: var(--panel); color: var(--text); border: 1px solid var(--border-soft); border-radius: 14px; padding: 18px; width: min(560px, 92vw); }
@@ -4599,17 +4611,38 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   function applyStep() {
     const steps = stepList();
     stepCur = Math.max(1, Math.min(stepCur, steps.length));
-    const cur = steps[stepCur - 1];
-    document.querySelectorAll('.st-main > .st-sec').forEach(sec => { sec.classList.toggle('st-off', !cur.ids.includes(sec.id)); });
-    document.querySelectorAll('#gen-image-form > [data-sp]').forEach(g => { g.classList.toggle('st-off', +g.dataset.sp !== cur.g); });
+    const shown = new Set(steps.flatMap(st => st.ids));
+    document.querySelectorAll('.st-main > .st-sec').forEach(sec => {
+      sec.classList.toggle('st-off', !shown.has(sec.id));
+      sec.style.order = Math.max(0, steps.findIndex(st => st.ids.includes(sec.id)));
+    });
+    document.querySelectorAll('#gen-image-form > [data-sp]').forEach(g => { g.classList.remove('st-off'); });
     const lv4 = el('gen-level4'), sig = lvlNow() + safeOnly() + genMake;
     if (lv4 && lv4.dataset.sig !== sig) {
       lv4.dataset.sig = sig;
-      lv4.innerHTML = LVL4.map(l => `<button type="button" class="gen-chip" data-lvl="${l[0]}" aria-pressed="${l[0] === lvlNow()}"${safeOnly() && l[0] !== 'sfw' ? ' disabled' : ''}><b>${l[1]}</b><small>${l[2]}</small></button>`).join('');
+      lv4.innerHTML = LVL4.map(l => `<button type="button" class="st-lvl st-lvl-${l[0]}" data-lvl="${l[0]}" aria-pressed="${l[0] === lvlNow()}"${safeOnly() && l[0] !== 'sfw' ? ' disabled' : ''}><b>${l[1]}</b><small>${l[2]}</small></button>`).join('');
     }
     document.querySelectorAll('.st-main .gen-head b').forEach(b => { b.hidden = true; });
   }
-  function goStep(n) { stepCur = n; lastRail = ''; tick(); const m = document.querySelector('.st-main'); if (m) m.scrollIntoView({ block: 'start' }); }
+  // One page: a rail entry scrolls to its part, and the part in view lights its entry.
+  function stepTarget(st) {
+    return (st.g !== undefined && document.querySelector(`#gen-image-form > [data-sp="${st.g}"]`)) || el(st.ids[0]);
+  }
+  function goStep(n) {
+    const t = stepTarget(stepList()[n - 1] || {ids: []});
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  }
+  let spyQueued = false;
+  window.addEventListener('scroll', () => {
+    if (spyQueued) return;
+    spyQueued = true;
+    requestAnimationFrame(() => {
+      spyQueued = false;
+      let cur = 1;
+      stepList().forEach((st, i) => { const t = stepTarget(st); if (t && t.offsetParent && t.getBoundingClientRect().top < 140) cur = i + 1; });
+      if (cur !== stepCur) { stepCur = cur; tick(); }
+    });
+  }, { passive: true });
   document.addEventListener('click', e => {
     const lvl = e.target.closest('[data-lvl]');
     if (lvl && !lvl.disabled) {
@@ -4623,8 +4656,6 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const g = e.target.closest('[data-step]');
     if (g) goStep(+g.dataset.step);
   });
-  el('st-back').onclick = () => goStep(stepCur - 1);
-  el('st-next').onclick = () => goStep(stepCur + 1);
   ['gen-video-out', 'gen-swap-out'].forEach(id => { const n = el(id), p = el('gen-p-prompt'); if (n && p) p.appendChild(n); });
 
   let lastRail = '', lastIssues = '';
@@ -4637,16 +4668,13 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const rail = steps.map((st, i) => {
       const mine = list.filter(x => stepOf(x.sec) === i + 1);
       const cls = mine.some(x => x.kind === 'err') ? 'st-err' : mine.length ? 'st-warn' : '';
-      return `<button type="button" class="${cls}" data-step="${i + 1}" aria-current="${i + 1 === stepCur}"><span class="st-n">${i + 1}</span>`
+      return `<button type="button" class="${cls}" data-step="${i + 1}" aria-current="${i + 1 === stepCur}"><span class="st-n" aria-hidden="true">${cls === 'st-err' ? '&times;' : cls ? '!' : '&#10003;'}</span>`
         + `<span class="st-t"><b>${esc(st.title)}</b><small>${esc(st.sum())}</small></span></button>`;
     }).join('');
     if (rail !== lastRail) { el('st-rail').innerHTML = rail; lastRail = rail; }
     const iss = list.map(i => `<button type="button" class="st-issue ${i.kind}" data-step="${stepOf(i.sec)}"><i>${stepOf(i.sec)}</i><span>${esc(i.text)}</span></button>`).join('');
     if (iss !== lastIssues) { el('st-issues').innerHTML = iss; lastIssues = iss; }
     el('st-picks').textContent = steps.map(st => st.sum()).filter(Boolean).join(' · ');
-    el('st-step-of').textContent = `Step ${stepCur} of ${steps.length}`;
-    el('st-back').disabled = stepCur <= 1;
-    el('st-next').hidden = stepCur >= steps.length;
 
     const ratio = (genMake === 'image' ? currentImageAspect() : (aspectOffered() ? currentAspect() : '')) || '4:5';
     const [w, h] = ratio.split(':').map(Number);

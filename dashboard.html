@@ -506,6 +506,13 @@ function closeMobilePanels() {
   _overlay().classList.remove('open');
 }
 
+// On a phone the drawer slides back out once a page is picked; a group
+// header only opens its list, so it leaves the drawer where it is.
+document.addEventListener('click', e => {
+  const item = e.target.closest('.sidebar .sb-item');
+  if (item && !item.classList.contains('sb-item-toggle') && window.innerWidth <= 900) closeMobilePanels();
+});
+
 // The persona cache is per signed-in user. Without this suffix a new account
 // on a shared browser would inherit whatever the previous user had cached.
 let CURRENT_UID = 'anon';
