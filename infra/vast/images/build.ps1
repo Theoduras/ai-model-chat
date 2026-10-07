@@ -21,7 +21,7 @@ foreach ($name in $images) {
     Write-Host "building $name" -ForegroundColor Cyan
     # h3 builds from the weights already downloaded to H3_DIR.
     $ctx = if ($name -eq 'h3') { if ($env:H3_DIR) { $env:H3_DIR } else { 'E:\h3' } } else { '.' }
-    if ($name -eq 'h3') { & "$dir\h3_split.ps1" -src $ctx -out "$dir\h3.Dockerfile" }
+    if ($name -eq 'h3') { & "$dir\h3_split.ps1" -src $ctx -out "$dir\h3.Dockerfile"; $ctx = Join-Path $ctx 'parts' }
     docker build --progress=plain -f "$dir\$name.Dockerfile" -t $tag $ctx
     if ($LASTEXITCODE) { throw "FAILED building $name" }
     Write-Host "pushing $name" -ForegroundColor Cyan

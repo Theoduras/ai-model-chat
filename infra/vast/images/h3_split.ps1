@@ -25,7 +25,7 @@ Get-ChildItem $src -Recurse -Filter *.safetensors | Where-Object { $_.FullName -
             while ($left -gt 0) { $n2 = $buf.Length; if ($left -lt $n2) { $n2 = [int]$left }; $r = $in.Read($buf, 0, $n2); $o.Write($buf, 0, $r); $left -= $r }
             $o.Close()
         }
-        $lines += "COPY --link parts/$name /h3parts/$name"
+        $lines += "COPY --link $name /h3parts/$name"
         $n++
     }
     $in.Close()
