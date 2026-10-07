@@ -22,13 +22,23 @@ API = 'https://console.vast.ai/api/v0'
 KEY = os.environ.get('VAST_API_KEY', '')
 
 
+# The int8 set the live RunPod template runs and imagegen.h3_payload names:
+# worker-comfyui 5.10.0's ComfyUI cannot load the smaller w6a8 file h3.FILES lists.
+H3_FILES = [
+    ('unet', 'diffusion_models/minimax_h3_fl2va_pruned_int8_convrot.safetensors'),
+    ('clip', 'text_encoders/qwen3vl_32b_minimax_h3_int8_convrot.safetensors'),
+    ('vae', 'vae/minimax_h3_video_vae_int8_convrot.safetensors'),
+    ('vae', 'vae/minimax_h3_audio_vae_fp32.safetensors'),
+    ('loras', 'loras/minimax_h3_fl2v_turbo_8step_v1.0_comfyui_bf16.safetensors'),
+]
+
 WORKERS = {
     'wan-2-2-gv': {
         'image': 'ghcr.io/theoduras/vast-gv:latest', 'disk': 150,
         'gpus': 'gpu_name in [RTX_6000Ada,L40,L40S,RTX_PRO_6000_S,RTX_PRO_6000_WS] cuda_max_good>=12.8', 'env': {}},
     'h3-gv': {
         'image': h3.IMAGE, 'disk': 120,
-        'gpus': 'gpu_name in [RTX_PRO_6000_S,RTX_PRO_6000_WS]', 'env': {'H3_FILES': json.dumps(h3.FILES, separators=(',', ':')), 'H3_HF': h3.HF}},
+        'gpus': 'gpu_name in [RTX_PRO_6000_S,RTX_PRO_6000_WS]', 'env': {'H3_FILES': json.dumps(H3_FILES, separators=(',', ':')), 'H3_HF': h3.HF}},
     'wan-2-2-char': {
         'image': 'ostris/aitoolkit:latest', 'disk': 300,
         'gpus': 'gpu_name in [RTX_PRO_6000_S,RTX_PRO_6000_WS,H100_SXM,H100_NVL]', 'env': {'HF_HOME': '/workspace/hf', 'MODELS_PATH': '/workspace/models'}},
