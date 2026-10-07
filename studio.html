@@ -371,6 +371,10 @@
     <button type="button" class="ob-skip" onclick="StudioWizard.open()"><span class="ob-skip-icon" aria-hidden="true">&#9678;</span>Guide</button>
   </div>
 
+  <div class="st-layout">
+  <nav class="st-rail" id="st-rail" aria-label="Studio sections"></nav>
+  <div class="st-main">
+
   <div class="gen-toggles">
     <span class="gen-label">Rating</span>
     <div class="pg-toggle" role="group" aria-label="Rating">
@@ -382,10 +386,7 @@
 
   <div class="gen-jobs" id="gen-jobs"></div>
 
-  <div class="gen-cols">
-    <div class="gen-col">
-
-      <div class="gen-panel" id="gen-p-engine">
+      <div class="gen-panel st-sec" id="gen-p-engine" data-title="Engine">
         <div class="gen-head"><b>1</b><h2>Engine</h2></div>
         <span class="hint" id="gen-job-note"></span>
         <div class="gen-f"><span id="gen-adv-summary">Model</span>
@@ -396,7 +397,7 @@
         <input type="hidden" id="gen-vmodel">
       </div>
 
-      <div class="gen-panel" id="gen-p-character">
+      <div class="gen-panel st-sec" id="gen-p-character" data-title="Character">
         <div class="gen-head"><b>2</b><h2>Character</h2></div>
         <label class="gen-f"><span>Whose photos are we generating?</span>
           <select id="persona" onchange="studioSlugFor().then(loadPersona)"></select></label>
@@ -423,9 +424,8 @@
         <input type="hidden" id="gen-ref">
         <span class="hint" id="persona-hint"></span>
       </div>
-    </div>
 
-    <div class="gen-panel gen-prompt" id="gen-p-prompt">
+    <div class="gen-panel gen-prompt st-sec" id="gen-p-prompt" data-title="Prompt">
       <div class="gen-head"><b>3</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
         <section class="gen-group">
@@ -506,7 +506,7 @@
             <span>Smudges and dust on the lens or mirror <small class="hint">(selfies)</small></span></label>
         </section>
 
-        <details class="gen-group gen-adv" id="gen-advanced">
+        <details class="gen-group gen-adv" id="gen-advanced" open>
           <summary><h3>Advanced — see or edit the prompt</h3></summary>
           <div class="gen-go">
             <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
@@ -671,7 +671,7 @@
           only supplies movement — it is never shown to a fan.</span>
       </div>
 
-      <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none">
+      <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none" open>
         <summary><h3>Advanced — see or edit the prompt</h3></summary>
         <div class="gen-go">
           <button type="button" class="btn-ai btn-ai-secondary" onclick="autoWriteVideoPrompt(true)">
@@ -696,8 +696,8 @@
       </div>
     </div>
 
-    <div class="gen-panel gen-result" id="gen-p-result">
-      <div class="gen-head"><b>4</b><h2>Size &amp; generate</h2></div>
+    <div class="gen-panel st-sec" id="gen-p-result" data-title="Size">
+      <div class="gen-head"><b>4</b><h2>Size &amp; shape</h2></div>
       <div class="gen-form" id="gen-image-out">
         <label class="gen-f"><span>Size</span>
           <select id="gen-res" onchange="genQuote()"></select></label>
@@ -744,6 +744,18 @@
           <span class="hint" id="gen-audio-note"></span>
         </div>
       </div>
+    </div>
+  </div>
+
+  <aside class="st-side" aria-label="Summary and cost">
+      <div class="st-preview" id="st-preview"><span id="st-preview-text"></span></div>
+      <div class="st-picks"><span class="st-cap">Your picks</span><p id="st-picks"></p></div>
+      <div class="st-issues" id="st-issues"></div>
+      <div class="st-cost">
+        <div class="st-cost-top"><span class="st-cost-n"><b id="st-cost-tokens">–</b><small>tokens</small></span><span id="st-cost-money"></span></div>
+        <span class="st-cost-line" id="st-cost-line"></span>
+        <div class="st-bar"><span id="st-bar-fill"></span></div>
+        <span class="st-bar-legend"><span id="st-cost-after"></span><span id="st-cost-have"></span></span>
       <div class="gen-quote">
         <div class="gen-q-row"><span id="gen-quote-what"></span><b id="gen-cost"></b></div>
         <div class="gen-q-row"><span id="gen-money-what"></span><span id="gen-money"></span></div>
@@ -755,10 +767,11 @@
         <button type="button" class="btn btn-primary" id="gen-run-btn" onclick="runGeneration()">Generate</button>
         <span class="hint" id="gen-status"></span>
       </div>
+      </div>
       <div class="gen-staging" id="gen-staging"></div>
       <span class="hint">Nothing here can reach a fan. Keep moves a shot into
         the vault and approves it; the rest delete themselves in three days.</span>
-    </div>
+  </aside>
   </div>
 
   <div class="vault" id="vault-panel">
@@ -3425,9 +3438,17 @@ function renderPresets() {
     && (p.model ? videoModels().includes(p.model)
         : !p.nsfw || videoModels().some(m => LORA_VIDEO_MODELS.includes(m))));
   box.style.display = genJob === 'animate' && usable.length ? '' : 'none';
+  const camLoop = p => {
+    const t = (p.label + ' ' + p.motion).toLowerCase();
+    return /push|zoom in|closer/.test(t) ? 'cam-push 3.2s' : /pull|zoom out|back away/.test(t) ? 'cam-pull 3.2s'
+      : /pan|across/.test(t) ? 'cam-pan 3.6s' : /orbit|circle|around/.test(t) ? 'cam-orbit 3.6s'
+      : /hand ?held|shak/.test(t) ? 'cam-hand 2.4s' : 'sway 1.7s';
+  };
   box.querySelector('div').innerHTML = usable.map(([p, i]) =>
-    `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
-      onclick="applyPreset(${i})">${esc(p.label)}${p.parts ? ' · ' + p.seconds + 's' : ''}</button>`).join('');
+    `<button type="button" class="st-tile" onclick="applyPreset(${i})"><div class="st-media">`
+    + `<div class="st-fig" style="color:var(--text-muted);animation:${camLoop(p)} ease-in-out infinite alternate">`
+    + `<svg viewBox="0 0 40 60" aria-hidden="true"><circle cx="20" cy="11" r="7" fill="currentColor"/><path d="M5 60 C5 40 10 24 20 21 C30 24 35 40 35 60 Z" fill="currentColor"/></svg></div></div>`
+    + `<span class="st-lbl">${esc(p.label)}${p.parts ? ' · ' + p.seconds + 's' : ''}</span></button>`).join('');
 }
 
 async function applyPreset(i) {
@@ -3862,7 +3883,7 @@ PageWizard.pageTour({
      body: 'Pick whose photos these are. Her approved character, or her face and body photos, keep her looking the same in every shot.'},
     {anchor: '#gen-p-prompt', placement: 'left', title: '3 · Prompt',
      body: 'Pick a scene, a shot and her expression and the direction fills itself in. Clothing, typed or an uploaded outfit photo, replaces every other outfit. Write the prompt turns it all into words, or type your own. The free phone look makes a still read like a phone snap; the unfiltered copy is kept too.'},
-    {anchor: '#gen-p-result', placement: 'left', title: '4 · Size & generate',
+    {anchor: '#gen-p-result', placement: 'left', title: '4 · Size & shape',
      body: 'Choose size, shape and how many; the price is on the button. Results land unapproved: Keep moves a photo into her vault, the rest delete themselves after 3 days.'},
   ],
 });
@@ -4042,5 +4063,265 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .guest img,.guest video{-webkit-user-drag:none;user-select:none;-webkit-touch-callout:none}
 @media print{.guest *{display:none!important}}
 </style>
+<style>
+/* Studio layout: section rail, one scrolling column of numbered sections, sticky summary. */
+.st-layout { display: flex; align-items: flex-start; gap: 24px; }
+.st-main { flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
+.st-rail { flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+.st-side { flex: 0 0 300px; display: flex; flex-direction: column; gap: 16px; padding: 18px;
+  background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r-lg); box-sizing: border-box; }
+@media (min-width: 900px) { .st-rail, .st-side { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; } }
+@media (max-width: 1000px) { .st-rail { display: none; } }
+@media (max-width: 900px) { .st-layout { flex-direction: column; align-items: stretch; } .st-side { flex: none; } }
+.st-rail button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 10px; min-height: 48px; }
+.st-rail button:hover { background: var(--panel-2); }
+.st-rail button:focus-visible { outline: 2px solid var(--accent); }
+.st-rail .st-n, .gen-head b { flex: none; width: 28px !important; height: 28px !important; border-radius: 50%; box-sizing: border-box;
+  border: 1.5px solid var(--accent) !important; color: var(--accent) !important; display: inline-flex !important; align-items: center; justify-content: center;
+  font-family: var(--display); font-size: 13px !important; font-weight: 600; background: none; }
+.st-rail .st-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.st-rail .st-t b { font-size: 14px; font-weight: 600; color: var(--text); }
+.st-rail .st-t small { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.st-sec { scroll-margin-top: 12px; border-radius: 16px; }
+.st-sec .gen-head { border-bottom: 0; padding-bottom: 0; gap: 12px; }
+.st-sec .gen-head h2 { font-family: var(--display); font-size: 1.15rem; }
+.st-sec.st-warn { border-color: #e0a030; } .st-sec.st-err { border-color: var(--err); }
+.st-sec.st-warn .gen-head b, .st-rail .st-warn .st-n { border-color: #e0a030 !important; color: #e0a030 !important; }
+.st-sec.st-err .gen-head b, .st-rail .st-err .st-n { border-color: var(--err) !important; color: var(--err) !important; }
+.gen-adv > summary { pointer-events: none; } .gen-adv > summary::before { display: none; }
+
+/* Tiles: a 16:10 media area over a label. */
+.st-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+.st-tiles.st-small { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+.st-tiles.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.st-grp { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
+.st-tile { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
+  border: 1px solid var(--border-soft); background: var(--panel); transition: border-color .15s; }
+.st-tile:hover:not([disabled]) { border-color: var(--accent-line); }
+.st-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.st-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
+.st-tile[disabled] { opacity: .45; cursor: not-allowed; }
+.st-media { position: relative; aspect-ratio: 16 / 10; overflow: hidden; background: var(--surface); }
+.st-tile[aria-pressed="true"] .st-media::after { content: '\2713'; position: absolute; right: 6px; top: 6px; width: 20px; height: 20px; border-radius: 50%;
+  background: var(--accent); color: #0e0e0e; font-size: 12px; font-weight: 800; display: flex; align-items: center; justify-content: center; }
+.st-fig { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: center; }
+.st-fig svg { height: 84%; display: block; transform-origin: 50% 0; }
+.st-slot { position: absolute; inset: 6px; border: 1px dashed var(--border); border-radius: 8px; display: flex; align-items: center; justify-content: center;
+  font-size: 11px; color: var(--text-muted); }
+.st-big { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-family: var(--display); font-size: 22px; font-weight: 700; color: var(--text); }
+.st-lbl { padding: 8px 10px 10px; font-size: 13px; line-height: 18px; font-weight: 600; color: var(--text); }
+.st-small .st-media { aspect-ratio: auto; height: 44px; }
+.st-small .st-lbl { display: none; }
+.st-chips .st-tile { border-radius: 999px; padding: 0 14px; min-height: 38px; justify-content: center; font-size: 13px; color: var(--text-2); }
+.st-chips .st-media, .st-chips .st-lbl { display: contents; }
+.gen-f select.st-tiled { display: none; }
+#gen-image-form .gen-form, #gen-p-result .gen-form { grid-template-columns: minmax(0, 1fr); }
+
+/* Engine and preset tiles. */
+.gen-chips.gen-stack { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.gen-stack .gen-chip { flex-direction: column; justify-content: flex-start; align-items: flex-start; border-radius: 12px; padding: 12px; min-height: 92px; }
+.gen-stack .gen-price, .gen-stack .gen-chip > small { margin-top: auto; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; }
+#gen-presets > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+#gen-presets .st-fig svg { transform-origin: 50% 60%; }
+@keyframes cam-push{from{transform:scale(1)}to{transform:scale(1.75) translateY(14%)}}
+@keyframes cam-pull{from{transform:scale(1.75) translateY(14%)}to{transform:scale(1)}}
+@keyframes cam-pan{from{transform:translateX(-34%)}to{transform:translateX(34%)}}
+@keyframes cam-orbit{from{transform:perspective(160px) rotateY(-55deg) translateX(-10%)}to{transform:perspective(160px) rotateY(55deg) translateX(10%)}}
+@keyframes cam-hand{0%{transform:translate(0,0) rotate(0)}20%{transform:translate(2%,-1.5%) rotate(1.2deg)}40%{transform:translate(-1.5%,1%) rotate(-.8deg)}60%{transform:translate(1%,2%) rotate(.6deg)}80%{transform:translate(-2%,-1%) rotate(-1deg)}100%{transform:translate(0,0) rotate(0)}}
+@keyframes sway{from{transform:translateX(-16%) rotate(-5deg)}to{transform:translateX(16%) rotate(5deg)}}
+@media (prefers-reduced-motion: reduce){ .st-fig { animation: none !important; } }
+
+/* Summary panel. */
+.st-preview { aspect-ratio: 4 / 5; max-height: 240px; border-radius: 14px; border: 1px solid var(--border-soft);
+  background: radial-gradient(120% 80% at 50% 0%, var(--accent-soft) 0%, var(--surface) 70%);
+  display: flex; align-items: center; justify-content: center; text-align: center; padding: 12px; box-sizing: border-box; font-size: 12px; color: var(--text-muted); }
+.st-cap { font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); }
+.st-picks p { margin: 6px 0 0; font-size: 14px; line-height: 21px; color: var(--text-2); }
+.st-issues { display: flex; flex-direction: column; gap: 6px; }
+.st-issues:empty { display: none; }
+.st-issue { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; font-size: 13px; line-height: 18px; }
+.st-issue i { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 11px; font-weight: 700; }
+.st-issue.warn { color: #e0a030; background: rgba(224,160,48,.1); }
+.st-issue.err { color: var(--err); background: rgba(255,80,80,.1); }
+.st-issue span { color: var(--text); }
+.st-cost { border-radius: 16px; background: var(--panel); border: 1px solid var(--border-soft); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
+.st-cost-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.st-cost-n b { font-family: var(--display); font-size: 34px; line-height: 38px; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
+.st-cost-n small { font-size: 14px; color: var(--text-muted); margin-left: 6px; }
+#st-cost-money { font-size: 15px; font-weight: 600; color: var(--text-2); }
+.st-cost-line { font-size: 13px; line-height: 18px; color: var(--text-muted); }
+.st-bar { height: 6px; border-radius: 999px; background: var(--surface-2); position: relative; overflow: hidden; }
+.st-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
+.st-bar-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); }
+.st-cost .gen-quote { background: none; border: 0; padding: 0; }
+.st-cost .gen-q-row:nth-child(-n+2) { display: none !important; }
+.st-cost #gen-run-btn { white-space: normal; line-height: 1.3; min-height: 50px; font-size: 15px; font-weight: 700; }
+.st-side .gen-staging { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+</style>
+<script>
+// Presentation only: every <select> below stays the source of truth; its tiles
+// mirror it and set it through a real change event, so nothing sent changes.
+(function () {
+  const TILED = {
+    'persona': 'chips', 'gen-scene': 'place', 'gen-scene-nsfw': 'slot', 'gen-shot': 'frame', 'gen-style': 'slot',
+    'gen-expression': 'slot', 'gen-zoom': 'frame', 'gen-camera': 'slot', 'gen-lighting': 'light', 'gen-quality': 'slot',
+    'gen-res': 'small', 'gen-batch': 'small', 'gen-vres': 'small', 'gen-vsecs': 'small', 'gen-sres': 'small',
+    'gen-ssecs': 'small', 'gen-smodel': 'slot', 'gen-swap-identity': 'chips', 'gen-reel-identity': 'chips', 'gen-swap-orient': 'chips',
+  };
+  const FRAMES = { closeup: 'scale(3.1) translateY(-6%)', close: 'scale(2.6) translateY(-4%)', portrait: 'scale(2)',
+    half: 'scale(1.4)', medium: 'scale(1.5)', 'waist-up': 'scale(1.5)', full: 'scale(.9) translateY(10%)', wide: 'scale(.95) translateY(8%)',
+    far: 'scale(.5) translateY(90%)', auto: 'scale(1.2)' };
+  const LIGHTS = { daylight: ['#8a8f94', '#4a4e52'], 'morning-sun': ['#e8c79a', '#6a5a48'], 'golden-hour': ['#ff9a4a', '#5a2a14'],
+    'warm-low': ['#7a4a24', '#1a100a'], candlelight: ['#d98a3a', '#140a04'], studio: ['#d8d8d8', '#5a5a5a'], 'shower-light': ['#9fb8c0', '#3a4a50'],
+    'dusk-neon': ['#ff3d9a', '#2a0a4a'], night: ['#c88a4a', '#0a0a14'], dark: ['#3a3030', '#050505'], 'phone-flash': ['#ffffff', '#0a0a0a'] };
+  const PLACES = { bedroom: ['#3a2a2a', '#1d1515'], bathroom: ['#2c3a3e', '#151c1e'], 'living-room': ['#3a3226', '#1c1813'], kitchen: ['#3b3a32', '#1d1c18'],
+    cafe: ['#4a3524', '#21170f'], street: ['#2b2f3a', '#13151b'], 'rooftop-bar': ['#3a1f4a', '#140b1c'], gym: ['#2f3436', '#151819'],
+    car: ['#262626', '#101010'], hotel: ['#3d3328', '#1a1611'], poolside: ['#1f4a5a', '#0f2229'], beach: ['#5a7a8a', '#c9a873'] };
+  const FIG = t => `<div class="st-fig"><svg viewBox="0 0 40 60" aria-hidden="true" style="transform:${t}"><circle cx="20" cy="11" r="7" fill="currentColor"/><path d="M5 60 C5 40 10 24 20 21 C30 24 35 40 35 60 Z" fill="currentColor"/></svg></div>`;
+  const hue = v => { let h = 0; for (const c of v) h = (h * 31 + c.charCodeAt(0)) % 360; return h; };
+  const grad = (v, map) => { const g = map[v]; return g ? `linear-gradient(160deg, ${g[0]}, ${g[1]})`
+    : `linear-gradient(160deg, hsl(${hue(v || 'x')} 25% 28%), hsl(${hue(v || 'x')} 25% 10%))`; };
+  const keyOf = v => (v || '').toLowerCase().replace(/\s+/g, '-');
+  const shown = n => !!n && n.offsetParent !== null;
+
+  function media(kind, o) {
+    const v = keyOf(o.value), t = esc(o.textContent.trim());
+    if (kind === 'frame') return FRAMES[v] ? `<div class="st-media" style="color:var(--text-muted)">${FIG(FRAMES[v])}</div>` : '<div class="st-media"><div class="st-slot">Example photo</div></div>';
+    if (kind === 'light') return `<div class="st-media" style="background:${grad(v, LIGHTS)}"></div>`;
+    if (kind === 'place') return `<div class="st-media" style="background:${grad(v, PLACES)}"></div>`;
+    if (kind === 'small' || kind === 'big') return `<div class="st-media"><div class="st-big">${t}</div></div>`;
+    if (kind === 'chips') return '';
+    return '<div class="st-media"><div class="st-slot">Example photo</div></div>';
+  }
+
+  function tileFor(kind, o, sel) {
+    return `<button type="button" class="st-tile" data-v="${esc(o.value)}" aria-pressed="${o.value === sel.value}"${o.disabled ? ' disabled' : ''}>`
+      + media(kind, o) + (kind === 'chips' ? esc(o.textContent.trim()) : `<span class="st-lbl">${esc(o.textContent.trim())}</span>`) + '</button>';
+  }
+
+  function syncSelect(id) {
+    const sel = el(id);
+    if (!sel) return;
+    const kind = TILED[id];
+    let box = sel.nextElementSibling && sel.nextElementSibling.classList.contains('st-tiles') ? sel.nextElementSibling : null;
+    if (!box) {
+      box = document.createElement('div');
+      box.className = 'st-tiles' + (kind === 'small' ? ' st-small' : kind === 'chips' ? ' st-chips' : '');
+      box.setAttribute('role', 'group');
+      box.addEventListener('click', e => {
+        const b = e.target.closest('.st-tile');
+        if (!b || b.disabled) return;
+        e.preventDefault();
+        sel.value = b.dataset.v;
+        sel.dispatchEvent(new Event('change', { bubbles: true }));
+        syncSelect(id);
+      });
+      sel.after(box);
+      sel.classList.add('st-tiled');
+    }
+    box.hidden = sel.hidden || sel.style.display === 'none';
+    const sig = sel.value + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
+    if (box.dataset.sig === sig) return;
+    box.dataset.sig = sig;
+    let html = '';
+    for (const node of sel.children) {
+      if (node.tagName === 'OPTGROUP') {
+        html += `<div class="st-grp">${esc(node.label)}</div>`;
+        for (const o of node.children) if (!o.hidden) html += tileFor(kind, o, sel);
+      } else if (!node.hidden) html += tileFor(kind, node, sel);
+    }
+    box.innerHTML = html;
+  }
+
+  function txt(id) { const s = el(id); return s && s.selectedOptions && s.selectedOptions[0] ? s.selectedOptions[0].textContent.trim() : ''; }
+  function sectionSummary(sec) {
+    const vis = id => shown(el(id)) || shown((el(id) || {}).nextElementSibling);
+    if (sec.id === 'gen-p-engine') {
+      const b = document.querySelector('#gen-models [aria-pressed="true"]');
+      return b ? (b.querySelector('b, span') || b).textContent.trim() : 'Pick an engine';
+    }
+    if (sec.id === 'gen-p-character') return txt('persona') || 'Pick whose photos';
+    if (sec.id === 'gen-p-prompt') {
+      if (genMake === 'image') return [txt('gen-scene'), txt('gen-shot'), txt('gen-lighting')].filter(Boolean).join(' · ');
+      const m = ['gen-video-motion', 'gen-swap-motion', 'gen-reel-prompt', 'gen-extend-motion', 'gen-multiref-motion']
+        .map(i => el(i)).find(i => shown(i) && i.value.trim());
+      return m ? m.value.trim() : 'Describe the motion';
+    }
+    if (sec.id === 'gen-p-result') {
+      if (genMake === 'image') return [txt('gen-res'), txt('gen-batch') + ' photos', currentImageAspect()].join(' · ');
+      return ['gen-vres', 'gen-vsecs', 'gen-sres', 'gen-ssecs'].filter(vis).map(txt).join(' · ');
+    }
+    return '';
+  }
+
+  function issues() {
+    const out = [];
+    let blocker = '';
+    try { blocker = jobBlocker(); } catch (e) {}
+    if (blocker) out.push({ sec: 'gen-p-prompt', kind: 'err', text: blocker });
+    const cost = parseInt((el('gen-cost') || {}).textContent, 10);
+    if (genTokens !== null && !isNaN(cost) && cost > genTokens)
+      out.push({ sec: 'gen-p-result', kind: 'warn', text: `This costs ${cost} tokens and you have ${genTokens}.` });
+    if (genMake === 'image' && genIdentity === 'vault' && genRefs && !genRefs.face.length && slug())
+      out.push({ sec: 'gen-p-character', kind: 'warn', text: 'No face photo picked, so her look may drift.' });
+    return out;
+  }
+
+  let lastRail = '', lastIssues = '';
+  function tick() {
+    Object.keys(TILED).forEach(syncSelect);
+    const secs = [...document.querySelectorAll('.st-sec')].filter(s => s.style.display !== 'none');
+    const list = issues();
+    secs.forEach(s => {
+      const mine = list.filter(i => i.sec === s.id);
+      s.classList.toggle('st-err', mine.some(i => i.kind === 'err'));
+      s.classList.toggle('st-warn', !mine.some(i => i.kind === 'err') && mine.length > 0);
+    });
+    const num = id => { const b = document.querySelector('#' + id + ' .gen-head b'); return b ? b.textContent : ''; };
+    const rail = secs.map(s => {
+      const cls = s.classList.contains('st-err') ? 'st-err' : s.classList.contains('st-warn') ? 'st-warn' : '';
+      return `<button type="button" class="${cls}" data-go="${s.id}"><span class="st-n">${esc(num(s.id))}</span>`
+        + `<span class="st-t"><b>${esc(s.dataset.title)}</b><small>${esc(sectionSummary(s))}</small></span></button>`;
+    }).join('');
+    if (rail !== lastRail) { el('st-rail').innerHTML = rail; lastRail = rail; }
+    const iss = list.map(i => `<button type="button" class="st-issue ${i.kind}" data-go="${i.sec}"><i>${esc(num(i.sec))}</i><span>${esc(i.text)}</span></button>`).join('');
+    if (iss !== lastIssues) { el('st-issues').innerHTML = iss; lastIssues = iss; }
+    el('st-picks').textContent = secs.map(sectionSummary).filter(Boolean).join(' · ');
+
+    const ratio = (genMake === 'image' ? currentImageAspect() : (aspectOffered() ? currentAspect() : '')) || '4:5';
+    const [w, h] = ratio.split(':').map(Number);
+    if (w && h) el('st-preview').style.aspectRatio = w + ' / ' + h;
+    const job = document.querySelector('#gen-jobs [aria-pressed="true"] b');
+    el('st-preview-text').textContent = (job ? job.textContent.trim() : '') + ' · ' + ratio;
+
+    const cost = parseInt((el('gen-cost') || {}).textContent, 10);
+    el('st-cost-tokens').textContent = isNaN(cost) ? '–' : cost.toLocaleString();
+    el('st-cost-money').textContent = isNaN(cost) ? '' : cashFor(cost);
+    el('st-cost-line').textContent = (el('gen-quote-what') || {}).textContent || '';
+    const have = genTokens;
+    el('st-cost-have').textContent = have === null ? 'Unlimited' : `You have ${have.toLocaleString()}`;
+    el('st-cost-after').textContent = have === null || isNaN(cost) ? '' : `${Math.max(have - cost, 0).toLocaleString()} left after`;
+    el('st-bar-fill').style.width = have === null ? '100%' : have > 0 && !isNaN(cost) ? Math.max(0, Math.min(100, (have - cost) / have * 100)) + '%' : '0%';
+
+    // The quote already disables the button for a blocker; this only adds the
+    // same rule where the quote does not, and lifts only what it set itself.
+    const btn = el('gen-run-btn');
+    const errs = list.some(i => i.kind === 'err');
+    if (errs && !btn.disabled) { btn.disabled = true; btn.dataset.stBlocked = '1'; }
+    else if (!errs && btn.dataset.stBlocked) { btn.disabled = false; delete btn.dataset.stBlocked; }
+  }
+
+  document.addEventListener('click', e => {
+    const g = e.target.closest('[data-go]');
+    if (!g) return;
+    const t = el(g.dataset.go);
+    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+  document.addEventListener('change', () => setTimeout(tick, 0));
+  document.addEventListener('click', () => setTimeout(tick, 0));
+  setInterval(tick, 400);
+  tick();
+})();
+</script>
 </body>
 </html>
