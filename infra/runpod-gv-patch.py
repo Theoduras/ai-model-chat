@@ -59,6 +59,22 @@ def load_workflow(workflow_path):
     return prompt
 
 
+_gv_queue = queue_prompt
+
+
+def queue_prompt(prompt):
+    # Newer ComfyUI (the Vast image) only loads images from its input folder.
+    import shutil
+    for node in prompt.values():
+        img = node.get('inputs', {}).get('image') if node.get('class_type') == 'LoadImage' else None
+        if isinstance(img, str) and img.startswith('/') and os.path.exists(img):
+            name = img.strip('/').replace('/', '_')
+            os.makedirs('/ComfyUI/input', exist_ok=True)
+            shutil.copy(img, os.path.join('/ComfyUI/input', name))
+            node['inputs']['image'] = name
+    return _gv_queue(prompt)
+
+
 _gv_handler = handler
 
 
@@ -84,7 +100,7 @@ def patch(src):
     if MARK in src:
         # A restarted worker keeps its disk: swap in this version of the block.
         src = src[:src.index(MARK)] + src[src.rindex(start):]
-    needed = ('def load_workflow(', 'def handler(')
+    needed = ('def load_workflow(', 'def handler(', 'def queue_prompt(')
     if not all(n in src for n in needed):
         return src
     at = src.rindex(start)
