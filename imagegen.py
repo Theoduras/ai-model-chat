@@ -2676,8 +2676,11 @@ class VastProvider(RunPodProvider):
             'lifetime': 900}}, key=key)
         body = self._post(f'{url}/run', {'auth_data': auth, 'session_id': sess['session_id'],
                                          'payload': payload}, timeout=VIDEO_TIMEOUT, key=key)
+        # Stored in generation_jobs.provider_job_id (2000 chars), so the endpoint
+        # key is looked up again on poll rather than carried.
         job = json.dumps({'url': url, 'auth': auth, 'session': sess['session_id'],
-                          'job': body.get('id'), 'key': key})
+                          'job': body.get('id'), 'ep': VAST_ENDPOINTS[model]},
+                         separators=(',', ':'))
         return job, self._read(body)
 
     def submit_video(self, spec):
@@ -2686,13 +2689,14 @@ class VastProvider(RunPodProvider):
 
     def poll(self, job_id, expect=1):
         h = json.loads(job_id)
+        key = h.get('key') or self._endpoint_key(h['ep'])
         res = self._read(self._post(f'{h["url"]}/status', {
             'auth_data': h['auth'], 'session_id': h['session'], 'payload': {'id': h['job']}},
-            key=h.get('key')))
+            key=key))
         if res.status != 'running':
             try:
                 self._post(f'{h["url"]}/session/end', {'session_id': h['session'],
-                                                       'session_auth': h['auth']}, key=h.get('key'))
+                                                       'session_auth': h['auth']}, key=key)
             except Exception:
                 pass
         return res

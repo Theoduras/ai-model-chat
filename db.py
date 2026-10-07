@@ -1003,7 +1003,7 @@ class GenerationJob(Base):
     slug = Column(String(64), nullable=False, index=True)
     kind = Column(String(8), default='image')      # image | video
     provider = Column(String(24), default='')
-    provider_job_id = Column(String(200), default='', index=True)
+    provider_job_id = Column(String(2000), default='', index=True)
     spec_json = Column(Text, default='{}')
     status = Column(String(12), default='queued')  # queued|running|done|failed
     tokens = Column(Integer, default=0)            # reserved at submit
