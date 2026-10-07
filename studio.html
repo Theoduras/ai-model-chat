@@ -47,7 +47,7 @@
 
     /* Page head: title, a one-line intro, and the guide. */
     .st-head { display: flex; align-items: flex-end; gap: 12px; flex-wrap: wrap; }
-    .st-head-t { flex: 1; min-width: 240px; }
+    .st-head-t { flex: 1 1 240px; min-width: 0; }
     .st-head h2 { font-size: 1.1rem; font-weight: 600; margin: 0 0 4px; }
     .st-head .hint { margin: 0; max-width: 72ch; }
 
@@ -68,28 +68,21 @@
     .gen-chip:focus-visible, .btn-ai:focus-visible, .gen-lb-nav:focus-visible, .gen-ref-x:focus-visible { border-radius: inherit; }
 
     /* Setup panels on the left, the prompt in the middle, the result on the right. */
-    .gen-cols { display: grid; grid-template-columns: 300px minmax(0, 1fr) 340px; gap: 20px; align-items: start; }
+    .gen-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(300px, 100%), 1fr)); gap: 20px; align-items: start; }
     .gen-col { display: flex; flex-direction: column; gap: 20px; min-width: 0; }
     .gen-panel {
       background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r-lg);
       padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; box-shadow: var(--shadow); min-width: 0;
     }
-    .gen-head { display: flex; align-items: center; gap: 9px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
+    .gen-head { display: flex; flex-wrap: wrap; align-items: center; gap: 9px; padding-bottom: 12px; border-bottom: 1px solid var(--border-soft); }
     .gen-head b {
       width: 21px; height: 21px; border-radius: 50%; border: 1px solid var(--accent); color: var(--accent);
       display: flex; align-items: center; justify-content: center; font-size: 0.7rem; flex-shrink: 0;
     }
     .gen-panel h2 { margin: 0; font-size: 0.9rem; font-weight: 600; }
     .gen-result { position: sticky; top: 0; }
-    @media (max-width: 1320px) {
-      .gen-cols { grid-template-columns: minmax(0, 1fr) 320px; }
-      .gen-cols > .gen-col { grid-column: 1; }
-      .gen-cols > .gen-prompt { grid-column: 1; }
-      .gen-cols > .gen-result { grid-column: 2; grid-row: 1 / span 2; }
-    }
     @media (max-width: 900px) {
-      .gen-cols { grid-template-columns: minmax(0, 1fr); }
-      .gen-cols > .gen-result { grid-column: 1; grid-row: auto; position: static; }
+      .gen-cols > .gen-result { position: static; }
       .fv-wrap { padding: 16px 16px 88px; }
     }
     @media (max-width: 600px) {
@@ -101,7 +94,6 @@
       .gen-chip { min-height: 38px; }
       .gen-stack .gen-chip { min-height: 44px; align-items: center; }
       #gen-direction-btn, #gen-write-btn, #vault-select-btn { min-height: 38px; }
-      .gen-form > .gen-f:last-child:nth-child(odd) { grid-column: 1 / -1; }
       .gen-check { align-items: flex-start; }
       .gen-check input { width: 20px; height: 20px; flex-shrink: 0; margin: 0; }
     }
@@ -110,9 +102,9 @@
     .gen-stack .gen-chip { display: flex; justify-content: space-between; gap: 8px; border-radius: var(--r-sm); padding: 8px 11px; text-align: left; }
     .gen-chip small { color: var(--text-muted); }
     .gen-stack .gen-eng { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-    .gen-eng b { font-weight: 600; white-space: nowrap; }
+    .gen-eng b { font-weight: 600; }
     .gen-eng .gen-tag { font-size: 12px; font-weight: 400; font-style: italic; line-height: 1.3; }
-    .gen-stack .gen-price { flex-shrink: 0; white-space: nowrap; font-weight: 400; }
+    .gen-stack .gen-price { flex-shrink: 0; font-weight: 400; }
     .gen-chip[aria-pressed="true"] small { color: var(--text-2); }
 
     /* Thumbnails: one 3:4 tile for every photo picker on the page. */
@@ -127,7 +119,7 @@
     .gen-ref-t em {
       position: absolute; left: 3px; bottom: 3px; max-width: calc(100% - 6px); font-style: normal; font-size: 0.6rem;
       color: #fff; background: rgba(0,0,0,.62); border-radius: 4px; padding: 1px 5px;
-      overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      overflow-wrap: anywhere;
     }
     .gen-ref-none { display: flex; align-items: center; justify-content: center; font-size: 0.6rem; line-height: 1.2; color: var(--text-muted); padding: 4px; }
     .gen-ref-x {
@@ -156,7 +148,7 @@
       animation: modalIn .15s ease-out;
     }
     .gen-sheet .modal-footer { margin: 0; padding: 14px 22px; border-top: 1px solid var(--border-soft); }
-    .gen-pick { display: grid; grid-template-columns: repeat(auto-fill, minmax(100px, 1fr)); gap: 10px; }
+    .gen-pick { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100px, 100%), 1fr)); gap: 10px; }
     .gen-pick .gen-ref-t { width: 100%; }
     .anim-pick { position: relative; }
     .gen-zoom-btn {
@@ -181,7 +173,7 @@
     .gen-lb-close { top: 16px; right: 16px; transform: none; font-size: 1.25rem; }
     /* These borrowed .gen-card's button look, which only applies inside a card,
        so in the viewer they rendered as bare browser buttons. */
-    #gen-lb-actions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; gap: 10px; }
+    #gen-lb-actions { position: absolute; bottom: 20px; left: 50%; transform: translateX(-50%); display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; max-width: calc(100% - 32px); }
     #gen-lb-actions[hidden] { display: none; }
     #gen-lb-actions button {
       border: none; border-radius: var(--r-sm); cursor: pointer; font: 600 0.9rem var(--font);
@@ -192,10 +184,10 @@
     .gen-lightbox:has(#gen-lb-actions:not([hidden])) { padding-bottom: 88px; }
 
     .gen-quote { background: var(--panel); border: 1px solid var(--border-soft); border-radius: var(--r-md); padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
-    .gen-q-row { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
+    .gen-q-row { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; font-size: 0.78rem; color: var(--text-2); }
     .gen-q-row b { font-family: var(--display); font-size: 1.05rem; color: var(--text); }
 
-    .gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(136px, 1fr)); gap: 12px 10px; }
+    .gen-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(136px, 100%), 1fr)); gap: 12px 10px; }
     .gen-form > .hint { grid-column: 1 / -1; }
     .gen-stackform { display: flex; flex-direction: column; gap: 12px; }
     .gen-f { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
@@ -205,9 +197,10 @@
     body.page-dashboard .gen-f select { padding-right: 32px; }
     .gen-f > label, .gen-lbl label { font-size: 0.78rem; font-weight: 600; color: var(--text-2); }
     .gen-form > .gen-wide { grid-column: 1 / -1; }
-    .gen-form > .gen-f > span:not(.hint), .gen-form > .gen-f > label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    #gen-direction-btn { align-self: stretch; padding: 0 14px; white-space: nowrap; }
-    .gen-lbl { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+    #gen-direction-btn { align-self: stretch; padding: 6px 14px; flex: 1 0 auto; }
+    #gen-direction { flex: 1 1 220px; min-width: 0; }
+    .gen-go > .hint { flex: 1 1 160px; }
+    .gen-lbl { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
     .gen-tag-nsfw { font-style: normal; font-size: 0.62rem; font-weight: 700; letter-spacing: .04em;
       color: var(--accent); border: 1px solid var(--accent-line); border-radius: 999px; padding: 1px 6px; margin-left: 4px; vertical-align: 1px; }
     .gen-info { display: inline-flex; align-items: center; gap: 5px; border: 1px solid var(--border); background: var(--panel);
@@ -233,7 +226,7 @@
       line-height: 1.25; cursor: pointer; }
     .gen-more:hover { border-color: var(--accent-line); color: var(--text); }
     .gen-staging > .gen-more, .vault-grid > .gen-more { aspect-ratio: 3/4; }
-    .gen-check { display: flex; gap: 8px; align-items: center; font-size: 0.82rem; }
+    .gen-check { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 0.82rem; }
     .gen-check input { accent-color: var(--accent); width: 16px; height: 16px; }
     .gen-file input[type="file"] { display: none; }
     .gen-clip { width: 100%; max-height: 240px; border-radius: var(--r-md); background: #000; }
@@ -242,22 +235,22 @@
     .gen-engines b { color: var(--text); font-weight: 600; }
     .gen-engines code { font-size: 0.95em; background: var(--surface-2); padding: 1px 5px; border-radius: 4px; }
     .gen-go { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
-    #gen-run-btn { width: 100%; white-space: nowrap; }
+    #gen-run-btn { width: 100%; }
     .gen-err { color: var(--err); }
     .gen-ok { color: var(--ok); }
 
-    .gen-staging { display: grid; grid-template-columns: repeat(auto-fill, minmax(96px, 1fr)); gap: 8px; }
+    .gen-staging { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(96px, 100%), 1fr)); gap: 8px; }
     .gen-card {
       position: relative; aspect-ratio: 3/4; border-radius: var(--r-sm); overflow: hidden;
       border: 1px solid var(--border-soft); background: var(--surface); cursor: zoom-in;
     }
     .gen-card img, .gen-card video { width: 100%; height: 100%; object-fit: cover; display: block; }
     .gen-card .gen-acts {
-      position: absolute; inset: auto 0 0 0; display: flex; gap: 3px; padding: 4px;
+      position: absolute; inset: auto 0 0 0; display: flex; flex-wrap: wrap; gap: 3px; padding: 4px;
       background: linear-gradient(to top, rgba(0,0,0,.75), transparent);
     }
     .gen-card .gen-acts button {
-      flex: 1; border: none; border-radius: var(--r-xs); cursor: pointer; font-family: var(--font);
+      flex: 1 1 40px; border: none; border-radius: var(--r-xs); cursor: pointer; font-family: var(--font);
       font-size: 0.68rem; font-weight: 600; padding: 5px 0; color: #fff;
     }
     .gen-keep { background: var(--accent); color: var(--accent-ink) !important; }
@@ -273,7 +266,7 @@
     .gen-engine {
       position: absolute; bottom: 34px; left: 4px; max-width: calc(100% - 8px); padding: 1px 6px;
       border-radius: 999px; background: rgba(0,0,0,.62); color: #fff; font-size: 0.6rem;
-      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+      overflow-wrap: anywhere;
     }
     .gen-pending .gen-engine, .gen-failed .gen-engine { position: static; bottom: auto; }
     .gen-pending, .gen-failed {
@@ -300,7 +293,7 @@
     .anim-pick[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring); }
 
     .gen-jobs { display: grid; gap: 8px; }
-    .gen-jobs-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); }
+    .gen-jobs-row { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); }
     .gen-jobs-h {
       margin: 4px 0 0; font-family: var(--font); font-size: 0.66rem; font-weight: 700; letter-spacing: .08em;
       text-transform: uppercase; color: var(--text-muted);
@@ -317,7 +310,7 @@
     .gen-job[aria-pressed="true"] { border-color: var(--accent-line); background: var(--accent-soft); }
     .gen-job[disabled] { cursor: not-allowed; }
     .gen-job[disabled] b, .gen-job[disabled] small { opacity: .55; }
-    .gen-soon.gen-sub-only { position: static; display: inline-block; white-space: nowrap; }
+    .gen-soon.gen-sub-only { position: static; display: inline-block; }
     .gen-soon.gen-sub-only[hidden] { display: none; }
     .gen-soon {
       position: absolute; top: 9px; right: 9px; font-size: 0.6rem; font-weight: 700; letter-spacing: .04em;
@@ -330,17 +323,12 @@
     @media (max-width: 600px) {
       /* 16px page + 20px panel padding left 286px; panels match the page gutter. */
       .gen-panel { padding: 16px; }
-      .gen-jobs-row { grid-template-columns: minmax(0, 1fr); }
       .gen-job { padding: 12px 14px; }
       .gen-job:has(.gen-soon:not(.gen-sub-only)) { padding-right: 64px; }
-      #gen-run-btn { white-space: normal; line-height: 1.3; min-height: 46px; }
-      .gen-stack .gen-eng b { white-space: normal; }
-      .gen-form > .gen-f > span:not(.hint), .gen-form > .gen-f > label { white-space: normal; }
+      #gen-run-btn { line-height: 1.3; min-height: 46px; }
       /* Four actions did not fit one row of a 139px card. */
-      .gen-staging { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-      .gen-card .gen-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 6px; }
+      .gen-card .gen-acts { gap: 4px; padding: 6px; }
       .gen-card .gen-acts button { min-height: 30px; font-size: 0.74rem; }
-      .gen-card .gen-acts button:only-child, .gen-card .gen-acts button:last-child:nth-child(odd) { grid-column: 1 / -1; }
       .gen-engine { bottom: 42px; }
       .gen-card:has(.gen-acts > button:nth-child(3)) .gen-engine { bottom: 76px; }
       .gen-del { width: 32px; height: 32px; font-size: 0.8rem; }
@@ -348,7 +336,8 @@
       .gen-panel .btn-sm, .vault .btn-sm, .gen-panel .btn-ai { min-height: 38px; }
       .gen-lightbox, .gen-lightbox:has(#gen-lb-actions:not([hidden])) { padding: 72px 16px 136px; }
       #gen-lb-actions { left: 16px; right: 16px; transform: none; bottom: max(20px, env(safe-area-inset-bottom)); }
-      #gen-lb-actions button { flex: 1 1 0; padding: 10px 0; }
+      #gen-lb-actions { max-width: none; }
+      #gen-lb-actions button { flex: 1 1 100px; padding: 10px 0; }
       .gen-lb-prev, .gen-lb-next { top: auto; bottom: calc(max(20px, env(safe-area-inset-bottom)) + 56px); transform: none; }
     }
   </style>
@@ -468,8 +457,8 @@
             <span class="hint" id="gen-location-note">A picked photo wins over “Where is she”. Only the place is copied, never anyone in it.</span>
           </div>
           <div class="gen-f"><span>What she's doing</span>
-            <div class="gen-go" style="flex-wrap:nowrap;">
-              <input type="text" id="gen-direction" maxlength="300" style="flex:1; min-width:0;"
+            <div class="gen-go">
+              <input type="text" id="gen-direction" maxlength="300"
                      placeholder="taking a pov selfie in the kitchen">
               <button type="button" class="btn btn-ghost btn-sm" id="gen-direction-btn" onclick="suggestDirection()">&#10022; Suggest</button>
             </div>
@@ -3571,7 +3560,7 @@ function renderChainMotions() {
       return `<div class="gen-f"><span>Part ${i + 2} — ${from}–${at}s</span>
         <input type="text" maxlength="300" value="${esc(genChainMotions[i] || '')}"
           placeholder="same as the part before" oninput="genChainMotions[${i}] = this.value">
-        <div style="margin:6px 0"><button type="button" class="btn-ai btn-ai-secondary"
+        <div class="gen-go" style="margin:6px 0"><button type="button" class="btn-ai btn-ai-secondary"
           onclick="writePartPrompt(${i})">Write prompt for part ${i + 2}</button>
           <span class="hint" id="gen-part-note-${i}"></span></div>
         <textarea rows="4" maxlength="2000" id="gen-part-prompt-${i}"
@@ -3680,9 +3669,9 @@ function renderLoras() {
     const off = l.enabled === false;
     if (off) delete genLoraPick[l.id];
     const picked = l.id in genLoraPick;
-    return `<label style="display:flex;align-items:center;gap:8px;margin:4px 0${off ? ';opacity:.45' : ''}">
+    return `<label style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0${off ? ';opacity:.45' : ''}">
       <input type="checkbox" ${picked ? 'checked' : ''} ${off ? 'disabled' : ''} onchange="toggleLora('${esc(l.id)}', this.checked)">
-      <span style="flex:1">${esc(l.name)}</span>
+      <span style="flex:1 1 160px;min-width:0;overflow-wrap:anywhere">${esc(l.name)}</span>
       <input type="number" min="0" max="2" step="0.05" style="width:80px"
         value="${picked ? genLoraPick[l.id] : l.scale}" onchange="genLoraPick['${esc(l.id)}'] = +this.value">
       ${genVideoOpen ? `<button type="button" class="btn-ai btn-ai-secondary"
@@ -4141,14 +4130,21 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 </style>
 <style>
 /* Studio layout: section rail, one scrolling column of numbered sections, sticky summary. */
-.st-layout { display: flex; align-items: flex-start; gap: 24px; }
+.st-layout { display: flex; flex-wrap: wrap; align-items: flex-start; gap: 24px; }
 .st-main { flex: 1 1 560px; min-width: 0; display: flex; flex-direction: column; gap: 20px; }
-.st-rail { flex: 0 0 200px; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
-.st-side { flex: 0 0 300px; display: flex; flex-direction: column; gap: 16px; padding: 18px;
+.st-rail { flex: 0 1 200px; display: flex; flex-direction: column; gap: 4px; padding: 6px 0; }
+.st-side { flex: 1 1 300px; max-width: 100%; display: flex; flex-direction: column; gap: 16px; padding: 18px;
   background: var(--panel-2); border: 1px solid var(--border-soft); border-radius: var(--r-lg); box-sizing: border-box; }
-@media (min-width: 900px) { .st-rail, .st-side { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; } }
-@media (max-width: 1000px) { .st-rail { display: none; } }
-@media (max-width: 900px) { .st-layout { flex-direction: column; align-items: stretch; } .st-side { flex: none; } }
+@media (min-width: 1001px) { .st-main { flex-basis: 400px; } .st-rail { flex-basis: 180px; } .st-side { flex: 0 1 300px; } .st-rail, .st-side { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; } }
+@media (min-width: 901px) and (max-width: 1000px) { .st-side { position: sticky; top: 0; max-height: 100vh; overflow-y: auto; } }
+/* Narrow: the rail moves under the main column instead of disappearing; the side panel joins it below 900px. */
+@media (max-width: 1000px) {
+  .st-main { order: 1; flex: 1 1 560px; }
+  .st-side { order: 2; }
+  .st-rail { order: 3; flex: 1 1 100%; flex-direction: row; flex-wrap: wrap; gap: 6px; }
+  .st-rail button { flex: 1 1 180px; border: 1px solid var(--border-soft); }
+}
+@media (max-width: 900px) { .st-main, .st-side { flex: 1 1 100%; } }
 .st-rail button { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 12px; align-items: flex-start; padding: 10px; border-radius: 10px; min-height: 48px; }
 .st-rail button:hover { background: var(--panel-2); }
 .st-rail button:focus-visible { outline: 2px solid var(--accent); }
@@ -4157,7 +4153,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   font-family: var(--display); font-size: 13px !important; font-weight: 600; background: none; }
 .st-rail .st-t { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
 .st-rail .st-t b { font-size: 14px; font-weight: 600; color: var(--text); }
-.st-rail .st-t small { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.st-rail .st-t small { font-size: 12px; line-height: 16px; color: var(--text-muted); overflow-wrap: anywhere; }
 .st-sec { scroll-margin-top: 12px; border-radius: 16px; }
 .st-sec .gen-head { border-bottom: 0; padding-bottom: 0; gap: 12px; }
 .st-sec .gen-head h2 { font-family: var(--display); font-size: 1.15rem; }
@@ -4167,8 +4163,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .gen-adv > summary { pointer-events: none; } .gen-adv > summary::before { display: none; }
 
 /* Tiles: a 16:10 media area over a label. */
-.st-tiles { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
-.st-tiles.st-small { grid-template-columns: repeat(auto-fill, minmax(78px, 1fr)); }
+.st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(128px, 100%), 1fr)); gap: 8px; }
+.st-tiles.st-small { grid-template-columns: repeat(auto-fit, minmax(min(78px, 100%), 1fr)); }
 .st-tiles.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .st-grp { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
 .st-tile { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
@@ -4193,7 +4189,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .gen-f select.st-tiled { display: none; }
 .st-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
 .st-ex-by { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 1px 7px; border-radius: 999px;
-  background: rgba(0,0,0,.62); color: #fff; font-size: 10px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  background: rgba(0,0,0,.62); color: #fff; font-size: 10px; line-height: 16px; overflow-wrap: anywhere; }
 .gen-chip { position: relative; }
 .st-eng-photo { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 50% 30%; border-radius: 8px; margin-bottom: 8px; display: block; }
 .gen-stack .gen-chip > .st-ex-by { top: 18px; bottom: auto; left: 18px; }
@@ -4201,13 +4197,16 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 #gen-p-type .pg-toggle, #gen-p-rating .pg-toggle { align-self: flex-start; height: 38px; }
 #gen-p-type .pg-toggle button.active { color: var(--accent); }
 #gen-levels:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px; }
-#gen-image-form .gen-form, #gen-p-result .gen-form { grid-template-columns: minmax(0, 1fr); }
+#gen-p-type .pg-toggle, #gen-p-rating .pg-toggle { flex-wrap: wrap; height: auto; width: 360px; align-self: flex-start; box-sizing: border-box; min-height: 38px; max-width: 100%; overflow: visible; }
+#gen-p-type .pg-toggle button, #gen-p-rating .pg-toggle button { flex: 1 1 120px; min-height: 32px; white-space: normal; }
+.gen-chips > .gen-chip, .gen-seg > .gen-chip { flex: 1 1 auto; }
+.gen-form > .gen-f:has(> .st-tiles:not(.st-chips):not(.st-small)), #gen-swap-out > .hint { grid-column: 1 / -1; }
 
 /* Engine and preset tiles. */
-.gen-chips.gen-stack { display: grid; grid-template-columns: repeat(auto-fill, minmax(170px, 1fr)); gap: 8px; }
+.gen-chips.gen-stack { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 8px; }
 .gen-stack .gen-chip { flex-direction: column; justify-content: flex-start; align-items: flex-start; border-radius: 12px; padding: 12px; min-height: 92px; }
 .gen-stack .gen-price, .gen-stack .gen-chip > small { margin-top: auto; font-size: 12px; font-weight: 600; color: var(--accent); background: var(--accent-soft); border-radius: 999px; padding: 1px 8px; }
-#gen-presets > div { display: grid; grid-template-columns: repeat(auto-fill, minmax(128px, 1fr)); gap: 8px; }
+#gen-presets > div { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(128px, 100%), 1fr)); gap: 8px; }
 #gen-presets .st-fig svg { transform-origin: 50% 60%; }
 @keyframes cam-push{from{transform:scale(1)}to{transform:scale(1.75) translateY(14%)}}
 @keyframes cam-pull{from{transform:scale(1.75) translateY(14%)}to{transform:scale(1)}}
@@ -4225,24 +4224,24 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-picks p { margin: 6px 0 0; font-size: 14px; line-height: 21px; color: var(--text-2); }
 .st-issues { display: flex; flex-direction: column; gap: 6px; }
 .st-issues:empty { display: none; }
-.st-issue { all: unset; box-sizing: border-box; cursor: pointer; display: flex; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; font-size: 13px; line-height: 18px; }
+.st-issue { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; font-size: 13px; line-height: 18px; }
 .st-issue i { flex: none; width: 22px; height: 22px; border-radius: 50%; border: 1.5px solid currentColor; display: inline-flex; align-items: center; justify-content: center; font-style: normal; font-size: 11px; font-weight: 700; }
 .st-issue.warn { color: #e0a030; background: rgba(224,160,48,.1); }
 .st-issue.err { color: var(--err); background: rgba(255,80,80,.1); }
 .st-issue span { color: var(--text); }
 .st-cost { border-radius: 16px; background: var(--panel); border: 1px solid var(--border-soft); padding: 18px; display: flex; flex-direction: column; gap: 12px; }
-.st-cost-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.st-cost-top { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between; gap: 8px; }
 .st-cost-n b { font-family: var(--display); font-size: 34px; line-height: 38px; font-weight: 700; letter-spacing: -.02em; color: var(--text); }
 .st-cost-n small { font-size: 14px; color: var(--text-muted); margin-left: 6px; }
 #st-cost-money { font-size: 15px; font-weight: 600; color: var(--text-2); }
 .st-cost-line { font-size: 13px; line-height: 18px; color: var(--text-muted); }
 .st-bar { height: 6px; border-radius: 999px; background: var(--surface-2); position: relative; overflow: hidden; }
 .st-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 999px; background: var(--accent); }
-.st-bar-legend { display: flex; justify-content: space-between; font-size: 12px; color: var(--text-muted); }
+.st-bar-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; justify-content: space-between; font-size: 12px; color: var(--text-muted); }
 .st-cost .gen-quote { background: none; border: 0; padding: 0; }
 .st-cost .gen-q-row:nth-child(-n+2) { display: none !important; }
-.st-cost #gen-run-btn { white-space: normal; line-height: 1.3; min-height: 50px; font-size: 15px; font-weight: 700; }
-.st-side .gen-staging { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.st-cost #gen-run-btn { line-height: 1.3; min-height: 50px; font-size: 15px; font-weight: 700; }
+.st-side .gen-staging { grid-template-columns: repeat(auto-fit, minmax(min(110px, 100%), 1fr)); }
 </style>
 <script>
 // Presentation only: every <select> below stays the source of truth; its tiles
