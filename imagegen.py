@@ -63,6 +63,9 @@ def submit_window(spec):
     """The longest a submit for this spec can block before it has an answer.
     A still is answered inline, so until then there is no task id to record,
     and a job without one is not dead until this has passed."""
+    if (spec or {}).get('model') in VAST_MODELS:
+        # A Vast submit waits for a worker to wake before it has a job id.
+        return VAST_ROUTE_WAIT + VIDEO_TIMEOUT
     if (spec or {}).get('kind') == 'image':
         return IMAGE_TIMEOUT + 30 * int(spec.get('batch') or 1)
     return VIDEO_TIMEOUT
