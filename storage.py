@@ -33,12 +33,19 @@ logger = logging.getLogger('storage')
 
 STAGING_PREFIX = 'staging'
 KEPT_PREFIX = 'kept'
+# The studio's example photos: a demo model, never anyone's media. Nothing
+# that sends, posts or references a photo may read from here.
+EXAMPLES_PREFIX = 'examples'
 STAGING_DAYS = 3
 
 _EXT = {
     'image/jpeg': '.jpg', 'image/jpg': '.jpg', 'image/png': '.png',
     'image/webp': '.webp', 'video/mp4': '.mp4', 'video/webm': '.webm',
 }
+
+
+def is_example(path):
+    return (path or '').startswith(EXAMPLES_PREFIX + '/')
 
 
 def mime_of(path):

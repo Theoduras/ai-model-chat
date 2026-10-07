@@ -1144,7 +1144,9 @@ _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 # never fetch the page to read that tag, leaving anything already indexed stuck.
 _CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/tokens', '/api/',
                    '/xbot', '/fanvue', '/onlyfans', '/threads', '/telegram', '/auth/',
-                   '/logout', '/go/', '/signup-']
+                   '/logout', '/go/', '/signup-',
+                   # The studio's other rating, fetched only once its toggle is on.
+                   '/js/studio-nsfw.js']
 
 
 def _request_origin():
@@ -35833,6 +35835,8 @@ def _char_path_url(path, mime):
     the backend cannot mint one -- dropping a reference would quietly cost her
     the identity lock."""
     import base64
+    if storage.is_example(path):
+        return None
     try:
         url = storage.signed_url(path)
     except Exception:
@@ -38625,6 +38629,270 @@ GEN_SUBMIT_GRACE = int(os.getenv('GEN_SUBMIT_GRACE', '60'))
 # creator's credits. Everything that the worker would have done off-request is
 # done on-request instead — see _gen_start's caller and _gen_advance_open.
 GEN_HAS_WORKER = _worker_enabled('GEN_WORKER')
+
+# ── Studio example photos ────────────────────────────────────────────────────
+# One demo model per option tile and per engine (studio_examples.py). The
+# manifest is one app setting, `engine:option_key` -> {path, by, at}; the
+# objects sit under storage's examples/ prefix. Nothing else reads either.
+import studio_examples as EX
+
+EXAMPLES_SETTING = 'studio_examples'
+EXAMPLES_RUN_SETTING = 'studio_examples_run'
+EXAMPLES_INLINE_BATCH = 3
+# A run whose heartbeat is older than this died with its instance.
+EXAMPLES_STALE_SECONDS = 600
+_examples_lock = threading.Lock()
+
+
+def _examples_manifest():
+    try:
+        m = json.loads(_get_setting(EXAMPLES_SETTING) or '{}')
+    except ValueError:
+        m = {}
+    return m if isinstance(m, dict) else {}
+
+
+def _examples_put(name, entry):
+    """Record one example and drop the object it replaces."""
+    with _examples_lock:
+        m = _examples_manifest()
+        old = (m.get(name) or {}).get('path')
+        m[name] = entry
+        _set_setting(EXAMPLES_SETTING, json.dumps(m))
+    if old and old != entry['path'] and storage.is_example(old):
+        storage.delete(old)
+
+
+def _examples_run():
+    try:
+        st = json.loads(_get_setting(EXAMPLES_RUN_SETTING) or '{}')
+    except ValueError:
+        st = {}
+    return st if isinstance(st, dict) else {}
+
+
+def _examples_set_run(**kw):
+    with _examples_lock:
+        st = _examples_run()
+        st.update(kw, beat=time.time())
+        _set_setting(EXAMPLES_RUN_SETTING, json.dumps(st))
+    return st
+
+
+def _examples_ref_url(path):
+    """The anchor as something the provider can fetch. Its own reader, because
+    _char_path_url refuses example paths."""
+    import base64
+    try:
+        url = storage.signed_url(path)
+    except Exception:
+        url = None
+    return url or 'data:image/jpeg;base64,' + base64.b64encode(storage.get(path)).decode()
+
+
+def _examples_anchor():
+    """The anchor portrait's path, made once on the example model. Returns
+    (path, USD spent making it now)."""
+    have = _examples_manifest().get('_anchor')
+    if have:
+        return have['path'], 0.0
+    data, mime, cost = EX.generate(EX.anchor_prompt(), EX.EXAMPLE_ENGINE, EX.example_air(),
+                                   aspect=EX.ANCHOR_ASPECT)
+    path = storage.replace(EX.path_for('anchor'), data, mime or 'image/jpeg')
+    _examples_put('_anchor', {'path': path, 'by': EX.EXAMPLE_ENGINE, 'at': time.time(),
+                              'cost': round(cost, 5)})
+    logger.info('EXAMPLES anchor made on %s cost=$%.4f', EX.example_air(), cost)
+    return path, cost
+
+
+def _examples_make(engine, key, ref):
+    """Make and store one example. Returns the provider USD it cost."""
+    name = f'{engine}:{key}'
+    src_name = f'_src:{engine}'
+    if key in EX.DERIVED:
+        cost = 0.0
+        if not _examples_manifest().get(src_name):
+            cost = _examples_make(engine, EX.DERIVED_SOURCE, ref)
+        src = _examples_manifest()[src_name]
+        data = EX.phone_tile(storage.get(src['path']), EX.DERIVED[key])
+        path = storage.replace(EX.path_for(name), data, 'image/jpeg', compress=False)
+        _examples_put(name, {'path': path, 'by': src['by'], 'at': time.time(), 'cost': 0})
+        return cost
+    data, mime, cost, by = EX.make(engine, key, ref)
+    if key == EX.DERIVED_SOURCE:
+        full = storage.replace(EX.path_for('src-' + engine), data, mime or 'image/jpeg')
+        _examples_put(src_name, {'path': full, 'by': by, 'at': time.time()})
+        data = EX.phone_tile(data, None)
+    else:
+        data = EX.tile(data)
+    path = storage.replace(EX.path_for(name), data, 'image/jpeg', compress=False)
+    _examples_put(name, {'path': path, 'by': by, 'at': time.time(), 'cost': round(cost, 5)})
+    logger.info('EXAMPLES %s made by %s cost=$%.4f', name, by, cost)
+    return cost
+
+
+def _examples_pending(engine, since=0.0):
+    """Keys still to make: missing, or (on a forced run) made before it began.
+    A filtered phone look comes after the plain selfie it is made from."""
+    m = _examples_manifest()
+    out = [k for k in EX.keys_for(engine)
+           if (m.get(f'{engine}:{k}') or {}).get('at', 0) <= since
+           and (since or not m.get(f'{engine}:{k}'))]
+    return sorted(out, key=lambda k: k in EX.DERIVED)
+
+
+def _examples_batch(engine, keys):
+    """Make `keys` in order, logging what each one cost. A failure is recorded
+    and skipped, so one refused tile does not stop the set."""
+    anchor, spent = _examples_anchor()
+    ref = _examples_ref_url(anchor)
+    for key in keys:
+        try:
+            spent += _examples_make(engine, key, ref)
+        except Exception as e:
+            logger.warning('EXAMPLES %s:%s failed: %s', engine, key, str(e)[:200])
+            st = _examples_run()
+            _examples_set_run(failed=sorted(set(st.get('failed') or []) | {key}),
+                              error=f'{key}: {str(e)[:200]}')
+        st = _examples_run()
+        _examples_set_run(cost_usd=round(float(st.get('cost_usd') or 0) + spent, 4))
+        spent = 0.0
+
+
+def _examples_status(engine):
+    st = _examples_run()
+    since = float(st.get('since') or 0) if st.get('engine') == engine else 0.0
+    total = len(EX.keys_for(engine))
+    running = bool(st.get('running') and st.get('engine') == engine
+                   and time.time() - float(st.get('beat') or 0) < EXAMPLES_STALE_SECONDS)
+    low, high, calls = EX.estimate(engine)
+    mine = st.get('engine') == engine
+    return {'engine': engine, 'total': total,
+            'have': total - len(_examples_pending(engine, since)),
+            'running': running, 'failed': (st.get('failed') or []) if mine else [],
+            'error': st.get('error', '') if mine else '',
+            'cost_usd': st.get('cost_usd', 0) if mine else 0,
+            'estimate_usd': [low, high], 'calls': calls,
+            'worker': GEN_HAS_WORKER}
+
+
+def _examples_thread(engine, since):
+    try:
+        while True:
+            keys = _examples_pending(engine, since)
+            failed = set(_examples_run().get('failed') or [])
+            keys = [k for k in keys if k not in failed]
+            if not keys:
+                break
+            _examples_batch(engine, keys[:1])
+    except Exception:
+        logger.exception('EXAMPLES run for %s stopped', engine)
+    finally:
+        _examples_set_run(running=False)
+        logger.info('EXAMPLES run for %s done, provider cost $%s',
+                    engine, _examples_run().get('cost_usd'))
+
+
+@app.route('/api/generate/examples')
+def api_generate_examples():
+    """{`engine:option_key`: url} for every example made so far; `by` names the
+    engine that made one where it is not the engine it is filed under."""
+    refused = _require_active()
+    if refused:
+        return refused
+    # The 18+ examples only once the studio has that rating on, so a page
+    # that never switched it never learns they exist.
+    adult = request.args.get('nsfw') == '1'
+    out, by = {}, {}
+    for name, e in _examples_manifest().items():
+        if name.startswith('_') or not isinstance(e, dict) or not e.get('path'):
+            continue
+        if not adult and name.split(':', 1)[-1] in EX.ADULT:
+            continue
+        out[name] = ('/api/generate/examples/file?n=' + urllib.parse.quote(name)
+                     + '&v=' + os.path.basename(e['path']).rsplit('.', 1)[0][-10:])
+        if e.get('by') and e['by'] != name.split(':', 1)[0]:
+            by[name] = e['by']
+    return jsonify({'default_engine': EX.EXAMPLE_ENGINE, 'engines': list(EX.ENGINES),
+                    'examples': out, 'by': by})
+
+
+@app.route('/api/generate/examples/file')
+def api_generate_examples_file():
+    refused = _require_active()
+    if refused:
+        return refused
+    name = request.args.get('n') or ''
+    e = _examples_manifest().get(name) if not name.startswith('_') else None
+    if not isinstance(e, dict) or not storage.is_example(e.get('path')):
+        return ('', 404)
+    return _serve_stored(e['path'], 'image/jpeg')
+
+
+@app.route('/api/generate/examples/status')
+def api_generate_examples_status():
+    refused = _require_admin()
+    if refused:
+        return refused
+    engine = request.args.get('engine') or EX.EXAMPLE_ENGINE
+    if engine not in EX.ENGINES:
+        return jsonify({'error': 'Unknown engine'}), 400
+    return jsonify(_examples_status(engine))
+
+
+@app.route('/api/generate/examples', methods=['POST'])
+def api_generate_examples_make():
+    """Make one engine's examples. Admin only, and never charged: it is the
+    platform's spend, logged per still. A host with a worker runs the set on a
+    thread; without one each call makes a few and the button calls again."""
+    refused = _require_admin()
+    if refused:
+        return refused
+    if not storage.enabled():
+        return jsonify({'error': 'No media storage is configured'}), 503
+    body = request.get_json(silent=True) or {}
+    engine = body.get('engine') or EX.EXAMPLE_ENGINE
+    if engine not in EX.ENGINES:
+        return jsonify({'error': 'Unknown engine'}), 400
+    key = (body.get('key') or '').strip()
+    if key:
+        if key not in EX.keys_for(engine):
+            return jsonify({'error': 'Unknown example key for this engine'}), 400
+        try:
+            _examples_batch(engine, [key])
+        except Exception as e:
+            return jsonify({'error': str(e)[:300]}), 502
+        return jsonify(dict(_examples_status(engine), ok=True))
+
+    st = _examples_run()
+    busy = st.get('running') and time.time() - float(st.get('beat') or 0) < EXAMPLES_STALE_SECONDS
+    if GEN_HAS_WORKER:
+        if busy:
+            return jsonify(dict(_examples_status(st.get('engine') or engine),
+                                error='A run is already going')), 409
+        since = time.time() if body.get('force') else 0.0
+        _examples_set_run(engine=engine, since=since, running=True, failed=[], error='',
+                          cost_usd=0, started=time.time())
+        threading.Thread(target=_examples_thread, args=(engine, since), daemon=True).start()
+        return jsonify(dict(_examples_status(engine), ok=True)), 202
+
+    # Inline: the first call starts the run and hands back `since`; the calls
+    # after it say `cont` and pass that `since` back, so a forced run still ends.
+    since = float(body.get('since') or 0)
+    if not body.get('cont'):
+        since = time.time() if body.get('force') else 0.0
+        _examples_set_run(engine=engine, since=since, running=False, failed=[], error='',
+                          cost_usd=0, started=time.time())
+    failed = set(_examples_run().get('failed') or [])
+    keys = [k for k in _examples_pending(engine, since) if k not in failed]
+    try:
+        _examples_batch(engine, keys[:EXAMPLES_INLINE_BATCH])
+    except Exception as e:
+        return jsonify({'error': str(e)[:300]}), 502
+    failed = set(_examples_run().get('failed') or [])
+    left = [k for k in _examples_pending(engine, since) if k not in failed]
+    return jsonify(dict(_examples_status(engine), ok=True, since=since, remaining=len(left)))
+
 
 _gen_lifecycle_done = [False]
 

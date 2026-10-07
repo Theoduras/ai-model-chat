@@ -336,7 +336,7 @@
       #gen-run-btn { white-space: normal; line-height: 1.3; min-height: 46px; }
       .gen-stack .gen-eng b { white-space: normal; }
       .gen-form > .gen-f > span:not(.hint), .gen-form > .gen-f > label { white-space: normal; }
-      /* Keep, Drop, Look and Undress did not fit one row of a 139px card. */
+      /* Four actions did not fit one row of a 139px card. */
       .gen-staging { grid-template-columns: repeat(2, minmax(0, 1fr)); }
       .gen-card .gen-acts { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; padding: 6px; }
       .gen-card .gen-acts button { min-height: 30px; font-size: 0.74rem; }
@@ -375,19 +375,29 @@
   <nav class="st-rail" id="st-rail" aria-label="Studio sections"></nav>
   <div class="st-main">
 
-  <div class="gen-toggles">
-    <span class="gen-label">Rating</span>
-    <div class="pg-toggle" role="group" aria-label="Rating">
-      <button type="button" id="rate-sfw" class="active" aria-pressed="true" onclick="setRating('sfw')">Safe</button>
-      <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')">Explicit</button>
-    </div>
-    <span class="hint">Narrows the jobs and the shots this persona allows.</span>
-  </div>
+      <div class="gen-panel st-sec" id="gen-p-type" data-title="Photo or video">
+        <div class="gen-head"><b>1</b><h2>Photo or video</h2></div>
+        <div class="pg-toggle" role="group" aria-label="Photo or video">
+          <button type="button" id="make-photo" class="active" aria-pressed="true" onclick="setMedia('image')">Photo</button>
+          <button type="button" id="make-video" aria-pressed="false" onclick="setMedia('video')">Video</button>
+        </div>
+        <div class="gen-jobs" id="gen-jobs"></div>
+      </div>
 
-  <div class="gen-jobs" id="gen-jobs"></div>
+      <div class="gen-panel st-sec" id="gen-p-rating" data-title="Rating">
+        <div class="gen-head"><b>2</b><h2>Rating</h2></div>
+        <div class="gen-toggles">
+          <div class="pg-toggle" role="group" aria-label="Rating">
+            <button type="button" id="rate-sfw" class="active" aria-pressed="true" onclick="setRating('sfw')">Safe for work</button>
+            <button type="button" id="rate-nsfw" aria-pressed="false" onclick="setRating('nsfw')"></button>
+          </div>
+        </div>
+        <div class="gen-chips" id="gen-levels" role="group" aria-label="Level" hidden></div>
+        <span class="hint">Narrows the engines, jobs and shots on offer.</span>
+      </div>
 
       <div class="gen-panel st-sec" id="gen-p-engine" data-title="Engine">
-        <div class="gen-head"><b>1</b><h2>Engine</h2></div>
+        <div class="gen-head"><b>3</b><h2>Engine</h2></div>
         <span class="hint" id="gen-job-note"></span>
         <div class="gen-f"><span id="gen-adv-summary">Model</span>
           <div class="gen-chips gen-stack" id="gen-models"></div>
@@ -395,10 +405,14 @@
         </div>
         <input type="hidden" id="gen-model">
         <input type="hidden" id="gen-vmodel">
+        <div class="gen-go" id="gen-ex-admin" hidden>
+          <button type="button" class="btn btn-ghost btn-sm" id="gen-ex-btn" onclick="makeExamples()">Make examples</button>
+          <span class="hint" id="gen-ex-progress"></span>
+        </div>
       </div>
 
       <div class="gen-panel st-sec" id="gen-p-character" data-title="Character">
-        <div class="gen-head"><b>2</b><h2>Character</h2></div>
+        <div class="gen-head"><b>4</b><h2>Character</h2></div>
         <label class="gen-f"><span>Whose photos are we generating?</span>
           <select id="persona" onchange="studioSlugFor().then(loadPersona)"></select></label>
         <div class="gen-f" id="gen-identity-src" style="display:none"><span>Her look comes from</span>
@@ -426,7 +440,7 @@
       </div>
 
     <div class="gen-panel gen-prompt st-sec" id="gen-p-prompt" data-title="Prompt">
-      <div class="gen-head"><b>3</b><h2 id="gen-prompt-head">Prompt</h2></div>
+      <div class="gen-head"><b>5</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
         <section class="gen-group">
           <h3>The shot</h3>
@@ -436,14 +450,7 @@
               <input type="text" id="gen-location-text" maxlength="120" hidden
                      placeholder="a rooftop bar in Tokyo at dusk" aria-label="Your own location"></div>
             <div class="gen-f gen-wide" id="gen-scene-nsfw-wrap" hidden>
-              <div class="gen-lbl"><label for="gen-scene-nsfw">What is happening <em class="gen-tag-nsfw">18+</em></label>
-                <button type="button" class="gen-info" aria-expanded="false" aria-controls="gen-scene-nsfw-help"
-                        onclick="const o = this.getAttribute('aria-expanded') !== 'true'; this.setAttribute('aria-expanded', o); el('gen-scene-nsfw-help').hidden = !o;">
-                  <span aria-hidden="true">i</span> What is this?</button></div>
-              <div class="note-box" id="gen-scene-nsfw-help" hidden>
-                Sets <b>what she is doing</b> in an explicit shot — the act or pose. It is added on top of
-                “Where is she”, not instead of it. Leave it on <b>—</b> for a photo with no explicit action,
-                or pick <b>Write your own…</b> to describe it in your words.</div>
+              <div id="gen-scene-nsfw-head"></div>
               <select id="gen-scene-nsfw"></select>
               <input type="text" id="gen-scene-text" maxlength="160" hidden
                      placeholder="describe what she is doing" aria-label="Your own action"></div>
@@ -473,7 +480,7 @@
         <section class="gen-group">
           <h3>What she wears</h3>
           <label class="gen-f"><span>Describe it</span>
-            <input type="text" id="gen-clothing" maxlength="200" placeholder="black satin robe with lace cuffs, fishnet stockings"></label>
+            <input type="text" id="gen-clothing" maxlength="200" placeholder="cream knit sweater and light-wash jeans"></label>
           <div class="gen-f"><span>Or pick an outfit photo</span>
             <div id="gen-outfits" class="gen-outfits"></div>
             <span class="hint">A picked photo wins over the text. Only the clothes are copied, never the person.</span>
@@ -540,7 +547,7 @@
             <input type="text" id="gen-lora-high" placeholder="High-noise .safetensors link (https://…)" style="margin:4px 0">
             <input type="text" id="gen-lora-low" placeholder="Low-noise .safetensors link (https://…)" style="margin:4px 0">
             <input type="number" id="gen-lora-scale" value="1" min="0" max="2" step="0.05" style="width:90px;margin:4px 0">
-            <input type="text" id="gen-lora-trigger" placeholder="Trigger words, comma separated (e.g. nsfwsks)" style="margin:4px 0">
+            <input type="text" id="gen-lora-trigger" placeholder="Trigger words, comma separated (e.g. sks)" style="margin:4px 0">
             <textarea id="gen-lora-examples" rows="4" placeholder="Example prompts from the LoRA's page; prompts are written in their style" style="margin:4px 0"></textarea>
             <button type="button" class="btn-ai btn-ai-secondary" id="gen-lora-save" onclick="addLora()">Add</button>
             <span class="hint" id="gen-lora-note"></span>
@@ -697,7 +704,7 @@
     </div>
 
     <div class="gen-panel st-sec" id="gen-p-result" data-title="Size">
-      <div class="gen-head"><b>4</b><h2>Size &amp; shape</h2></div>
+      <div class="gen-head"><b>6</b><h2>Size &amp; shape</h2></div>
       <div class="gen-form" id="gen-image-out">
         <label class="gen-f"><span>Size</span>
           <select id="gen-res" onchange="genQuote()"></select></label>
@@ -804,8 +811,6 @@
   <div id="gen-lb-actions" hidden onclick="event.stopPropagation()">
     <button type="button" class="gen-keep" id="gen-lb-keep" onclick="lightboxKeep(true)">Keep</button>
     <button type="button" class="gen-drop" id="gen-lb-drop" onclick="lightboxKeep(false)">Drop</button>
-    <button type="button" class="gen-drop" id="gen-lb-undress" title="Fully nude version of this photo — 1 token"
-            onclick="undressMedia(lbItems[lbIdx].dataset.undress)">Undress</button>
   </div>
   <button type="button" class="gen-lb-nav gen-lb-prev" id="gen-lb-prev" aria-label="Previous"
           onclick="event.stopPropagation(); stepLightbox(-1)">‹</button>
@@ -901,11 +906,12 @@ let genDrive = null;      // the Video tab's optional motion clip, same shape
 const SWAP_LIMITS = { mb: 32, types: ['video/mp4', 'video/quicktime'] };
 let genRating = 'sfw';
 
+// The other rating's labels, presets and controls live in js/studio-nsfw.js,
+// fetched only when that toggle is switched on, so the page a crawler reads
+// carries none of them.
 const GEN_SHOT_LABELS = {
   portrait: 'Portrait', closeup: 'Face close-up', half: 'Waist up', full: 'Full body',
-  candid: 'Candid', mirror: 'Mirror selfie', lingerie: 'Lingerie',
-  implied: 'Implied nude', sheer: 'Sheer robe', bedroom: 'Bedroom',
-  topless: 'Topless', nude: 'Nude', explicit: 'Explicit',
+  candid: 'Candid', mirror: 'Mirror selfie',
 };
 const GEN_RES_LABELS = { '1k': '1K', '2k': '2K', '4k': '4K' };
 
@@ -914,6 +920,7 @@ async function init() {
   try {
     const me = await (await fetch('/api/me')).json();
     chatbotOff = (me.capabilities || {}).chatbot === false;
+    el('gen-ex-admin').hidden = !me.is_admin;
     if (me.guest) guestMode();
     el('fv-sub-only').hidden = !chatbotOff;
   } catch (e) {}
@@ -941,7 +948,9 @@ async function init() {
     return;
   }
   el('gen-jobs').innerHTML = skelRows(1, '64px');
+  el('rate-nsfw').textContent = 'NSFW';
   await loadCredits();
+  loadExamples(false);
   if (!genPrices) el('gen-jobs').innerHTML = '<div class="note-box">Could not load prices. Reload the page to try again.</div>';
   await loadPersona();
 }
@@ -999,7 +1008,7 @@ async function loadCharacterBadge() {
                    : 'no approved photos yet, so the vault photos are used.')
     + (missing.length
       ? `<br>Missing: ${missing.map(v => esc(v.label)).join(', ')} — <a href="/characters?id=${esc(c.id)}">approve them</a> for a closer match.` : '')
-    + '<br><small>Safe-work shots never receive an explicit photo.</small>';
+    + '<br><small>Safe-work shots only ever receive her safe-work photos.</small>';
 }
 document.addEventListener('change', e => {
   if (e.target && ['gen-shot', 'gen-scene', 'gen-scene-nsfw'].includes(e.target.id)) loadCharacterBadge();
@@ -1349,9 +1358,8 @@ async function loadPersona() {
     genZooms = d.zooms || [];
     genQualities = d.qualities || [];
     el('persona-hint').textContent =
-      'The Safe / Explicit toggle above decides what is offered here. Her NSFW '
-      + 'level is a chat setting — how far she flirts with a fan — and does not '
-      + 'limit what you can generate.';
+      'The rating toggle above decides what is offered here. Her chat level — '
+      + 'how far she flirts with a fan — does not limit what you can generate.';
   } catch (e) { mediaVault = []; genAllowedShots = []; genScenes = []; }
   renderVault();
   renderGenForm();
@@ -1408,15 +1416,132 @@ function renderJobTiles() {
       onclick="setJob('${key}')"><b>${esc(row.label)}</b>
       <small>${esc(row.note)}</small></button>`;
   };
-  const keys = jobKeys().filter(jobServes);
-  const photo = keys.filter(k => jobKind(k) === 'image');
-  const video = keys.filter(k => jobKind(k) !== 'image');
-  box.innerHTML = `<h3 class="gen-jobs-h">Photo</h3><div class="gen-jobs-row">${photo.map(tile).join('')}</div>`
-    + `<h3 class="gen-jobs-h">Video</h3><div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
+  // Photo has one job, so the Photo button is it; the video jobs sit under Video.
+  const video = jobKeys().filter(jobServes).filter(k => jobKind(k) !== 'image');
+  box.innerHTML = `<div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
+  box.hidden = genMake === 'image';
+  const photo = genMake === 'image';
+  el('make-photo').setAttribute('aria-pressed', String(photo));
+  el('make-video').setAttribute('aria-pressed', String(!photo));
+  el('make-photo').classList.toggle('active', photo);
+  el('make-video').classList.toggle('active', !photo);
+  if (window.StudioNSFW) StudioNSFW.sync();
+}
+
+let genLastVideoJob = '';
+function setMedia(v) {
+  if (v === 'image') return setJob('image');
+  const open = jobKeys().filter(k => jobKind(k) !== 'image' && jobServes(k) && jobOpen(k));
+  setJob(open.includes(genLastVideoJob) ? genLastVideoJob : (open[0] || 'animate'));
+}
+
+// The other rating's script, fetched once and only when its toggle is pressed.
+let genNsfwLoad = null;
+function loadNsfw() {
+  if (window.StudioNSFW) return Promise.resolve();
+  if (!genNsfwLoad) {
+    genNsfwLoad = new Promise((resolve, reject) => {
+      const tag = document.createElement('script');
+      tag.src = '/js/studio-nsfw.js?v=1';
+      tag.onload = resolve;
+      tag.onerror = () => { genNsfwLoad = null; reject(new Error('Could not load that rating')); };
+      document.head.appendChild(tag);
+    });
+  }
+  return genNsfwLoad;
+}
+
+// Example photos of one demo model, per engine and option (studio_examples.py).
+// The other rating's ones are asked for only once it is on.
+let genEx = { examples: {}, by: {}, default_engine: '', engines: [] }, genExAdult = false, genExVer = 0;
+async function loadExamples(adult) {
+  genExAdult = genExAdult || !!adult;
+  try {
+    const res = await fetch('/api/generate/examples' + (genExAdult ? '?nsfw=1' : ''));
+    if (!res.ok) return;
+    genEx = await res.json();
+    genExVer++;
+    renderModelChips();
+  } catch (e) {}
+}
+
+function engineLabel(m) {
+  if (!genPrices) return m;
+  return (genRating === 'nsfw' && (genPrices.labels_nsfw || {})[m]) || (genPrices.labels || {})[m] || m;
+}
+
+// The chosen engine's example, else the default engine's, named when it is
+// not the engine on screen. `exact` refuses the fallback.
+function exampleFor(opt, engine, exact) {
+  engine = engine || (el('gen-model') || {}).value || '';
+  const ex = genEx.examples || {}, by = genEx.by || {};
+  let name = engine + ':' + opt;
+  if (!ex[name]) {
+    if (exact) return null;
+    name = genEx.default_engine + ':' + opt;
+    if (!ex[name]) return null;
+  }
+  const maker = by[name] || name.split(':')[0];
+  return { url: ex[name], by: maker !== engine ? engineLabel(maker) : '' };
+}
+
+function exampleSig() {
+  return genExVer + '|' + ((el('gen-model') || {}).value || '') + '|' + genRating;
+}
+
+function exampleImg(ex, cls) {
+  return `<img class="${cls || 'st-photo'}" src="${esc(ex.url)}" alt="" loading="lazy" decoding="async">`
+    + (ex.by ? `<span class="st-ex-by">${esc(ex.by)}</span>` : '');
+}
+
+async function makeExamples() {
+  const engine = el('gen-model').value, btn = el('gen-ex-btn'), out = el('gen-ex-progress');
+  const show = d => { out.textContent = `${d.have} / ${d.total} for ${engineLabel(engine)}`
+    + (d.cost_usd ? ` · $${Number(d.cost_usd).toFixed(2)}` : '')
+    + (d.failed && d.failed.length ? ` · ${d.failed.length} failed` : ''); };
+  const post = body => fetch('/api/generate/examples', { method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(Object.assign({ engine }, body)) });
+  if (!(genEx.engines || []).includes(engine)) { out.textContent = 'No examples are made for this engine.'; return; }
+  btn.disabled = true;
+  try {
+    let d = await (await fetch('/api/generate/examples/status?engine=' + encodeURIComponent(engine))).json();
+    let force = false;
+    if (d.have >= d.total) {
+      if (!confirm(`Every example exists for ${engineLabel(engine)}. Make them all again (about $${d.estimate_usd[1]})?`)) return;
+      force = true;
+    } else if (!confirm(`Make ${d.total - d.have} examples on ${engineLabel(engine)}, about $${d.estimate_usd[1]} for a full set?`)) return;
+    let res = await post({ force });
+    d = await res.json();
+    if (!res.ok && res.status !== 202 && res.status !== 409) throw new Error(d.error || 'Could not start');
+    show(d);
+    if (d.running) {
+      while (d.running) {
+        await new Promise(r => setTimeout(r, 4000));
+        d = await (await fetch('/api/generate/examples/status?engine=' + encodeURIComponent(engine))).json();
+        show(d);
+        loadExamples();
+      }
+    } else {
+      while (d.ok && d.remaining > 0) {
+        res = await post({ cont: true, since: d.since });
+        d = await res.json();
+        if (!res.ok) throw new Error(d.error || 'Stopped');
+        show(d);
+        loadExamples();
+      }
+    }
+    loadExamples();
+  } catch (e) { out.textContent = '✗ ' + e.message; }
+  finally { btn.disabled = false; }
+}
+
+function ratingWord() {
+  return genRating === 'nsfw' && window.StudioNSFW ? StudioNSFW.word : 'safe';
 }
 
 function setJob(v) {
   genJob = v;
+  if (jobKind(v) !== 'image') genLastVideoJob = v;
   genMake = jobKind(v) === 'swap' ? 'swap'
           : jobKind(v) === 'image' ? 'image' : 'video';
   renderGenForm();
@@ -1428,7 +1553,11 @@ function setMake(v) {
 
 function setRating(v) {
   if (v === 'nsfw' && document.documentElement.dataset.guest) {
-    guestGate('Explicit content needs a free account.');
+    guestGate('A free account opens every rating.');
+    return;
+  }
+  if (v === 'nsfw' && !window.StudioNSFW) {
+    loadNsfw().then(() => setRating(v), e => setGenStatus('✗ ' + e.message, false));
     return;
   }
   genRating = v;
@@ -1448,8 +1577,9 @@ function setRating(v) {
 // set to SFW simply has no explicit half, so the toggle cannot conjure one.
 function shotsForRating() {
   const explicitShots = (genEngines && genEngines.nsfw_shots) || [];
-  return genAllowedShots.filter(sh =>
-    genRating === 'nsfw' ? explicitShots.includes(sh) : !explicitShots.includes(sh));
+  return genAllowedShots.filter(sh => genRating === 'nsfw'
+    ? explicitShots.includes(sh) && (!window.StudioNSFW || StudioNSFW.shotInLevel(sh))
+    : !explicitShots.includes(sh));
 }
 
 // `prices.videos` arrives either flat (resolution first) or keyed by model.
@@ -1546,7 +1676,7 @@ function videoModelChips(box, note) {
   if (note) {
     note.textContent = offered.length === 1
       ? `${videoLabel(offered[0])} is the only model that serves ` +
-        `${want === 'nsfw' ? 'explicit' : 'safe'} clips.`
+        `${ratingWord()} clips.`
       : 'Priced by the second, so a longer clip costs proportionally more.';
   }
 }
@@ -1585,15 +1715,16 @@ function renderModelChips() {
   const tag = m => (nsfw && (genPrices.taglines_nsfw || {})[m]) || (genPrices.taglines || {})[m] || '';
   box.innerHTML = keys.map(m => {
     const price = (genPrices.images[m] || {})[res];
+    const ex = exampleFor('shot:portrait', m, true);
     return `<button type="button" class="gen-chip" aria-pressed="${m === hidden.value}"
-             onclick="pickModel('${m}')"><span class="gen-eng"><b>${esc(label(m))}</b>
+             onclick="pickModel('${m}')">${ex ? exampleImg(ex, 'st-eng-photo') : ''}<span class="gen-eng"><b>${esc(label(m))}</b>
              ${tag(m) ? `<small class="gen-tag">${esc(tag(m))}</small>` : ''}</span>
              <small class="gen-price">${price === undefined ? '' : price + (price === 1 ? ' token' : ' tokens')}</small></button>`;
   }).join('') || '<span class="hint">No model serves that rating.</span>';
   if (note) {
     const only = label(keys[0]);
     note.textContent = keys.length === 1
-      ? `${only} is the only model that serves ${want === 'nsfw' ? 'explicit' : 'safe'} work.`
+      ? `${only} is the only model that serves ${ratingWord()} work.`
       : 'Prices are per photo. Holding her face costs nothing on top.';
   }
 }
@@ -1760,9 +1891,9 @@ function showLightbox() {
     player.src = clip ? src : '';
   }
   el('gen-lb-prev').hidden = el('gen-lb-next').hidden = lbItems.length < 2;
-  el('gen-lb-actions').hidden = !node.dataset.stagedId && !node.dataset.undress;
+  const extra = window.StudioNSFW && StudioNSFW.lightbox(node.dataset.still);
+  el('gen-lb-actions').hidden = !node.dataset.stagedId && !extra;
   el('gen-lb-keep').hidden = el('gen-lb-drop').hidden = !node.dataset.stagedId;
-  el('gen-lb-undress').hidden = !node.dataset.undress;
   el('gen-lightbox').hidden = false;
 }
 
@@ -1909,7 +2040,7 @@ function renderGenForm() {
     const keep = shot.value;
     const shots = shotsForRating();
     shot.innerHTML = shots.map(s => opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
-      || `<option value="">Nothing ${genRating === 'nsfw' ? 'explicit' : 'safe'} is allowed for this persona</option>`;
+      || `<option value="">Nothing ${ratingWord()} is allowed for this persona</option>`;
   }
   const scene = el('gen-scene');
   if (scene) {
@@ -1920,7 +2051,8 @@ function renderGenForm() {
       genScenes.filter(sc => sc.level === 'sfw').map(sc => opt(sc.key, prettyKey(sc.key), keep)).join('') +
       opt(CUSTOM, 'Write your own…', keep);
     const nsfw = el('gen-scene-nsfw'), keepN = nsfw.value;
-    const explicit = genRating === 'nsfw' ? genScenes.filter(sc => sc.level !== 'sfw') : [];
+    const explicit = genRating === 'nsfw' && window.StudioNSFW
+      ? genScenes.filter(sc => sc.level !== 'sfw' && StudioNSFW.sceneInLevel(sc.level)) : [];
     nsfw.innerHTML = `<option value="">—</option>` +
       explicit.map(sc => opt(sc.key, prettyKey(sc.key), keepN)).join('') +
       opt(CUSTOM, 'Write your own…', keepN);
@@ -2302,8 +2434,7 @@ const SWAP_NOTES = {
     'motion. A new video that resembles yours, not your video with her in it.',
   'kling-3-0-mc': 'Her one full-body photo performs your clip. Carries her build, not only her face, but takes a single photo.',
   'kling-2-6-mc': 'Like Kling 3.0 at a lower price; one full-body photo.',
-  'ml-face-swap': 'Same as the replace above — keeps your clip, swaps only ' +
-    'who is in it — on the one provider that will also run this explicit.',
+  'ml-face-swap': 'Same as the replace above — keeps your clip, swaps only who is in it.',
 };
 
 function swapModels() {
@@ -3275,7 +3406,7 @@ function renderGenStaging() {
         ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
         : `<img loading="lazy" decoding="async" src="${m.url}" alt="">`;
       cards.push(['m:' + m.id, `
-        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}"${clip ? '' : ` data-undress="${m.id}"`} onclick="openLightbox(this)">
+        <div class="gen-card" data-lb="${m.url}" data-kind="${m.kind}" data-staged-id="${m.id}"${clip ? '' : ` data-still="${m.id}"`} onclick="openLightbox(this)">
           ${thumb}
           <span class="gen-ttl">${esc(genTtl(m.expires_at))}</span>
           ${engine}
@@ -3283,7 +3414,7 @@ function renderGenStaging() {
             <button type="button" class="gen-keep" onclick="event.stopPropagation(); keepGenerated('${m.id}', true)">Keep</button>
             <button type="button" class="gen-drop" onclick="event.stopPropagation(); keepGenerated('${m.id}', false)">Drop</button>
             ${m.has_original ? `<button type="button" class="gen-drop" aria-pressed="${m.look === 'original'}" title="Showing the ${m.look === 'original' ? 'unfiltered original, tap for the phone look' : 'phone look, tap for the unfiltered original'}" onclick="event.stopPropagation(); switchLook('${m.id}')">${m.look === 'original' ? 'Original' : 'Phone'}</button>` : ''}
-            ${clip ? '' : `<button type="button" class="gen-drop" title="Fully nude version of this photo — 1 token" onclick="event.stopPropagation(); undressMedia('${m.id}')">Undress</button>`}
+            ${clip || !window.StudioNSFW ? '' : StudioNSFW.cardButton(m.id)}
           </div>
         </div>`]);
     });
@@ -3328,21 +3459,6 @@ async function keepGenerated(id, keep) {
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
 }
 
-async function undressMedia(id) {
-  if (!id) return;
-  try {
-    const res = await fetch('/api/generate/undress', {
-      method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug(), media: id }),
-    });
-    const d = await res.json();
-    if (!d.ok) throw new Error(d.error || 'Undress failed');
-    setGenStatus(`Undressing — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It lands in your generations.`, null);
-    loadCredits();
-    pollGenJobs();
-  } catch (e) { setGenStatus('✗ ' + e.message, false); }
-}
-
 // The kept photos a clip can start from — the same list the vault's play
 // buttons are drawn from, so the two can never disagree about what is animatable.
 function animPhotos() {
@@ -3371,53 +3487,8 @@ function renderAnimPhotos() {
 }
 
 // One click: the action, the length and each part's action are filled in and
-// the prompts written. Explicit ones run on Wan 2.2 + LoRA, in its style.
+// the prompts written. The other rating's presets are added by js/studio-nsfw.js.
 const MOTION_PRESETS = [
-  { label: 'Slow strip', nsfw: true, seconds: 8,
-    motion: 'she slowly pulls her top over her head and lets it drop, then hooks her thumbs into her panties and slides them down her thighs, stepping out of them; she runs both hands up over her bare stomach and squeezes her naked breasts, nipples hard, holding eye contact with a teasing smile' },
-  { label: 'Breast play', nsfw: true, seconds: 8,
-    motion: 'she cups and squeezes her bare breasts with both hands, pinching and rolling her hard nipples between her fingers, her breasts bouncing softly as she lets go, biting her lower lip and moaning quietly while looking into the camera' },
-  { label: 'Spread & show', nsfw: true, seconds: 8,
-    motion: 'she lies back naked and slowly opens her legs wide toward the camera, her fingers spreading her pussy lips apart to show her wet pink vagina, holding the pose while her hips rock gently and she looks down the camera with a dirty smile' },
-  { label: 'Rubbing her clit', nsfw: true, seconds: 8,
-    motion: 'she sits with her legs spread, rubbing her clit in fast tight circles with two fingers, her pussy glistening wet, her hips grinding against her hand, eyes half closed and mouth open, breathing hard and moaning' },
-  { label: 'Fingering', nsfw: true, seconds: 8,
-    motion: 'she slides two fingers deep into her wet pussy and pumps them in and out in a steady rhythm, her thumb rubbing her clit, her other hand squeezing her breast, her back arching as she moans' },
-  { label: 'Fingering, building', nsfw: true, seconds: 16,
-    motion: 'she slowly slides two fingers in and out of her wet pussy, rubbing her clit with her thumb, breathing deeper and moaning softly',
-    parts: ['she fingers herself faster and harder, her hips bucking against her hand, thighs trembling, moaning louder as she builds toward orgasm'] },
-  { label: 'Wand massager', nsfw: true, seconds: 8,
-    motion: 'she sits with her legs wide open and presses a buzzing wand massager firmly against her clit, her hips twitching and grinding into it, her pussy and anus visibly clenching, head thrown back and moaning loudly' },
-  { label: 'Toy, steady', nsfw: true, seconds: 8,
-    motion: 'she lies back with her legs spread and pushes the dildo deep into her wet pussy, sliding it in and out in a steady rhythm, her pussy lips gripping the shaft, half-lidded eyes and heavy breathing' },
-  { label: 'Toy, building', nsfw: true, seconds: 16,
-    motion: 'she slowly works the dildo in and out of her wet pussy, taking it a little deeper with each stroke, breathing deeper',
-    parts: ['she fucks herself with the dildo faster and harder, ramming it deep, her body tensing, breasts bouncing, moaning as she builds to a peak'] },
-  { label: 'Riding a toy', nsfw: true, seconds: 8,
-    motion: 'she squats over a suction-cup dildo and lowers herself onto it, riding it up and down, her pussy stretching around the shaft, her ass bouncing and her breasts jiggling with each drop, moaning with her mouth open' },
-  { label: 'Toy to mouth', nsfw: true, seconds: 8,
-    motion: 'she slowly pulls the glistening dildo out of her pussy and brings it to her mouth, licking it from base to tip and sucking it while keeping eye contact' },
-  { label: 'Toy then mouth', nsfw: true, seconds: 16,
-    motion: 'she pumps the dildo in and out of her wet pussy in a steady rhythm, moaning',
-    parts: ['she pulls the wet dildo out of her pussy and sucks it clean, licking the shaft while keeping eye contact'] },
-  { label: 'Doggy tease', nsfw: true, seconds: 8,
-    motion: 'she kneels on all fours with her ass toward the camera, arches her back and reaches between her legs to rub her pussy from behind, spreading her cheeks so her pussy and anus are on show, looking back over her shoulder and moaning' },
-  { label: 'Orgasm', nsfw: true, seconds: 8,
-    motion: 'she rubs her clit hard and fast until she has an orgasm: her whole body tenses and shudders, her thighs shake, her pussy and anus have strong orgasmic contractions visibly tightening and releasing rhythmically, and she cries out with her mouth wide open' },
-  { label: 'Build to orgasm', nsfw: true, seconds: 16,
-    motion: 'she sits with open legs masturbating with her hand, rubbing her clit and sliding her fingers into her wet pussy, moaning louder and louder',
-    parts: ['she has an orgasm that makes her body jerk and shake, her pussy and anus contracting rhythmically, then she falls back into a relaxed state, audibly catching her breath'] },
-  { label: 'Afterglow', nsfw: true, seconds: 5,
-    motion: 'she lies back naked with her legs still open, her pussy wet and flushed, chest heaving as she catches her breath, then smiles lazily at the camera and licks her fingers' },
-  // H3 only: one clip of 10 or 15 seconds, with sound.
-  { label: 'H3 · Fingering', nsfw: true, model: 'h3-gv', seconds: 10,
-    motion: 'she lies back with her legs spread wide, sliding two fingers deep into her wet pussy and pumping them in and out, curling them inside her, her thumb rubbing her clit, her pussy lips glistening around her fingers, her back arching as she moans louder and louder' },
-  { label: 'H3 · Wand to orgasm', nsfw: true, model: 'h3-gv', seconds: 15,
-    motion: 'she is sitting with open legs while masturbating with a wand massager pressed against her clit, grinding her hips into it and moaning; she has an orgasm that causes her to shake and cry out, her pussy and anus having strong orgasmic contractions visibly tightening and releasing rhythmically, then she falls back into a relaxed state, audibly catching her breath' },
-  { label: 'H3 · Fingered orgasm', nsfw: true, model: 'h3-gv', seconds: 15,
-    motion: 'she is fingering her wet pussy with two fingers while rubbing her clit, going faster and harder, her thighs trembling; she has an orgasm that makes her whole body jerk, her pussy and anus contracting rhythmically around her fingers, then she slowly pulls her fingers out and falls back, audibly catching her breath' },
-  { label: 'H3 · Spread & tease', nsfw: true, model: 'h3-gv', seconds: 10,
-    motion: 'she lies back naked and opens her legs toward the camera, spreading her pussy lips with two fingers to show her wet pink vagina, then slowly rubs her clit in circles while whispering and moaning, looking straight into the camera' },
   { label: 'Hair flip', nsfw: false, seconds: 5,
     motion: 'she flips her hair over one shoulder with one hand, tilts her head and smiles at the camera, then holds the look' },
   { label: 'Wink & kiss', nsfw: false, seconds: 5,
@@ -3817,7 +3888,7 @@ function renderVault() {
       : `<img loading="lazy" decoding="async" src="${v.thumb}" alt="" draggable="false">`;
     return [v.id, `
       <div class="vault-item${vaultPicked.has(v.id) ? ' selected' : ''}" data-id="${v.id}"
-           data-lb="${v.thumb}" data-kind="${v.kind}"${!clip ? ` data-undress="${v.id}"` : ''} onclick="vaultClick(this)">
+           data-lb="${v.thumb}" data-kind="${v.kind}"${!clip ? ` data-still="${v.id}"` : ''} onclick="vaultClick(this)">
         ${thumb}${fv}
       </div>`];
   }).concat(more ? [['more', more]] : []), '<div class="vault-empty">Nothing kept yet — generate some shots above.</div>');
@@ -3875,15 +3946,17 @@ function openFanvueUpload() {
 PageWizard.pageTour({
   name: 'StudioWizard', key: 'page:studio',
   steps: [
-    {anchor: '.gen-toggles', placement: 'bottom', title: 'Rating',
-     body: 'Safe or Explicit. It narrows the jobs and shots this persona allows, so pick it first.'},
-    {anchor: '#gen-p-engine', placement: 'right', title: '1 · Engine',
+    {anchor: '#gen-p-type', placement: 'right', title: '1 · Photo or video',
+     body: 'What you are making. The video jobs sit under Video.'},
+    {anchor: '#gen-p-rating', placement: 'right', title: '2 · Rating',
+     body: 'It narrows the engines, jobs and shots on offer, so pick it before the engine.'},
+    {anchor: '#gen-p-engine', placement: 'right', title: '3 · Engine',
      body: 'The model that makes the photo. Photos and Photo to Video are open on every plan.'},
-    {anchor: '#gen-p-character', placement: 'right', title: '2 · Character',
+    {anchor: '#gen-p-character', placement: 'right', title: '4 · Character',
      body: 'Pick whose photos these are. Her approved character, or her face and body photos, keep her looking the same in every shot.'},
-    {anchor: '#gen-p-prompt', placement: 'left', title: '3 · Prompt',
+    {anchor: '#gen-p-prompt', placement: 'left', title: '5 · Prompt',
      body: 'Pick a scene, a shot and her expression and the direction fills itself in. Clothing, typed or an uploaded outfit photo, replaces every other outfit. Write the prompt turns it all into words, or type your own. The free phone look makes a still read like a phone snap; the unfiltered copy is kept too.'},
-    {anchor: '#gen-p-result', placement: 'left', title: '4 · Size & shape',
+    {anchor: '#gen-p-result', placement: 'left', title: '6 · Size & shape',
      body: 'Choose size, shape and how many; the price is on the button. Results land unapproved: Keep moves a photo into her vault, the rest delete themselves after 3 days.'},
   ],
 });
@@ -3913,9 +3986,12 @@ function studioSaveSoon() {
   clearTimeout(studioSaveTimer);
   studioSaveTimer = setTimeout(studioSave, 300);
 }
-function studioRestore() {
+async function studioRestore() {
   const s = studioSaved();
   if (!s || s.persona !== el('persona').value || !genPrices) return;
+  if (s.rating === 'nsfw' && !document.documentElement.dataset.guest) {
+    try { await loadNsfw(); } catch (e) { return; }
+  }
   studioRestoring = true;
   try {
     if (s.rating) setRating(s.rating);
@@ -3954,7 +4030,7 @@ function guestMode() {
   const bar = document.createElement('div');
   bar.className = 'guest-bar';
   bar.innerHTML = '<span><b>Guest mode</b> &middot; safe-for-work only &middot; '
-    + 'register free to unlock NSFW and download your work &middot; no credit card needed</span>'
+    + 'register free to unlock every rating and download your work &middot; no credit card needed</span>'
     + '<a href="/register?next=/studio">Register free</a>';
   document.body.appendChild(bar);
   let hide = 0;
@@ -3991,11 +4067,11 @@ function guestGate(reason) {
       <div class="gg-card" role="dialog" aria-modal="true" aria-labelledby="gg-title">
         <button type="button" class="gg-x" aria-label="Close">&times;</button>
         <div class="gg-badge"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><rect x="4.5" y="10.5" width="15" height="10" rx="2.5"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3" stroke-linecap="round"/></svg></div>
-        <h2 id="gg-title">Unlock explicit content</h2>
+        <h2 id="gg-title">Unlock the full studio</h2>
         <p class="gg-reason"></p>
         <p class="gg-sub">As a guest you can make safe-for-work photos and clips. A free account opens up the rest.</p>
         <ul class="gg-list">
-          <li><b>Explicit photos and Photo to Video</b></li>
+          <li><b>Every rating</b>, for photos and Photo to Video</li>
           <li><b>Download</b> everything you make, without limits</li>
           <li><b>Keep your work</b> &mdash; this studio, your settings and every generation come with you</li>
         </ul>
@@ -4115,6 +4191,16 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-chips .st-tile { border-radius: 999px; padding: 0 14px; min-height: 38px; justify-content: center; font-size: 13px; color: var(--text-2); }
 .st-chips .st-media, .st-chips .st-lbl { display: contents; }
 .gen-f select.st-tiled { display: none; }
+.st-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
+.st-ex-by { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 1px 7px; border-radius: 999px;
+  background: rgba(0,0,0,.62); color: #fff; font-size: 10px; line-height: 16px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.gen-chip { position: relative; }
+.st-eng-photo { width: 100%; aspect-ratio: 16 / 10; object-fit: cover; object-position: 50% 30%; border-radius: 8px; margin-bottom: 8px; display: block; }
+.gen-stack .gen-chip > .st-ex-by { top: 18px; bottom: auto; left: 18px; }
+.st-chip-photo { width: 44px; height: 30px; object-fit: cover; border-radius: 6px; margin-right: 8px; vertical-align: middle; flex: none; }
+#gen-p-type .pg-toggle, #gen-p-rating .pg-toggle { align-self: flex-start; height: 38px; }
+#gen-p-type .pg-toggle button.active { color: var(--accent); }
+#gen-levels:not([hidden]) { display: flex; flex-wrap: wrap; gap: 6px; }
 #gen-image-form .gen-form, #gen-p-result .gen-form { grid-template-columns: minmax(0, 1fr); }
 
 /* Engine and preset tiles. */
@@ -4184,8 +4270,13 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   const keyOf = v => (v || '').toLowerCase().replace(/\s+/g, '-');
   const shown = n => !!n && n.offsetParent !== null;
 
-  function media(kind, o) {
+  const EX_GROUP = { 'gen-shot': 'shot', 'gen-zoom': 'zoom', 'gen-style': 'style', 'gen-scene': 'place',
+    'gen-scene-nsfw': 'scene', 'gen-expression': 'expression', 'gen-camera': 'camera', 'gen-lighting': 'light',
+    'gen-quality': 'quality' };
+  function media(kind, o, id) {
     const v = keyOf(o.value), t = esc(o.textContent.trim());
+    const ex = EX_GROUP[id] && o.value && exampleFor(EX_GROUP[id] + ':' + o.value);
+    if (ex) return `<div class="st-media">${exampleImg(ex)}</div>`;
     if (kind === 'frame') return FRAMES[v] ? `<div class="st-media" style="color:var(--text-muted)">${FIG(FRAMES[v])}</div>` : '<div class="st-media"><div class="st-slot">Example photo</div></div>';
     if (kind === 'light') return `<div class="st-media" style="background:${grad(v, LIGHTS)}"></div>`;
     if (kind === 'place') return `<div class="st-media" style="background:${grad(v, PLACES)}"></div>`;
@@ -4196,7 +4287,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 
   function tileFor(kind, o, sel) {
     return `<button type="button" class="st-tile" data-v="${esc(o.value)}" aria-pressed="${o.value === sel.value}"${o.disabled ? ' disabled' : ''}>`
-      + media(kind, o) + (kind === 'chips' ? esc(o.textContent.trim()) : `<span class="st-lbl">${esc(o.textContent.trim())}</span>`) + '</button>';
+      + media(kind, o, sel.id) + (kind === 'chips' ? esc(o.textContent.trim()) : `<span class="st-lbl">${esc(o.textContent.trim())}</span>`) + '</button>';
   }
 
   function syncSelect(id) {
@@ -4220,7 +4311,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
       sel.classList.add('st-tiled');
     }
     box.hidden = sel.hidden || sel.style.display === 'none';
-    const sig = sel.value + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
+    const sig = sel.value + '|' + (EX_GROUP[id] ? exampleSig() : '') + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
     let html = '';
@@ -4236,6 +4327,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   function txt(id) { const s = el(id); return s && s.selectedOptions && s.selectedOptions[0] ? s.selectedOptions[0].textContent.trim() : ''; }
   function sectionSummary(sec) {
     const vis = id => shown(el(id)) || shown((el(id) || {}).nextElementSibling);
+    if (sec.id === 'gen-p-type') return genMake === 'image' ? 'Photo' : 'Video · ' + jobRow(genJob).label;
+    if (sec.id === 'gen-p-rating') return genRating === 'nsfw' && window.StudioNSFW ? StudioNSFW.summary() : 'Safe for work';
     if (sec.id === 'gen-p-engine') {
       const b = document.querySelector('#gen-models [aria-pressed="true"]');
       return b ? (b.querySelector('b, span') || b).textContent.trim() : 'Pick an engine';
@@ -4267,9 +4360,26 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     return out;
   }
 
+  // The phone-look buttons and the smudges box are not selects; their
+  // examples are set on them in place.
+  function decorate(host, opt, cls) {
+    if (!host) return;
+    const ex = exampleFor(opt);
+    let img = host.querySelector(':scope > .' + cls);
+    if (!ex) { if (img) img.remove(); return; }
+    if (!img) { img = document.createElement('img'); img.className = cls; img.alt = ''; img.loading = 'lazy'; host.prepend(img); }
+    if (img.getAttribute('src') !== ex.url) img.src = ex.url;
+    img.title = ex.by ? 'Example by ' + ex.by : '';
+  }
+  function decorateExtras() {
+    document.querySelectorAll('#gen-phone-seg .gen-chip[data-v]').forEach(b => decorate(b, 'phone-look:' + b.dataset.v, 'st-chip-photo'));
+    decorate((el('gen-smudges') || {}).parentElement, 'smudges:on', 'st-chip-photo');
+  }
+
   let lastRail = '', lastIssues = '';
   function tick() {
     Object.keys(TILED).forEach(syncSelect);
+    decorateExtras();
     const secs = [...document.querySelectorAll('.st-sec')].filter(s => s.style.display !== 'none');
     const list = issues();
     secs.forEach(s => {

@@ -2017,6 +2017,10 @@ class RunwareProvider(Provider):
         if spec.get('explicit') and model_key not in EXPLICIT_MODELS:
             model_key = EXPLICIT_MODEL
         model = RUNWARE_MODELS.get(model_key) or RUNWARE_MODELS['seedream-4-5']
+        # A model id set by env with no key of its own (the studio examples'
+        # EXAMPLES_MODEL), sized as the key it stands in for.
+        if spec.get('model_air') and not spec.get('explicit'):
+            model = spec['model_air']
         width, height = dimensions(model_key, spec.get('resolution'), spec.get('aspect'))
 
         task = self._base_task(spec, model, width, height)
