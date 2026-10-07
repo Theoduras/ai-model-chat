@@ -2611,6 +2611,10 @@ class VastProvider(RunPodProvider):
         return resp.json()
 
     def _endpoint_key(self, name):
+        # Lets a box without the account key (infra/vast/deploy.py test) reach an endpoint.
+        keys = json.loads(os.getenv('VAST_ENDPOINT_KEYS') or '{}')
+        if keys.get(name):
+            return keys[name]
         import requests
         resp = requests.get('https://console.vast.ai/api/v0/endptjobs/', params={'client_id': 'me'},
                             headers=self._headers(), timeout=TIMEOUT)

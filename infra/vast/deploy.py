@@ -101,38 +101,43 @@ def deploy(name):
 
 
 def test(name):
-    os.environ['VAST_API_KEY'] = KEY
+    """One smallest, fastest job: a 480p clip at the model's shortest length,
+    or a 1:1 still. Prints a SMOKE line either way."""
+    os.environ.setdefault('VAST_API_KEY', KEY or 'x')
     sys.path.insert(0, ROOT)
     import imagegen
-    vp = imagegen.VastProvider(KEY)
+    vp = imagegen.VastProvider(os.environ['VAST_API_KEY'])
     start = time.time()
-    if name == imagegen.CHAR_LORA_IMAGE_MODEL:
-        job, res = vp.submit_image({'model': name, 'seed': 7, 'aspect': '2:3',
-                                    'prompt': 'Photo of a woman in a red coat on a rainy street.'})
-    else:
-        job, res = vp.submit_video({
-            'model': name, 'seconds': 5, 'resolution': '480p', 'seed': 7, 'aspect': '9:16',
-            'reference_b64': base64.b64encode(h3.still_png()).decode(), 'reference_mime': 'image/png',
-            'prompt': 'Slow camera push in on soft colored light.'})
-    print('submitted after', f'{time.time() - start:.0f}s', flush=True)
-    while res.status == 'running':
-        time.sleep(15)
-        res = vp.poll(job)
-        print(f'  {time.time() - start:.0f}s {res.status}', flush=True)
-    if res.status != 'done':
-        sys.exit(f'test failed: {res.error}')
-    url = res.urls[0]
-    data = base64.b64decode(url.split(',', 1)[1]) if url.startswith('data:') else \
-        urllib.request.urlopen(url, timeout=120).read()
-    out = os.path.abspath(f'{name}-test' + ('.png' if 'char' in name else '.mp4'))
-    with open(out, 'wb') as f:
-        f.write(data)
-    print(f'{out} ({len(data) >> 10} KB) in {time.time() - start:.0f}s')
+    try:
+        if name == imagegen.CHAR_LORA_IMAGE_MODEL:
+            job, res = vp.submit_image({'model': name, 'seed': 7, 'aspect': '1:1',
+                                        'prompt': 'Photo of a red apple on a table.'})
+        else:
+            job, res = vp.submit_video({
+                'model': name, 'seconds': 1, 'resolution': '480p', 'seed': 7, 'aspect': '9:16',
+                'reference_b64': base64.b64encode(h3.still_png()).decode(),
+                'reference_mime': 'image/png', 'prompt': 'Slow camera push in on soft light.'})
+        print(f'SMOKE {name} submitted after {time.time() - start:.0f}s', flush=True)
+        while res.status == 'running':
+            time.sleep(10)
+            res = vp.poll(job)
+        if res.status != 'done':
+            raise RuntimeError(res.error)
+        url = res.urls[0]
+        size = len(base64.b64decode(url.split(',', 1)[1])) if url.startswith('data:') else \
+            len(urllib.request.urlopen(url, timeout=120).read())
+        print(f'SMOKE {name} OK {size >> 10} KB in {time.time() - start:.0f}s', flush=True)
+    except Exception as e:
+        print(f'SMOKE {name} FAIL after {time.time() - start:.0f}s: {e}', flush=True)
 
 
 if __name__ == '__main__':
     if sys.argv[1:2] == ['test']:
-        test(sys.argv[2])
+        import threading
+        names = list(WORKERS) if sys.argv[2] == 'all' else sys.argv[2:]
+        threads = [threading.Thread(target=test, args=(n,)) for n in names]
+        [t.start() for t in threads]
+        [t.join() for t in threads]
     else:
         for n in sys.argv[1:] or WORKERS:
             deploy(n)
