@@ -48,7 +48,9 @@ WORKERS = {
 # a resumed cold worker must not read the last boot's "ready" line before its
 # handler is up again.
 ONSTART = ('mkdir -p /opt/vast_jobs/runpod-h3 /opt/vast_jobs/runpod-lora /opt/vast_jobs/start; cd /opt/vast_jobs; '
-           'R=https://raw.githubusercontent.com/Theoduras/ai-model-chat/$VJ_REF/infra; '
+           # raw.githubusercontent caches a branch for minutes; a commit id is never stale.
+           'S=$(git ls-remote https://github.com/Theoduras/ai-model-chat refs/heads/$VJ_REF 2>/dev/null | cut -f1); '
+           'R=https://raw.githubusercontent.com/Theoduras/ai-model-chat/${S:-$VJ_REF}/infra; '
            'for f in vast/sitecustomize.py vast/worker.py vast/preload.py vast/start/$VJ_NAME.sh runpod-gv-patch.py '
            'runpod-h3/handler.py runpod-h3/deploy.py runpod-lora/handler.py; do '
            'curl -fsSL $R/$f -o ${f#vast/}; done; : > /var/log/vast-jobs.log; '
