@@ -1,0 +1,199 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Niche Finder</title>
+  <link rel="icon" href="/favicon.ico" sizes="any">
+  <link rel="icon" type="image/png" href="/favicon.png">
+  <script src="/js/theme.js"></script>
+  <link rel="stylesheet" href="/css/style.css">
+  <link rel="stylesheet" href="/css/site-nav.css">
+  <script src="/js/site-nav.js" defer></script>
+  <script>
+    if (window.self === window.top) location.replace('/dashboard?open=' + encodeURIComponent(location.pathname + location.search));
+    else document.documentElement.classList.add('in-workspace');
+  </script>
+  <style>
+    .in-workspace body > header { display: none; }
+    .nf-scroll { flex:1; min-height:0; overflow-y:auto; }
+    .nf-wrap { max-width:1180px; margin:0 auto; padding:22px 24px 110px; font-family:var(--font); }
+    .nf-head h2 { margin:0 0 4px; font-size:1.25rem; }
+    .nf-head p { margin:0 0 14px; color:var(--text-muted); font-size:.85rem; line-height:1.5; max-width:760px; }
+    .nf-meta { display:flex; flex-wrap:wrap; align-items:center; gap:10px; margin-bottom:16px; font-size:.8rem; color:var(--text-2); }
+    .nf-pill { padding:4px 10px; border-radius:9999px; border:1px solid var(--accent-line); background:var(--panel); font-weight:600; }
+    .nf-tools { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:14px; }
+    .nf-tools input, .nf-tools select { padding:8px 12px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--text); font:inherit; font-size:.82rem; }
+    .nf-tools input { flex:1; min-width:180px; }
+    .nf-btn { display:inline-flex; align-items:center; gap:6px; padding:7px 13px; border-radius:10px; border:1px solid var(--border); background:var(--surface); color:var(--text-2); cursor:pointer; font-size:.78rem; font-weight:600; font-family:var(--font); }
+    .nf-btn:hover { border-color:var(--accent-line); color:var(--text); }
+    .nf-btn[disabled] { opacity:.6; cursor:wait; }
+    .nf-btn.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+    .nf-table { width:100%; border-collapse:separate; border-spacing:0; background:var(--panel); border:1px solid var(--border-soft); border-radius:var(--r-lg); overflow:hidden; box-shadow:var(--shadow-sm); font-size:.82rem; }
+    .nf-table th { text-align:left; padding:10px 12px; font-size:.72rem; letter-spacing:.04em; text-transform:uppercase; color:var(--text-muted); border-bottom:1px solid var(--border-soft); cursor:pointer; user-select:none; white-space:nowrap; }
+    .nf-table th.sorted::after { content:' ▾'; } .nf-table th.sorted.asc::after { content:' ▴'; }
+    .nf-table td { padding:10px 12px; border-bottom:1px solid var(--border-soft); vertical-align:middle; }
+    .nf-row { cursor:pointer; } .nf-row:hover td { background:var(--surface); }
+    .nf-name { font-weight:600; color:var(--text); }
+    .nf-group { display:block; font-size:.7rem; color:var(--text-muted); }
+    .nf-new { margin-left:6px; padding:1px 7px; border-radius:9999px; background:var(--accent); color:#fff; font-size:.62rem; font-weight:700; }
+    .nf-bar { display:flex; align-items:center; gap:8px; min-width:90px; }
+    .nf-bar i { flex:1; height:6px; border-radius:3px; background:var(--surface); overflow:hidden; position:relative; }
+    .nf-bar i b { position:absolute; inset:0 auto 0 0; border-radius:3px; }
+    .nf-bar span { width:24px; text-align:right; font-variant-numeric:tabular-nums; color:var(--text-2); }
+    .g b { background:#2f9e6b; } .m b { background:#d89a1e; } .r b { background:#d6455d; }
+    .nf-score { font-weight:700; font-size:.95rem; font-variant-numeric:tabular-nums; }
+    .nf-trend { font-weight:600; } .nf-trend.rising { color:#2f9e6b; } .nf-trend.falling { color:#d6455d; } .nf-trend.flat { color:var(--text-muted); }
+    .nf-why td { background:var(--surface); color:var(--text-2); font-size:.8rem; line-height:1.5; }
+    .nf-why .nf-btn { margin-left:12px; }
+    .nf-empty { padding:40px 20px; text-align:center; color:var(--text-muted); }
+    .nf-note { margin:0 0 14px; padding:10px 14px; border-radius:var(--r-md); border:1px solid var(--accent-line); background:var(--panel); color:var(--text-2); font-size:.8rem; }
+    @media (max-width:760px) {
+      .nf-wrap { padding:18px 16px 110px; }
+      .nf-hide-sm { display:none; }
+      .nf-bar { min-width:60px; } .nf-bar span { display:none; }
+    }
+  </style>
+</head>
+<body class="page-dashboard">
+<header>
+  <h1>Niche Finder</h1>
+  <div style="display:flex; align-items:center; gap:16px;">
+    <nav data-site-nav="inline" class="sn-links sn-inline"></nav>
+    <a href="/dashboard" style="color:var(--text-muted); font-size:0.8rem; text-decoration:none;">← Dashboard</a>
+  </div>
+</header>
+<div class="nf-scroll"><div class="nf-wrap">
+  <div class="nf-head">
+    <h2>Pick where your AI model competes</h2>
+    <p>Every niche on Fanvue and OnlyFans, ranked by opportunity. Popular niches bring fans but are crowded; the best starts are where demand outruns the creators serving it. Click a row for the reason, then build your character for it.</p>
+  </div>
+  <div class="nf-meta">
+    <span class="nf-pill" id="nf-updated">Updated weekly</span>
+    <span id="nf-source"></span>
+    <button type="button" class="nf-btn" id="nf-refresh" hidden onclick="nfRefresh()">Refresh now</button>
+  </div>
+  <div class="nf-note" id="nf-note" hidden></div>
+  <div class="nf-tools">
+    <input type="search" id="nf-q" placeholder="Search niches" oninput="nfRender()">
+    <select id="nf-group" onchange="nfRender()"><option value="">All groups</option></select>
+    <select id="nf-trend" onchange="nfRender()">
+      <option value="">Any trend</option><option value="rising">Rising</option><option value="flat">Flat</option><option value="falling">Falling</option>
+    </select>
+  </div>
+  <table class="nf-table">
+    <thead><tr>
+      <th data-k="name">Niche</th>
+      <th data-k="popularity">Popularity</th>
+      <th data-k="saturation" class="nf-hide-sm">Saturation</th>
+      <th data-k="gap">Demand &gt; supply</th>
+      <th data-k="trend" class="nf-hide-sm">Trend</th>
+      <th data-k="score" class="sorted">Opportunity</th>
+    </tr></thead>
+    <tbody id="nf-body"><tr><td colspan="6" class="nf-empty">Loading…</td></tr></tbody>
+  </table>
+</div></div>
+<script>
+let NF = { niches: [] }, nfSort = { k: 'score', asc: false }, nfOpen = null;
+const TREND_ORDER = { rising: 2, flat: 1, falling: 0 };
+
+function esc(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
+
+// Saturation is the one column where high is bad, so its colours flip.
+function bar(v, invert) {
+  if (v == null) return '<span style="color:var(--text-muted)">–</span>';
+  const good = invert ? 100 - v : v;
+  const cls = good >= 60 ? 'g' : good >= 35 ? 'm' : 'r';
+  return `<div class="nf-bar ${cls}"><i><b style="width:${v}%"></b></i><span>${v}</span></div>`;
+}
+
+function nfRender() {
+  const q = document.getElementById('nf-q').value.trim().toLowerCase();
+  const g = document.getElementById('nf-group').value;
+  const t = document.getElementById('nf-trend').value;
+  const ranked = NF.niches.some(n => n.score != null);
+  let rows = NF.niches.filter(n => (!q || (n.name + ' ' + n.group).toLowerCase().includes(q))
+    && (!g || n.group === g) && (!t || n.trend === t));
+  const k = nfSort.k, dir = nfSort.asc ? 1 : -1;
+  rows.sort((a, b) => {
+    let x = a[k], y = b[k];
+    if (k === 'trend') { x = TREND_ORDER[x]; y = TREND_ORDER[y]; }
+    if (k === 'name') return dir * String(x).localeCompare(String(y));
+    return dir * ((x ?? -1) - (y ?? -1));
+  });
+  document.querySelectorAll('.nf-table th').forEach(th => {
+    th.classList.toggle('sorted', th.dataset.k === k);
+    th.classList.toggle('asc', th.dataset.k === k && nfSort.asc);
+  });
+  const body = document.getElementById('nf-body');
+  if (!rows.length) { body.innerHTML = '<tr><td colspan="6" class="nf-empty">No niches match.</td></tr>'; return; }
+  body.innerHTML = rows.map(n => {
+    const main = `<tr class="nf-row" onclick="nfToggle('${n.slug}')">
+      <td><span class="nf-name">${esc(n.name)}</span>${n.new ? '<span class="nf-new">NEW</span>' : ''}<span class="nf-group">${esc(n.group)}</span></td>
+      <td>${bar(n.popularity)}</td>
+      <td class="nf-hide-sm">${bar(n.saturation, true)}</td>
+      <td>${bar(n.gap)}</td>
+      <td class="nf-hide-sm">${n.trend ? `<span class="nf-trend ${n.trend}">${n.trend === 'rising' ? '↑' : n.trend === 'falling' ? '↓' : '→'} ${n.trend}</span>` : '–'}</td>
+      <td><span class="nf-score">${n.score ?? '–'}</span></td></tr>`;
+    if (nfOpen !== n.slug) return main;
+    const why = n.why ? esc(n.why) : (ranked ? '' : 'Not ranked yet.');
+    const money = n.monetization != null ? ` <b>Monetisation ${n.monetization}/100.</b>` : '';
+    return main + `<tr class="nf-why"><td colspan="6">${why}${money}
+      <button type="button" class="nf-btn primary" onclick="nfUse('${n.slug}', event)">Use this niche</button></td></tr>`;
+  }).join('');
+}
+
+function nfToggle(slug) { nfOpen = nfOpen === slug ? null : slug; nfRender(); }
+
+function nfUse(slug, ev) {
+  ev.stopPropagation();
+  const n = NF.niches.find(x => x.slug === slug);
+  try { localStorage.setItem('vf_niche', JSON.stringify({ slug, name: n && n.name, at: Date.now() })); } catch (e) {}
+  location.href = '/characters?new=1&niche=' + encodeURIComponent(slug);
+}
+
+function nfShow(d) {
+  NF = d;
+  const groups = [...new Set(d.niches.map(n => n.group))].sort();
+  const sel = document.getElementById('nf-group');
+  sel.innerHTML = '<option value="">All groups</option>' + groups.map(g => `<option>${esc(g)}</option>`).join('');
+  document.getElementById('nf-updated').textContent = d.updated_at
+    ? 'Updated weekly · last refresh ' + new Date(d.updated_at).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' })
+    : 'Updated weekly · first ranking pending';
+  document.getElementById('nf-source').textContent = d.sources && d.sources.length
+    ? 'From ' + d.sources.map(u => new URL(u).hostname.replace(/^www\./, '')).filter((h, i, a) => a.indexOf(h) === i).join(', ')
+    : '';
+  if (!d.updated_at) nfNote(d.is_admin ? 'No ranking yet. Press Refresh now to build the first one.' : 'The first ranking is on its way; the list below is unranked until then.');
+  nfRender();
+}
+
+function nfNote(msg) { const el = document.getElementById('nf-note'); el.textContent = msg || ''; el.hidden = !msg; }
+
+async function nfRefresh() {
+  const b = document.getElementById('nf-refresh');
+  b.disabled = true; b.textContent = 'Ranking… (up to a minute)';
+  try {
+    const r = await fetch('/api/niches/refresh', { method: 'POST' });
+    const d = await r.json();
+    if (!d.ok) throw new Error(d.error || 'Refresh failed');
+    nfNote(''); d.is_admin = true; nfShow(d);
+  } catch (e) { nfNote(e.message); }
+  b.disabled = false; b.textContent = 'Refresh now';
+}
+
+document.querySelectorAll('.nf-table th').forEach(th => th.onclick = () => {
+  const k = th.dataset.k;
+  nfSort = { k, asc: nfSort.k === k ? !nfSort.asc : k === 'name' || k === 'saturation' };
+  nfRender();
+});
+
+fetch('/api/niches').then(r => r.json()).then(d => {
+  if (!d.ok) throw new Error(d.error || 'Could not load niches');
+  document.getElementById('nf-refresh').hidden = !d.is_admin;
+  nfShow(d);
+}).catch(e => {
+  document.getElementById('nf-body').innerHTML = `<tr><td colspan="6" class="nf-empty">${esc(e.message)}</td></tr>`;
+});
+</script>
+</body>
+</html>

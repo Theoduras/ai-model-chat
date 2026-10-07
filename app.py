@@ -29,6 +29,7 @@ from utils import (platform_scoped, operator_only, _is_operator,
 import growth
 import credits as CR
 import imagegen
+import niches
 import storage
 import wishes
 from google import genai
@@ -2613,6 +2614,8 @@ _OPEN_PATHS = (
                # browser. It carries its own proof (CRON_SECRET) and has no
                # session to offer, so a sign-in check would only ever 401 it.
                '/api/generate/tick',
+               # The weekly niche re-rank, same scheduler and same proof.
+               '/api/niche/refresh',
                # Vast workers fetch the LoRA links to preload at boot, by VAST_LORA_KEY.
                '/api/generate/lora-links',
                # Meta posts these itself: the webhook, and the two callbacks it
@@ -9445,7 +9448,7 @@ _GUEST_API_DENY = ('/api/generate/undress', '/api/generate/persona',
                    '/api/generate/conversion-triggers', '/api/generate/interests',
                    '/api/generate/image', '/api/credits/checkout')
 _GUEST_PAGES_DENY = ('/billing', '/account', '/tokens', '/dashboard', '/characters',
-                     '/admin', '/embed-setup', '/undress')
+                     '/admin', '/embed-setup', '/undress', '/niche-finder')
 
 
 def _is_guest(user):
@@ -39304,6 +39307,79 @@ def api_generate_tick():
     except Exception:
         logger.exception('staging purge failed')
     return jsonify({'ok': True, 'advanced': n, 'purged': purged})
+
+
+
+def _niche_llm(prompt):
+    """Gemini stand-in for Grok until XAI_API_KEY is set."""
+    if client is None:
+        raise RuntimeError('Gemini client not configured')
+    resp = client.models.generate_content(
+        model=MODEL_NAME,
+        contents=[{'role': 'user', 'parts': [{'text': prompt}]}],
+        config=_no_thinking(types.GenerateContentConfig(
+            temperature=0.3, max_output_tokens=12000,
+            response_mime_type='application/json')))
+    return _gemini_text(resp)
+
+
+def _niche_refresh():
+    s = _db_session()
+    try:
+        blob = niches.refresh(s, _niche_llm)
+        s.commit()
+    finally:
+        s.close()
+    logger.info('NICHES refreshed model=%s n=%d sources=%d',
+                blob['model'], len(blob['niches']), len(blob['sources']))
+    return blob
+
+
+@app.route('/api/niche/refresh', methods=['GET', 'POST'])
+def api_niche_refresh_cron():
+    """Weekly re-rank, called by a scheduler with CRON_SECRET."""
+    if not _cron_authorised():
+        return ('', 404)
+    try:
+        blob = _niche_refresh()
+    except Exception:
+        logger.exception('niche refresh failed')
+        return jsonify({'ok': False}), 500
+    return jsonify({'ok': True, 'count': len(blob['niches']), 'model': blob['model']})
+
+
+@app.route('/api/niches/refresh', methods=['POST'])
+def api_niches_refresh_admin():
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    try:
+        blob = _niche_refresh()
+    except Exception as e:
+        logger.exception('niche refresh failed')
+        return jsonify({'ok': False, 'error': f'Refresh failed: {e}'}), 502
+    return jsonify({'ok': True, **blob})
+
+
+@app.route('/api/niches')
+def api_niches():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    s = _db_session()
+    try:
+        blob = niches.current(s)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'is_admin': bool((_current_user() or {}).get('is_admin')), **blob})
+
+
+@app.route('/niche-finder')
+def niche_finder_page():
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    return send_from_directory(BASE_DIR, 'niche-finder.html')
 
 
 _gen_worker_started = [False]

@@ -98,6 +98,25 @@ else sweeps it.
 Runware bills from a prepaid wallet. An empty wallet comes back as an
 insufficient-credits error on every submit, which reads like a broken key.
 
+## Niche finder refresh
+
+`/niche-finder` ranks niches from a list in `niches.py`, re-ranked by Grok
+(`XAI_API_KEY`, optional `XAI_MODEL`, default `grok-4`) or by Gemini while no
+xAI key is set. Admins have a Refresh button on the page. The weekly run is a
+Cloud Scheduler job calling the cron route with `CRON_SECRET`:
+
+```
+gcloud run services update ai-model-chat-dev --region europe-west4 \
+  --update-env-vars XAI_API_KEY=...,XAI_MODEL=grok-4
+gcloud scheduler jobs create http niche-refresh --location europe-west4 \
+  --schedule "0 5 * * 1" --time-zone UTC --http-method GET \
+  --uri https://velvetfunneler.com/api/niche/refresh \
+  --headers "Authorization=Bearer $CRON_SECRET" --attempt-deadline 300s
+```
+
+`NICHE_SOURCES` (comma-separated URLs) replaces the public pages it reads.
+Fanvue and OnlyFans themselves are never fetched.
+
 ## Running the growth layer
 
 The social-to-subscriber layer (free-trial links, source attribution, the
