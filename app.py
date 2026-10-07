@@ -34616,14 +34616,15 @@ def _gen_spec(slug, body, user):
                 if (len(picked) < 4 and words.search(text) and lora
                         and not any(p['high'] == lora['high'] for p in picked)):
                     _auto_lora(picked, lora)
-        spec['loras'] = picked
+        spec['loras'] = _balance_loras(picked, family, library)
     return spec
 
 
 # The Wan 2.2 LoRA library, kept in app settings. Seeded with the general NSFW
 # pair from Civitai (model 1307155, v0.08a high and low).
 _DEFAULT_VIDEO_LORAS = [{
-    'id': 'nsfw-22-v008a', 'name': 'General NSFW v0.08a', 'scale': 1.0,
+    # Its author runs Wan LoRAs at about 0.9.
+    'id': 'nsfw-22-v008a', 'name': 'General NSFW v0.08a', 'scale': 0.9,
     'trigger': 'nsfwsks', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2073605',
     'low': 'https://civitai.com/api/download/models/2083303'}, {
@@ -34633,7 +34634,8 @@ _DEFAULT_VIDEO_LORAS = [{
     'trigger': 'vagina', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3034683',
     'low': 'https://civitai.com/api/download/models/3034713'}, {
-    # Civitai model 1707303, v2.0 I2V-A14B full-body high and low.
+    # Civitai model 1707303, v2.0 I2V-A14B full-body high and low. Its author
+    # tested every pair, close-up and full-body together, at 1.0.
     'id': 'dildo-22-v2-fullbody', 'name': 'Solo Dildo v2 (full body)', 'scale': 1.0,
     'trigger': 'piston_dildo_style', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2405917',
@@ -34646,28 +34648,33 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'dildo-h3', 'name': 'Solo Dildo (H3)', 'scale': 1.0, 'family': 'h3',
     'trigger': 'piston_dildo_style', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3378450', 'low': ''}, {
-    # Civitai model 2926109, v1.0.
-    'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 1.0, 'family': 'h3',
+    # Civitai model 2926109, v1.0. No published strength: 0.8 is the middle of
+    # the 0.5-1.0 range H3 LoRAs hold steady in.
+    'id': 'masturbation-h3', 'name': 'H3 Masturbation / Orgasm', 'scale': 0.8, 'family': 'h3',
     'trigger': 'masturbating, orgasmic contractions', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3311155', 'low': ''}, {
-    # Civitai model 2887438, V1.
-    'id': 'fingering-h3', 'name': 'H3 Fingering', 'scale': 1.0, 'family': 'h3',
+    # Civitai model 2887438, V1. Its author says 0.8-1.
+    'id': 'fingering-h3', 'name': 'H3 Fingering', 'scale': 0.9, 'family': 'h3',
     'trigger': 'fingering', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3264127', 'low': ''}, {
-    # Civitai model 2846342, v0.5 (stills + motion).
-    'id': 'hmpussy-h3', 'name': 'HMPussy v0.5 (H3)', 'scale': 1.0, 'family': 'h3',
+    # Civitai model 2846342, v0.5 (stills + motion). The version's download is
+    # its video file, which its author runs at 0.35 under a stills file at 1.0;
+    # alone it gets a little more.
+    'id': 'hmpussy-h3', 'name': 'HMPussy v0.5 (H3)', 'scale': 0.5, 'family': 'h3',
     'trigger': 'hmpussy, Vagina', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3215304', 'low': ''}, {
-    # Civitai model 2476698, H3 FL2VA v0.2: no trigger; "maintain eye contact" holds.
-    'id': 'deepthroat-h3', 'name': 'Deepthroat v0.2 (H3)', 'scale': 1.0, 'family': 'h3',
+    # Civitai model 2476698, H3 FL2VA v0.2: no trigger; "maintain eye contact"
+    # holds. No published strength, a wide usable window: 0.8 as for masturbation.
+    'id': 'deepthroat-h3', 'name': 'Deepthroat v0.2 (H3)', 'scale': 0.8, 'family': 'h3',
     'trigger': '', 'examples': 'maintain eye contact',
     'high': 'https://civitai.com/api/download/models/3226989', 'low': ''}, {
     # Civitai model 1626704: jiggle, grab, squeeze and bounce, no caption needed.
-    'id': 'boobs-h3', 'name': 'Boob Physics (H3)', 'scale': 1.0, 'family': 'h3',
+    # It adds "a little" motion on top of the clip, so it runs low.
+    'id': 'boobs-h3', 'name': 'Boob Physics (H3)', 'scale': 0.6, 'family': 'h3',
     'trigger': '', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3245935', 'low': ''}, {
     # The same model's Wan 2.2 v8.0 pair: high bounces, low indents and jiggles.
-    'id': 'boobs-22', 'name': 'Boob Physics v8 (Wan 2.2)', 'scale': 1.0,
+    'id': 'boobs-22', 'name': 'Boob Physics v8 (Wan 2.2)', 'scale': 0.7,
     'trigger': '', 'examples': '',
     'high': 'https://civitai.com/api/download/models/2661167',
     'low': 'https://civitai.com/api/download/models/2665810'}]
@@ -34689,8 +34696,44 @@ def _auto_lora(picked, lora):
                        'examples': lora.get('examples', '')})
 
 
+# Stacked LoRAs add up: past these totals Wan blurs and H3 loses motion
+# coherence (H3's guidance puts it at about 1.5 on top of its turbo LoRA).
+# Her own LoRA counts, because it is the one that must not lose.
+LORA_STACK_BUDGET = {'wan': 2.4, 'h3': 1.6}
+# Her LoRA holds identity, so it gives way least; below half its strength a
+# content LoRA no longer does what it was picked for.
+LORA_HER_FLOOR = 0.85
+LORA_CONTENT_FLOOR = 0.5
+
+
+def _balance_loras(picked, family, library):
+    """Scale a stack down to its family's budget. Only strengths left at their
+    library default are moved: one the creator typed is used as typed."""
+    defaults = {(l['high'], l['low']): l['scale'] for l in library.values()}
+    budget = LORA_STACK_BUDGET.get(family, 2.0)
+    if len(picked) < 2 or sum(p['scale'] for p in picked) <= budget:
+        return picked
+    out = [dict(p) for p in picked]
+    her = [p for p in out if p['name'] == 'Her LoRA']
+    for p in her:
+        p['scale'] = max(LORA_HER_FLOOR, p['scale'] - 0.15)
+    free = [p for p in out if p not in her
+            and defaults.get((p['high'], p['low'])) == p['scale']]
+    fixed = sum(p['scale'] for p in out if p not in free)
+    room = budget - fixed
+    want = sum(p['scale'] for p in free)
+    if free and want > room:
+        factor = max(LORA_CONTENT_FLOOR, room / want if room > 0 else 0)
+        for p in free:
+            p['scale'] = round(p['scale'] * factor, 2)
+    return out
+
+
 _REMOVED_LORAS = ('vagina-h3',)
 _LOCKED_LORAS = tuple(l['id'] for l in _DEFAULT_VIDEO_LORAS)
+# Bumped when a built-in's default strength changes: a stored copy older than
+# this takes the new default once, then keeps whatever an admin sets.
+LORA_SCALE_REV = 1
 
 
 def _video_loras():
@@ -34699,6 +34742,10 @@ def _video_loras():
     except ValueError:
         loras = None
     loras = [l for l in loras if l.get('id') not in _REMOVED_LORAS] if isinstance(loras, list) else []
+    builtin = {d['id']: d for d in _DEFAULT_VIDEO_LORAS}
+    for l in loras:
+        if l.get('id') in builtin and (l.get('scale_rev') or 0) < LORA_SCALE_REV:
+            l['scale'], l['scale_rev'] = builtin[l['id']]['scale'], LORA_SCALE_REV
     # The built-in LoRAs are permanent: switched off, never removed.
     have = {l.get('id') for l in loras}
     missing = [dict(d) for d in _DEFAULT_VIDEO_LORAS if d['id'] not in have]
@@ -34760,7 +34807,7 @@ def api_admin_video_loras():
                  'trigger': str(body.get('trigger') or '').strip()[:200],
                  'examples': str(body.get('examples') or '').strip()[:3000],
                  'family': 'h3' if (old or body).get('family') == 'h3' else 'wan',
-                 'enabled': (old or {}).get('enabled', True)}
+                 'enabled': (old or {}).get('enabled', True), 'scale_rev': LORA_SCALE_REV}
         if old:
             loras[loras.index(old)] = entry
         else:
