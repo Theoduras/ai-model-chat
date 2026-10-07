@@ -11,7 +11,7 @@ $base = 'https://raw.githubusercontent.com/Theoduras/ai-model-chat/develop/infra
 $dir = Join-Path $env:USERPROFILE 'vast-build'
 New-Item -ItemType Directory -Force $dir | Out-Null
 Set-Location $dir
-foreach ($f in 'gv.Dockerfile', 'gv_steps.py', 'h3.Dockerfile') {
+foreach ($f in 'gv.Dockerfile', 'gv_steps.py', 'h3_split.ps1') {
     Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing
 }
 
@@ -21,6 +21,7 @@ foreach ($name in $images) {
     Write-Host "building $name" -ForegroundColor Cyan
     # h3 builds from the weights already downloaded to H3_DIR.
     $ctx = if ($name -eq 'h3') { if ($env:H3_DIR) { $env:H3_DIR } else { 'E:\h3' } } else { '.' }
+    if ($name -eq 'h3') { & "$dir\h3_split.ps1" -src $ctx -out "$dir\h3.Dockerfile" }
     docker build --progress=plain -f "$dir\$name.Dockerfile" -t $tag $ctx
     if ($LASTEXITCODE) { throw "FAILED building $name" }
     Write-Host "pushing $name" -ForegroundColor Cyan

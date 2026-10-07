@@ -37,7 +37,7 @@ WORKERS = {
         'image': 'ghcr.io/theoduras/vast-gv:latest', 'disk': 150,
         'gpus': 'gpu_name in [RTX_6000Ada,L40,L40S,RTX_PRO_6000_S,RTX_PRO_6000_WS] cuda_max_good>=12.8', 'env': {}},
     'h3-gv': {
-        'image': h3.IMAGE, 'disk': 120,
+        'image': 'ghcr.io/theoduras/vast-h3:latest', 'disk': 180,
         'gpus': 'gpu_name in [RTX_PRO_6000_S,RTX_PRO_6000_WS]', 'env': {'H3_FILES': json.dumps(H3_FILES, separators=(',', ':')), 'H3_HF': h3.HF}},
     'wan-2-2-char': {
         'image': 'ostris/aitoolkit:latest', 'disk': 300,
