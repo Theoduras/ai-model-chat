@@ -382,6 +382,7 @@
           </div>
         </div>
         <div class="gen-chips" id="gen-levels" role="group" aria-label="Level" hidden></div>
+        <div class="gen-chips st-levels" id="gen-level4" role="group" aria-label="Content level"></div>
         <span class="hint">Narrows the engines, jobs and shots on offer.</span>
       </div>
 
@@ -431,7 +432,7 @@
     <div class="gen-panel gen-prompt st-sec" id="gen-p-prompt" data-title="Prompt">
       <div class="gen-head"><b>5</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
-        <section class="gen-group">
+        <section class="gen-group" data-sp="3">
           <h3>The shot</h3>
           <div class="gen-form">
             <div class="gen-f gen-wide"><label for="gen-scene">Where is she</label>
@@ -443,14 +444,18 @@
               <select id="gen-scene-nsfw"></select>
               <input type="text" id="gen-scene-text" maxlength="160" hidden
                      placeholder="describe what she is doing" aria-label="Your own action"></div>
-            <label class="gen-f"><span>Content type</span>
+            <label class="gen-f"><span id="gen-shot-lbl">Framing</span>
               <select id="gen-shot" onchange="genQuote()"></select></label>
-            <label class="gen-f"><span>Style</span>
+            <label class="gen-f"><span>Photo style</span>
               <select id="gen-style"></select></label>
-            <label class="gen-f"><span>Expression</span>
-              <select id="gen-expression"></select></label>
-            <label class="gen-f"><span>Zoom</span>
+            <label class="gen-f" id="gen-zoom-wrap"><span>Framing distance</span>
               <select id="gen-zoom"></select></label>
+            <label class="gen-f"><span>Camera angle</span>
+              <select id="gen-angle"></select></label>
+            <label class="gen-f"><span>How she is posed</span>
+              <select id="gen-pose"></select></label>
+            <label class="gen-f"><span>Holding or near her <small>optional</small></span>
+              <input type="text" id="gen-props" maxlength="80" placeholder="a coffee, her phone, a towel"></label>
           </div>
           <div class="gen-f"><span>Or use a photo of the place</span>
             <div id="gen-locations" class="gen-outfits"></div>
@@ -466,7 +471,20 @@
           </div>
         </section>
 
-        <section class="gen-group">
+        <section class="gen-group" data-sp="4">
+          <h3>Her</h3>
+          <div class="gen-form">
+            <label class="gen-f"><span>Expression</span>
+              <select id="gen-expression"></select></label>
+            <label class="gen-f"><span>Where she looks</span>
+              <select id="gen-gaze"></select></label>
+            <label class="gen-f"><span>Hair today</span>
+              <select id="gen-hair"></select></label>
+            <label class="gen-f"><span>Makeup</span>
+              <select id="gen-makeup"></select></label>
+            <label class="gen-f"><span>Skin</span>
+              <select id="gen-skin"></select></label>
+          </div>
           <h3>What she wears</h3>
           <label class="gen-f"><span>Describe it</span>
             <input type="text" id="gen-clothing" maxlength="200" placeholder="cream knit sweater and light-wash jeans"></label>
@@ -476,15 +494,19 @@
           </div>
         </section>
 
-        <section class="gen-group">
-          <h3>Camera &amp; look</h3>
+        <section class="gen-group" data-sp="5">
+          <h3>Camera &amp; light</h3>
           <div class="gen-form">
-            <label class="gen-f"><span>Phone camera</span>
+            <label class="gen-f"><span>Camera</span>
               <select id="gen-camera"></select></label>
             <label class="gen-f"><span>Lighting</span>
               <select id="gen-lighting"></select></label>
-            <label class="gen-f"><span>Photo quality</span>
+            <label class="gen-f"><span>How real</span>
               <select id="gen-quality"></select></label>
+            <label class="gen-f"><span>Lens look</span>
+              <select id="gen-lens"></select></label>
+            <label class="gen-f"><span>Colour grade</span>
+              <select id="gen-grade"></select></label>
           </div>
           <div class="gen-f"><span>Phone look <small>grain, soft lens, glow — free</small></span>
             <div class="gen-seg" id="gen-phone-seg">
@@ -502,7 +524,7 @@
             <span>Smudges and dust on the lens or mirror <small class="hint">(selfies)</small></span></label>
         </section>
 
-        <details class="gen-group gen-adv" id="gen-advanced" open>
+        <details class="gen-group gen-adv" id="gen-advanced" data-sp="6" open>
           <summary><h3>Advanced — see or edit the prompt</h3></summary>
           <div class="gen-go">
             <button type="button" class="btn-ai btn-ai-secondary" id="gen-write-btn" onclick="writePrompt()">
@@ -512,7 +534,8 @@
           <label class="gen-f"><span>Prompt</span>
             <textarea id="gen-prompt" rows="6" maxlength="2000"
                       placeholder="Empty = built from your choices above when you generate"></textarea></label>
-          <label class="gen-f"><span>Keep out of the shot</span>
+          <div class="gen-f"><span>Keep out of the shot</span><div class="gen-chips" id="gen-keepout"></div></div>
+          <label class="gen-f"><span>Anything else to keep out</span>
             <textarea id="gen-negative" rows="2" placeholder="sunglasses, jewellery, other people"></textarea></label>
           <label class="gen-f"><span>Always added</span>
             <textarea id="gen-negative-base" rows="3" readonly></textarea></label>
@@ -667,23 +690,6 @@
           only supplies movement — it is never shown to a fan.</span>
       </div>
 
-      <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none" open>
-        <summary><h3>Advanced — see or edit the prompt</h3></summary>
-        <div class="gen-go">
-          <button type="button" class="btn-ai btn-ai-secondary" onclick="autoWriteVideoPrompt(true)">
-            Write the prompt</button>
-          <span class="hint" id="gen-vwrite-note"></span>
-        </div>
-        <label class="gen-f"><span>Prompt</span>
-          <textarea id="gen-vprompt" rows="6" maxlength="2000" oninput="checkVideoPromptStale()"
-                    placeholder="Built from your choices above"></textarea></label>
-        <span class="hint">Edit it and it stays as you wrote it. The clause that keeps her clip untouched is always added back.</span>
-        <label class="gen-f"><span>Keep out of the clip</span>
-          <textarea id="gen-vnegative" rows="2" placeholder="other people, sunglasses"></textarea></label>
-        <label class="gen-f"><span>Always added</span>
-          <textarea id="gen-vnegative-base" rows="4" readonly></textarea></label>
-        <span class="hint">Anything your prompt asks for (say, zoom in) is dropped from it automatically; child, teen and underage never are.</span>
-      </details>
 
       <div class="note-box" id="gen-video-note" style="display:none">
         A clip always starts from a photo that is already kept, so its first frame
@@ -727,6 +733,9 @@
           <div class="gen-chips" id="gen-aspects"></div>
           <span class="hint" id="gen-aspect-note"></span>
         </div>
+      </div>
+    </div>
+    <div class="gen-panel st-sec" id="gen-p-sound" data-title="Sound"><div class="gen-head"><h2>Sound</h2></div>
         <div class="gen-f" id="gen-audio-row"><span>Sound</span>
           <div class="gen-chips" id="gen-audio-modes"></div>
           <input type="text" id="gen-audio-prompt" maxlength="300" style="display:none"
@@ -739,8 +748,28 @@
           </div>
           <span class="hint" id="gen-audio-note"></span>
         </div>
-      </div>
     </div>
+    <div class="gen-panel st-sec" id="gen-p-vprompt" data-title="Prompt"><div class="gen-head"><h2>Prompt</h2></div>
+      <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none" open>
+        <summary><h3>Advanced — see or edit the prompt</h3></summary>
+        <div class="gen-go">
+          <button type="button" class="btn-ai btn-ai-secondary" onclick="autoWriteVideoPrompt(true)">
+            Write the prompt</button>
+          <span class="hint" id="gen-vwrite-note"></span>
+        </div>
+        <label class="gen-f"><span>Prompt</span>
+          <textarea id="gen-vprompt" rows="6" maxlength="2000" oninput="checkVideoPromptStale()"
+                    placeholder="Built from your choices above"></textarea></label>
+        <span class="hint">Edit it and it stays as you wrote it. The clause that keeps her clip untouched is always added back.</span>
+        <label class="gen-f"><span>Keep out of the clip</span>
+          <textarea id="gen-vnegative" rows="2" placeholder="other people, sunglasses"></textarea></label>
+        <label class="gen-f"><span>Always added</span>
+          <textarea id="gen-vnegative-base" rows="4" readonly></textarea></label>
+        <span class="hint">Anything your prompt asks for (say, zoom in) is dropped from it automatically; child, teen and underage never are.</span>
+      </details>
+    </div>
+    <div class="st-nav" id="st-nav"><button type="button" class="btn btn-ghost" id="st-back">Back</button>
+      <span id="st-step-of"></span><button type="button" class="btn btn-primary" id="st-next">Next</button></div>
   </div>
 
   <aside class="st-side" aria-label="Summary and cost">
@@ -943,6 +972,7 @@ async function init() {
   loadExamples(false);
   if (!genPrices) el('gen-jobs').innerHTML = '<div class="note-box">Could not load prices. Reload the page to try again.</div>';
   await loadPersona();
+  loadStudioOptions();
 }
 
 async function loadCredits() {
@@ -1595,6 +1625,7 @@ function setRating(v) {
     return;
   }
   genRating = v;
+  loadStudioOptions();
   el('rate-sfw').setAttribute('aria-pressed', String(v === 'sfw'));
   el('rate-nsfw').setAttribute('aria-pressed', String(v === 'nsfw'));
   el('rate-sfw').classList.toggle('active', v === 'sfw');
@@ -2073,7 +2104,8 @@ function renderGenForm() {
   if (shot) {
     const keep = shot.value;
     const shots = shotsForRating();
-    shot.innerHTML = shots.map(s => opt(s, GEN_SHOT_LABELS[s] || s, keep)).join('')
+    shot.innerHTML = shots.filter(s => !(genOpts && ['candid', 'mirror'].includes(s)))
+      .map(s => opt(s, optLabel(s, genOpts && genOpts.shots) !== prettyKey(s) ? optLabel(s, genOpts.shots) : (GEN_SHOT_LABELS[s] || s), keep)).join('')
       || `<option value="">Nothing ${ratingWord()} is allowed for this persona</option>`;
   }
   const scene = el('gen-scene');
@@ -2093,12 +2125,30 @@ function renderGenForm() {
     el('gen-scene-nsfw-wrap').hidden = genRating !== 'nsfw';
     syncCustomFields();
   }
+  if (genOpts) {
+    Object.entries(OPT_SELECTS).forEach(([id, key]) => fillVocab(id, genOpts[key]));
+    fillVocab('gen-style', genOpts.styles);
+    fillVocab('gen-expression', genOpts.expressions);
+    fillVocab('gen-quality', genOpts.quality);
+    fillGroups('gen-camera', genOpts.cameras);
+    fillGroups('gen-lighting', genOpts.lights);
+    fillVocab('gen-zoom', genOpts.distance);
+    el('gen-zoom-wrap').hidden = genRating !== 'nsfw';
+    el('gen-shot-lbl').textContent = genRating === 'nsfw' ? 'What is on show' : 'Framing';
+    fillGroups('gen-scene', genOpts.places,
+      `<option value="">Anywhere</option>`);
+    scene.insertAdjacentHTML('beforeend', opt(CUSTOM, 'Write your own…', scene.value));
+    if (genOpts.moments.length) fillGroups('gen-scene-nsfw', genOpts.moments, `<option value="">—</option>`);
+    el('gen-scene-nsfw').insertAdjacentHTML('beforeend', opt(CUSTOM, 'Write your own…', el('gen-scene-nsfw').value));
+    syncCustomFields();
+  } else {
   fillVocab('gen-style', genStyles);
   fillVocab('gen-camera', genCameras);
   fillVocab('gen-lighting', genLighting);
   fillVocab('gen-expression', genExpressions);
   fillVocab('gen-zoom', genZooms);
   fillVocab('gen-quality', genQualities);
+  }
 
   renderImageRes();
   genQuote();
@@ -2350,6 +2400,38 @@ function pickExtendMode(m) {
   renderGenForm();
 }
 
+let genOpts = null;
+const OPT_SELECTS = { 'gen-angle': 'angles', 'gen-pose': 'poses', 'gen-gaze': 'gazes', 'gen-hair': 'hair',
+  'gen-makeup': 'makeup', 'gen-skin': 'skins', 'gen-lens': 'lenses', 'gen-grade': 'grades' };
+let genKeepOut = [];
+function studioExtras() {
+  const o = { props: (el('gen-props') || {}).value || '', keep_out: genKeepOut.slice() };
+  Object.keys(OPT_SELECTS).forEach(id => { o[id.slice(4)] = (el(id) || {}).value || ''; });
+  return o;
+}
+async function loadStudioOptions() {
+  const lvl = genRating === 'nsfw' && window.StudioNSFW ? ({ tease: 'suggestive', spicy: 'moderate', explicit: 'explicit' })[StudioNSFW.level()] : 'sfw';
+  if (genOpts && genOpts.level === lvl) return;
+  try {
+    const d = await (await fetch('/api/studio/options?level=' + lvl)).json();
+    d.level = lvl; genOpts = d;
+    const k = el('gen-keepout');
+    if (k) k.innerHTML = d.keep_out.map(r => `<button type="button" class="gen-chip" data-ko="${r.key}" aria-pressed="${genKeepOut.includes(r.key)}">${esc(r.label)}</button>`).join('');
+    renderGenForm();
+  } catch (e) {}
+}
+function optLabel(key, rows) {
+  const r = (rows || []).find(x => x.key === key);
+  return r ? r.label : prettyKey(key);
+}
+function fillGroups(id, groups, first) {
+  const sel = el(id);
+  if (!sel) return;
+  const keep = sel.value;
+  const opts = r => `<option value="${r.key}"${r.key === keep ? ' selected' : ''}>${esc(r.label)}</option>`;
+  sel.innerHTML = (first || '') + groups.map(g => g.group
+    ? `<optgroup label="${esc(g.group)}">${g.rows.map(opts).join('')}</optgroup>` : g.rows.map(opts).join('')).join('');
+}
 function prettyKey(k) {
   const t = String(k).replace(/-/g, ' ');
   return t.charAt(0).toUpperCase() + t.slice(1);
@@ -2858,6 +2940,7 @@ function promptChoices() {
     lighting: el('gen-lighting').value,
     expression: el('gen-expression').value,
     zoom: el('gen-zoom').value,
+    ...studioExtras(),
     smudges: el('gen-smudges').checked,
     quality: el('gen-quality').value,
     clothing: el('gen-clothing').value.trim(),
@@ -3273,6 +3356,7 @@ async function runGeneration() {
         lighting: el('gen-lighting').value,
         expression: el('gen-expression').value,
         zoom: el('gen-zoom').value,
+        ...studioExtras(),
         smudges: el('gen-smudges').checked,
         quality: el('gen-quality').value,
         clothing: el('gen-clothing').value.trim(),
@@ -4214,6 +4298,13 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-grp { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
 .st-tile { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
   border: 1px solid var(--border-soft); background: var(--panel); transition: border-color .15s; }
+.st-off { display: none !important; }
+.st-main .gen-head b, #gen-p-prompt > .gen-head { display: none !important; }
+.st-levels .gen-chip { flex-direction: column; align-items: flex-start; min-width: 150px; }
+.st-levels small { color: var(--text-muted); }
+#gen-p-rating .pg-toggle, #gen-p-rating > .hint { display: none; }
+.st-nav { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 4px 0 24px; }
+.st-nav span { color: var(--text-muted); font-size: 13px; }
 .st-tile { position: relative; }
 .st-edit { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 50%; background: #000a; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
 #ex-edit { background: var(--panel); color: var(--text); border: 1px solid var(--border-soft); border-radius: 14px; padding: 18px; width: min(560px, 92vw); }
@@ -4299,7 +4390,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   const TILED = {
     'persona': 'chips', 'gen-scene': 'place', 'gen-scene-nsfw': 'slot', 'gen-shot': 'frame', 'gen-style': 'slot',
     'gen-expression': 'slot', 'gen-zoom': 'frame', 'gen-camera': 'slot', 'gen-lighting': 'light', 'gen-quality': 'slot',
-    'gen-res': 'small', 'gen-batch': 'small', 'gen-vres': 'small', 'gen-vsecs': 'small', 'gen-sres': 'small',
+    'gen-angle': 'chips', 'gen-pose': 'chips', 'gen-gaze': 'chips', 'gen-hair': 'chips', 'gen-makeup': 'chips',
+    'gen-skin': 'chips', 'gen-lens': 'chips', 'gen-grade': 'chips', 'gen-res': 'small', 'gen-batch': 'small', 'gen-vres': 'small', 'gen-vsecs': 'small', 'gen-sres': 'small',
     'gen-ssecs': 'small', 'gen-smodel': 'slot', 'gen-swap-identity': 'chips', 'gen-reel-identity': 'chips', 'gen-swap-orient': 'chips',
   };
   const FRAMES = { closeup: 'scale(3.1) translateY(-6%)', close: 'scale(2.6) translateY(-4%)', portrait: 'scale(2)',
@@ -4320,7 +4412,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 
   const EX_GROUP = { 'gen-shot': 'shot', 'gen-zoom': 'zoom', 'gen-style': 'style', 'gen-scene': 'place',
     'gen-scene-nsfw': 'scene', 'gen-expression': 'expression', 'gen-camera': 'camera', 'gen-lighting': 'light',
-    'gen-quality': 'quality' };
+    'gen-quality': 'quality', 'gen-angle': 'angle', 'gen-pose': 'pose', 'gen-gaze': 'gaze', 'gen-hair': 'hair',
+    'gen-makeup': 'makeup', 'gen-skin': 'skin', 'gen-lens': 'lens', 'gen-grade': 'grade' };
   function media(kind, o, id) {
     const v = keyOf(o.value), t = esc(o.textContent.trim());
     const ex = EX_GROUP[id] && o.value && exampleFor(EX_GROUP[id] + ':' + o.value);
@@ -4428,27 +4521,87 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     decorate((el('gen-smudges') || {}).parentElement, 'smudges:on', 'st-chip-photo');
   }
 
+  // ── Steps: one card at a time ──────────────────────────────────────────────
+  let stepCur = 1;
+  const LVL4 = [['sfw', 'Safe for work', 'Clothed. Feeds and socials.'], ['tease', 'Tease', 'Lingerie, sheer, implied.'],
+    ['spicy', 'Spicy', 'Topless and nude.'], ['explicit', 'Explicit', 'Fully explicit. PPV only.']];
+  const lvlNow = () => genRating !== 'nsfw' || !window.StudioNSFW ? 'sfw' : StudioNSFW.level();
+  const safeOnly = () => ['reel', 'swap'].includes(genJob);
+  const motionText = () => {
+    const m = ['gen-video-motion', 'gen-swap-motion', 'gen-reel-prompt', 'gen-extend-motion', 'gen-multiref-motion']
+      .map(i => el(i)).find(i => shown(i) && i.value.trim());
+    return m ? m.value.trim() : 'Describe the motion';
+  };
+  const eng = () => { const b = document.querySelector('#gen-models [aria-pressed="true"]'); return b ? (b.querySelector('b, span') || b).textContent.trim() : ''; };
+  function stepList() {
+    const lv = () => (LVL4.find(l => l[0] === lvlNow()) || LVL4[0])[1];
+    const who = { title: 'Who', ids: ['gen-p-type', 'gen-p-character'], sum: () => txt('persona') || 'Pick whose photos' };
+    const lev = { title: 'Content level', ids: ['gen-p-rating'], sum: lv };
+    if (genMake === 'image') return [who, lev,
+      { title: 'The shot', ids: ['gen-p-prompt'], g: 3, sum: () => [txt('gen-scene'), txt('gen-shot'), txt('gen-pose')].filter(Boolean).join(' · ') },
+      { title: 'Her', ids: ['gen-p-prompt'], g: 4, sum: () => [txt('gen-expression'), (el('gen-clothing') || {}).value].filter(Boolean).join(' · ') },
+      { title: 'Camera and light', ids: ['gen-p-prompt'], g: 5, sum: () => [txt('gen-lighting'), txt('gen-camera')].filter(Boolean).join(' · ') },
+      { title: 'Engine and size', ids: ['gen-p-engine', 'gen-p-result', 'gen-p-prompt'], g: 6, sum: () => [eng(), txt('gen-res')].filter(Boolean).join(' · ') }];
+    return [who, lev,
+      { title: 'The clip', ids: ['gen-p-prompt'], sum: motionText },
+      { title: 'Sound', ids: ['gen-p-sound'], sum: () => (document.querySelector('#gen-audio-modes [aria-pressed="true"]') || {}).textContent || 'Sound' },
+      { title: 'Generate', ids: ['gen-p-engine', 'gen-p-result', 'gen-p-vprompt'], sum: () => [eng(), txt('gen-vres')].filter(Boolean).join(' · ') }];
+  }
+  function stepOf(sec) {
+    const st = stepList(), i = st.findIndex(x => x.ids.includes(sec) && (sec !== 'gen-p-prompt' || x.g === undefined || x.g === 3));
+    return i < 0 ? st.length : i + 1;
+  }
+  function applyStep() {
+    const steps = stepList();
+    stepCur = Math.max(1, Math.min(stepCur, steps.length));
+    const cur = steps[stepCur - 1];
+    document.querySelectorAll('.st-main > .st-sec').forEach(sec => { sec.classList.toggle('st-off', !cur.ids.includes(sec.id)); });
+    document.querySelectorAll('#gen-image-form > [data-sp]').forEach(g => { g.classList.toggle('st-off', +g.dataset.sp !== cur.g); });
+    const lv4 = el('gen-level4'), sig = lvlNow() + safeOnly() + genMake;
+    if (lv4 && lv4.dataset.sig !== sig) {
+      lv4.dataset.sig = sig;
+      lv4.innerHTML = LVL4.map(l => `<button type="button" class="gen-chip" data-lvl="${l[0]}" aria-pressed="${l[0] === lvlNow()}"${safeOnly() && l[0] !== 'sfw' ? ' disabled' : ''}><b>${l[1]}</b><small>${l[2]}</small></button>`).join('');
+    }
+    document.querySelectorAll('.st-main .gen-head b').forEach(b => { b.hidden = true; });
+  }
+  function goStep(n) { stepCur = n; lastRail = ''; tick(); const m = document.querySelector('.st-main'); if (m) m.scrollIntoView({ block: 'start' }); }
+  document.addEventListener('click', e => {
+    const lvl = e.target.closest('[data-lvl]');
+    if (lvl && !lvl.disabled) {
+      const k = lvl.dataset.lvl;
+      if (k === 'sfw') setRating('sfw');
+      else loadNsfw().then(() => { StudioNSFW.setLevel(k); setRating('nsfw'); renderGenForm(); loadStudioOptions(); });
+      return;
+    }
+    const ko = e.target.closest('[data-ko]');
+    if (ko) { const k = ko.dataset.ko; genKeepOut = genKeepOut.includes(k) ? genKeepOut.filter(x => x !== k) : genKeepOut.concat(k); ko.setAttribute('aria-pressed', String(genKeepOut.includes(k))); return; }
+    const g = e.target.closest('[data-step]');
+    if (g) goStep(+g.dataset.step);
+  });
+  el('st-back').onclick = () => goStep(stepCur - 1);
+  el('st-next').onclick = () => goStep(stepCur + 1);
+  ['gen-video-out', 'gen-swap-out'].forEach(id => { const n = el(id), p = el('gen-p-prompt'); if (n && p) p.appendChild(n); });
+
   let lastRail = '', lastIssues = '';
   function tick() {
     Object.keys(TILED).forEach(syncSelect);
     decorateExtras();
-    const secs = [...document.querySelectorAll('.st-sec')].filter(s => s.style.display !== 'none');
+    applyStep();
     const list = issues();
-    secs.forEach(s => {
-      const mine = list.filter(i => i.sec === s.id);
-      s.classList.toggle('st-err', mine.some(i => i.kind === 'err'));
-      s.classList.toggle('st-warn', !mine.some(i => i.kind === 'err') && mine.length > 0);
-    });
-    const num = id => { const b = document.querySelector('#' + id + ' .gen-head b'); return b ? b.textContent : ''; };
-    const rail = secs.map(s => {
-      const cls = s.classList.contains('st-err') ? 'st-err' : s.classList.contains('st-warn') ? 'st-warn' : '';
-      return `<button type="button" class="${cls}" data-go="${s.id}"><span class="st-n">${esc(num(s.id))}</span>`
-        + `<span class="st-t"><b>${esc(s.dataset.title)}</b><small>${esc(sectionSummary(s))}</small></span></button>`;
+    const steps = stepList();
+    const rail = steps.map((st, i) => {
+      const mine = list.filter(x => stepOf(x.sec) === i + 1);
+      const cls = mine.some(x => x.kind === 'err') ? 'st-err' : mine.length ? 'st-warn' : '';
+      return `<button type="button" class="${cls}" data-step="${i + 1}" aria-current="${i + 1 === stepCur}"><span class="st-n">${i + 1}</span>`
+        + `<span class="st-t"><b>${esc(st.title)}</b><small>${esc(st.sum())}</small></span></button>`;
     }).join('');
     if (rail !== lastRail) { el('st-rail').innerHTML = rail; lastRail = rail; }
-    const iss = list.map(i => `<button type="button" class="st-issue ${i.kind}" data-go="${i.sec}"><i>${esc(num(i.sec))}</i><span>${esc(i.text)}</span></button>`).join('');
+    const iss = list.map(i => `<button type="button" class="st-issue ${i.kind}" data-step="${stepOf(i.sec)}"><i>${stepOf(i.sec)}</i><span>${esc(i.text)}</span></button>`).join('');
     if (iss !== lastIssues) { el('st-issues').innerHTML = iss; lastIssues = iss; }
-    el('st-picks').textContent = secs.map(sectionSummary).filter(Boolean).join(' · ');
+    el('st-picks').textContent = steps.map(st => st.sum()).filter(Boolean).join(' · ');
+    el('st-step-of').textContent = `Step ${stepCur} of ${steps.length}`;
+    el('st-back').disabled = stepCur <= 1;
+    el('st-next').hidden = stepCur >= steps.length;
 
     const ratio = (genMake === 'image' ? currentImageAspect() : (aspectOffered() ? currentAspect() : '')) || '4:5';
     const [w, h] = ratio.split(':').map(Number);
@@ -4473,12 +4626,6 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     else if (!errs && btn.dataset.stBlocked) { btn.disabled = false; delete btn.dataset.stBlocked; }
   }
 
-  document.addEventListener('click', e => {
-    const g = e.target.closest('[data-go]');
-    if (!g) return;
-    const t = el(g.dataset.go);
-    if (t) t.scrollIntoView({ behavior: 'smooth', block: 'start' });
-  });
   document.addEventListener('change', () => setTimeout(tick, 0));
   document.addEventListener('click', () => setTimeout(tick, 0));
   setInterval(tick, 400);

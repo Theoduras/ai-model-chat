@@ -119,7 +119,10 @@
     renderGenForm();
   });
 
+  const LEVEL_OF = { suggestive: 'tease', moderate: 'spicy', explicit: 'explicit' };
   window.StudioNSFW = {
+    setLevel: k => { level = LEVEL_OF[k] || k; try { sessionStorage.setItem(LEVEL_KEY, level); } catch (x) {} },
+    level: () => level,
     word: 'explicit',
     shotInLevel: sh => row().shots.includes(sh) || !LEVELS.some(l => l.shots.includes(sh)),
     sceneInLevel: lvl => row().scenes.includes(lvl),

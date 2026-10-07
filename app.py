@@ -15340,6 +15340,19 @@ def api_persona_media_list(slug):
         s.close()
 
 
+@app.route('/api/studio/options')
+def api_studio_options():
+    """The studio's labelled, grouped options for one content level."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    import studio_options as SO
+    level = (request.args.get('level') or 'explicit').strip().lower()
+    return jsonify(dict(SO.vocab(level if level in imagegen.LEVEL_ORDER else 'explicit'),
+                        recommended={'image': SO.recommended_image_engine(level),
+                                     'video': SO.recommended_video_engine('animate', level)}))
+
+
 def _outfit_of(row, outfits):
     """Resolve a media row's outfit number to its definition, or None."""
     try:
