@@ -19,7 +19,9 @@ $images = if ($env:IMAGES) { $env:IMAGES -split ' ' } else { 'gv' }
 foreach ($name in $images) {
     $tag = "ghcr.io/theoduras/vast-${name}:latest"
     Write-Host "building $name" -ForegroundColor Cyan
-    docker build --progress=plain -f "$name.Dockerfile" -t $tag .
+    # h3 builds from the weights already downloaded to H3_DIR.
+    $ctx = if ($name -eq 'h3') { if ($env:H3_DIR) { $env:H3_DIR } else { 'E:\h3' } } else { '.' }
+    docker build --progress=plain -f "$dir\$name.Dockerfile" -t $tag $ctx
     if ($LASTEXITCODE) { throw "FAILED building $name" }
     Write-Host "pushing $name" -ForegroundColor Cyan
     docker push $tag
