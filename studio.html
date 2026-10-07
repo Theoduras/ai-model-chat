@@ -910,6 +910,7 @@ async function init() {
     const me = await (await fetch('/api/me')).json();
     chatbotOff = (me.capabilities || {}).chatbot === false;
     el('gen-ex-admin').hidden = !me.is_admin;
+    window.IS_ADMIN = !!me.is_admin;
     if (me.guest) guestMode();
     el('fv-sub-only').hidden = !chatbotOff;
   } catch (e) {}
@@ -1481,6 +1482,50 @@ function exampleSig() {
 function exampleImg(ex, cls) {
   return `<img class="${cls || 'st-photo'}" src="${esc(ex.url)}" alt="" loading="lazy" decoding="async">`
     + (ex.by ? `<span class="st-ex-by">${esc(ex.by)}</span>` : '');
+}
+
+async function editExample(key) {
+  const engine = el('gen-model').value;
+  let d;
+  try { d = await (await fetch('/api/generate/examples/prompt?key=' + encodeURIComponent(key))).json(); }
+  catch (e) { return; }
+  if (d.error) { alert(d.error); return; }
+  let dlg = el('ex-edit');
+  if (!dlg) {
+    dlg = document.createElement('dialog');
+    dlg.id = 'ex-edit';
+    dlg.innerHTML = '<form method="dialog" class="ex-edit-f"><h3 id="ex-edit-t"></h3>'
+      + '<textarea id="ex-edit-p" rows="6" maxlength="600" aria-label="Example prompt"></textarea>'
+      + '<span class="hint" id="ex-edit-s"></span><div class="gen-go">'
+      + '<button type="button" class="btn btn-sm" id="ex-edit-go">Save and remake</button>'
+      + '<button type="button" class="btn btn-ghost btn-sm" id="ex-edit-reset">Reset to built-in</button>'
+      + '<button type="submit" class="btn btn-ghost btn-sm">Close</button></div></form>';
+    document.body.appendChild(dlg);
+  }
+  el('ex-edit-t').textContent = key + ' · ' + engineLabel(engine);
+  el('ex-edit-p').value = d.prompt;
+  el('ex-edit-s').textContent = d.custom ? 'Custom sentence.' : 'Built-in sentence.';
+  const save = async reset => {
+    const st = el('ex-edit-s');
+    st.textContent = 'Saving…';
+    try {
+      const post = (url, body) => fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+      let r = await post('/api/generate/examples/prompt', { key, prompt: reset ? '' : el('ex-edit-p').value });
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || 'Could not save');
+      el('ex-edit-p').value = j.prompt;
+      if (reset) { st.textContent = 'Back to the built-in sentence.'; return; }
+      st.textContent = 'Making the photo…';
+      r = await post('/api/generate/examples', { engine, key });
+      const m = await r.json();
+      if (!r.ok) throw new Error(m.error || 'Could not make it');
+      st.textContent = 'Done.';
+      loadExamples();
+    } catch (e) { st.textContent = '✗ ' + e.message; }
+  };
+  el('ex-edit-go').onclick = () => save(false);
+  el('ex-edit-reset').onclick = () => save(true);
+  dlg.showModal();
 }
 
 async function makeExamples() {
@@ -4169,6 +4214,10 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-grp { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
 .st-tile { all: unset; box-sizing: border-box; cursor: pointer; display: flex; flex-direction: column; border-radius: 12px; overflow: hidden;
   border: 1px solid var(--border-soft); background: var(--panel); transition: border-color .15s; }
+.st-tile { position: relative; }
+.st-edit { position: absolute; top: 6px; right: 6px; z-index: 2; width: 26px; height: 26px; border-radius: 50%; background: #000a; color: #fff; display: flex; align-items: center; justify-content: center; font-size: 13px; }
+#ex-edit { background: var(--panel); color: var(--text); border: 1px solid var(--border-soft); border-radius: 14px; padding: 18px; width: min(560px, 92vw); }
+#ex-edit textarea { width: 100%; box-sizing: border-box; margin: 10px 0 6px; }
 .st-tile:hover:not([disabled]) { border-color: var(--accent-line); }
 .st-tile:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
 .st-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent); }
@@ -4285,7 +4334,9 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   }
 
   function tileFor(kind, o, sel) {
+    const exKey = window.IS_ADMIN && EX_GROUP[sel.id] && o.value ? EX_GROUP[sel.id] + ':' + o.value : '';
     return `<button type="button" class="st-tile" data-v="${esc(o.value)}" aria-pressed="${o.value === sel.value}"${o.disabled ? ' disabled' : ''}>`
+      + (exKey ? `<span class="st-edit" role="button" tabindex="0" data-ex="${esc(exKey)}" title="Edit or remake this example">&#9998;</span>` : '')
       + media(kind, o, sel.id) + (kind === 'chips' ? esc(o.textContent.trim()) : `<span class="st-lbl">${esc(o.textContent.trim())}</span>`) + '</button>';
   }
 
@@ -4299,6 +4350,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
       box.className = 'st-tiles' + (kind === 'small' ? ' st-small' : kind === 'chips' ? ' st-chips' : '');
       box.setAttribute('role', 'group');
       box.addEventListener('click', e => {
+        const ed = e.target.closest('.st-edit');
+        if (ed) { e.preventDefault(); e.stopPropagation(); editExample(ed.dataset.ex); return; }
         const b = e.target.closest('.st-tile');
         if (!b || b.disabled) return;
         e.preventDefault();
@@ -4310,7 +4363,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
       sel.classList.add('st-tiled');
     }
     box.hidden = sel.hidden || sel.style.display === 'none';
-    const sig = sel.value + '|' + (EX_GROUP[id] ? exampleSig() : '') + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
+    const sig = sel.value + '|' + (window.IS_ADMIN ? 'a' : '') + (EX_GROUP[id] ? exampleSig() : '') + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
     let html = '';

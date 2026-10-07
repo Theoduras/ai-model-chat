@@ -34317,7 +34317,16 @@ def _gen_spec(slug, body, user):
         'location_ref': (_studio_location(slug, body.get('location_ref'))
                          and str(body['location_ref'])),
         'zoom': (body.get('zoom') or '').strip().lower(),
+        'props': re.sub(r'\s+', ' ', str(body.get('props') or '')).strip()[:80],
     })
+    for _k, _t in (('angle', imagegen.ANGLES), ('pose', imagegen.POSES), ('gaze', imagegen.GAZES),
+                   ('hair', imagegen.HAIR_STYLES), ('makeup', imagegen.MAKEUPS),
+                   ('skin', imagegen.SKINS), ('lens', imagegen.LENSES), ('grade', imagegen.GRADES)):
+        spec[_k] = imagegen.pick_option(_t, str(body.get(_k) or '').strip().lower(), level)
+    _keep = imagegen.keep_out_text(
+        [str(k) for k in (body.get('keep_out') or []) if isinstance(k, str)][:8])
+    if _keep:
+        spec['negative_extra'] = (spec['negative_extra'] + ', ' + _keep).strip(', ')[:600]
 
     if kind == 'image':
         shot = (body.get('shot') or 'portrait').strip().lower()
@@ -35991,6 +36000,9 @@ def _gen_image_prompt(slug, spec, has_reference):
         features=clause, quality=spec.get('quality', ''), clothing=clothing,
         expression=spec.get('expression', ''), smudges=spec.get('smudges', False),
         zoom=spec.get('zoom', ''),
+        angle=spec.get('angle', ''), pose=spec.get('pose', ''), gaze=spec.get('gaze', ''),
+        hair=spec.get('hair', ''), makeup=spec.get('makeup', ''), skin=spec.get('skin', ''),
+        lens=spec.get('lens', ''), grade=spec.get('grade', ''), props=spec.get('props', ''),
         location_ref=(('second-to-last' if spec.get('outfit_ref') else 'last')
                       if spec.get('location_ref') else ''),
         location_text=spec.get('location_text', ''), scene_text=spec.get('scene_text', ''),
@@ -38741,9 +38753,49 @@ def _examples_pending(engine, since=0.0):
     return sorted(out, key=lambda k: k in EX.DERIVED)
 
 
+EXAMPLES_PROMPTS_SETTING = 'studio_examples_prompts'
+
+
+def _examples_load_prompts():
+    try:
+        m = json.loads(_get_setting(EXAMPLES_PROMPTS_SETTING) or '{}')
+    except ValueError:
+        m = {}
+    EX.OVERRIDES.clear()
+    EX.OVERRIDES.update({k: v for k, v in m.items() if k in EX.PROMPTS and isinstance(v, str)})
+    return EX.OVERRIDES
+
+
+@app.route('/api/generate/examples/prompt', methods=['GET', 'POST'])
+def api_generate_examples_prompt():
+    """Read or change the sentence one example tile is made from. Admin only;
+    an empty sentence puts the built-in one back."""
+    refused = _require_admin()
+    if refused:
+        return refused
+    body = request.get_json(silent=True) or {}
+    key = (body.get('key') or request.args.get('key') or '').strip()
+    if key not in EX.PROMPTS:
+        return jsonify({'error': 'Unknown example key'}), 400
+    custom = _examples_load_prompts()
+    if request.method == 'POST':
+        text = re.sub(r'\s+', ' ', str(body.get('prompt') or '')).strip()[:600]
+        with _examples_lock:
+            m = dict(custom)
+            if text and text != EX.PROMPTS[key]:
+                m[key] = text
+            else:
+                m.pop(key, None)
+            _set_setting(EXAMPLES_PROMPTS_SETTING, json.dumps(m))
+        custom = _examples_load_prompts()
+    return jsonify({'key': key, 'default': EX.PROMPTS[key], 'prompt': custom.get(key) or EX.PROMPTS[key],
+                    'custom': key in custom})
+
+
 def _examples_batch(engine, keys):
     """Make `keys` in order, logging what each one cost. A failure is recorded
     and skipped, so one refused tile does not stop the set."""
+    _examples_load_prompts()
     anchor, spent = _examples_anchor()
     ref = _examples_ref_url(anchor)
     for key in keys:

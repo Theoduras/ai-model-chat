@@ -983,6 +983,104 @@ SMUDGES = {
 }
 
 
+# Per-shot choices the creator briefs beyond the shot itself. Each table maps a
+# key to (label, prompt words, level); an unknown key or one above the job's
+# level reads as 'auto' (nothing said), so a picker that is ahead of the server
+# makes a plainer photo rather than a refused one.
+ANGLES = {
+    'auto': ('Let the shot decide', '', 'sfw'),
+    'eye-level': ('Eye level', 'shot at eye level', 'sfw'),
+    'above': ('From above', 'shot from slightly above, looking down at her', 'sfw'),
+    'below': ('From below', 'shot from a low angle, looking up at her', 'sfw'),
+    'behind': ('From behind', 'shot from behind her', 'sfw'),
+    'side': ('From the side', 'shot from the side, in profile', 'sfw'),
+}
+POSES = {
+    'auto': ('Let the shot decide', '', 'sfw'),
+    'standing': ('Standing', 'standing', 'sfw'),
+    'sitting': ('Sitting', 'sitting', 'sfw'),
+    'lying': ('Lying down', 'lying down', 'sfw'),
+    'kneeling': ('Kneeling', 'kneeling', 'sfw'),
+    'leaning': ('Leaning', 'leaning against something', 'sfw'),
+    'walking': ('Walking', 'caught mid-step, walking', 'sfw'),
+}
+# Scenes that already say how she is posed: a second pose would argue with them.
+POSE_IN_SCENE = ('exposed', 'solo-touch', 'bent-over', 'nipple-play', 'aftermath', 'bath',
+                 'just-woke-up')
+GAZES = {
+    'auto': ('Let the shot decide', '', 'sfw'),
+    'lens': ('Into the lens', 'looking straight into the lens', 'sfw'),
+    'away': ('Away', 'looking away from the camera, off to the side', 'sfw'),
+    'down': ('Down', 'eyes lowered, looking down', 'sfw'),
+    'over-shoulder': ('Over her shoulder', 'glancing back over her shoulder at the camera', 'sfw'),
+}
+HAIR_STYLES = {
+    'auto': ('As in her character', '', 'sfw'),
+    'down': ('Down', 'her hair worn down', 'sfw'),
+    'up': ('Up', 'her hair pinned up', 'sfw'),
+    'ponytail': ('Ponytail', 'her hair in a high ponytail', 'sfw'),
+    'messy-bun': ('Messy bun', 'her hair in a messy bun with loose strands', 'sfw'),
+    'braid': ('Braid', 'her hair in one loose braid', 'sfw'),
+    'tousled': ('Tousled', 'her hair tousled and a little messy', 'sfw'),
+    'wet': ('Wet', 'her hair wet and slicked back', 'sfw'),
+}
+HAIR_SAME = 'keeping her own hair colour and length'
+MAKEUPS = {
+    'auto': ('As in her photos', '', 'sfw'),
+    'natural': ('Natural', 'light natural makeup', 'sfw'),
+    'glam': ('Full glam', 'full glam makeup, defined brows, winged liner, glossy lips', 'sfw'),
+    'smoky': ('Smoky eye', 'a smoky eye with soft nude lips', 'sfw'),
+    'bare': ('Bare-faced', 'no makeup, bare skin', 'sfw'),
+}
+SKINS = {
+    'auto': ('Natural', '', 'sfw'),
+    'dewy': ('Dewy', 'dewy, glowing skin', 'sfw'),
+    'flushed': ('Flushed', 'flushed cheeks and a warm glow on her skin', 'sfw'),
+    'tanned': ('Sun-kissed', 'sun-kissed tanned skin', 'sfw'),
+    'oiled': ('Oiled', 'oiled skin catching the light', 'suggestive'),
+    'wet': ('Wet', 'wet skin with water droplets', 'suggestive'),
+}
+LENSES = {
+    'auto': ('Let the shot decide', '', 'sfw'),
+    'wide': ('Wide phone lens', 'ultra-wide phone lens, slight edge distortion, everything in focus', 'sfw'),
+    'portrait': ('Portrait blur', 'portrait-mode background blur, shallow depth of field', 'sfw'),
+    'tele': ('Telephoto', 'telephoto compression, flattened perspective, softly blurred background', 'sfw'),
+}
+GRADES = {
+    'auto': ('Let the shot decide', '', 'sfw'),
+    'warm': ('Warm', 'a warm colour grade', 'sfw'),
+    'cool': ('Cool', 'a cool, blue-leaning colour grade', 'sfw'),
+    'faded': ('Faded film', 'a faded film colour grade with lifted blacks', 'sfw'),
+    'contrast': ('High contrast', 'a punchy high-contrast colour grade', 'sfw'),
+}
+# Chips under "Keep out": each adds its words to the negative prompt.
+KEEP_OUT = {
+    'other-people': ('Other people', 'other people, bystanders, a second person'),
+    'text': ('Text', 'captions, text overlays, signs with writing'),
+    'sunglasses': ('Sunglasses', 'sunglasses'),
+    'jewellery': ('Extra jewellery', 'necklaces, earrings, extra jewellery'),
+    'tattoos': ('Tattoos', 'tattoos'),
+    'heavy-makeup': ('Heavy makeup', 'heavy makeup'),
+}
+
+
+def pick_option(table, key, level='explicit'):
+    """The key if the table knows it and the job's level allows it, else 'auto'."""
+    row = table.get(key or '')
+    if not row or LEVEL_ORDER.index(row[2]) > LEVEL_ORDER.index(
+            'sfw' if level == 'sfw' else 'explicit'):
+        return 'auto'
+    return key
+
+
+def option_text(table, key):
+    return (table.get(key or '') or ('', ''))[1]
+
+
+def keep_out_text(keys):
+    return ', '.join(KEEP_OUT[k][1] for k in keys if k in KEEP_OUT)
+
+
 def expression_text(key):
     return (EXPRESSIONS.get(key) or ('', ''))[1]
 
@@ -1214,7 +1312,9 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  style='', scene='', camera='', lighting='', direction='',
                  banned=(), age=None, quality='', clothing='', features='',
                  expression='', smudges=False, location='', zoom='',
-                 location_ref='', location_text='', scene_text=''):
+                 location_ref='', location_text='', scene_text='',
+                 angle='', pose='', gaze='', hair='', makeup='', skin='', lens='', grade='',
+                 props=''):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -1273,7 +1373,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
 
     body = ' '.join(filter(None, [
         _sentence(((purpose + ': ') if purpose else '')
-                  + ', '.join(b for b in (who, framing, zoomed, where, styled) if b)),
+                  + ', '.join(b for b in (who, framing, zoomed, option_text(ANGLES, angle), where, styled) if b)),
         (('The reference images set who she is — not what she wears'
           + ('.' if location_ref else ' or where she is.')) if has_reference else ''),
         _sentence(f'The photo is taken {place}; the setting must clearly be that place' if place else ''),
@@ -1282,12 +1382,21 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                   'setting must clearly match it, with nobody else in it'
                   if location_ref else ''),
         _sentence(matched),
-        (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup' else ''),
+        (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup'
+         and not option_text(MAKEUPS, makeup) else ''),
         _sentence(f'She is wearing {clothing}' if clothing else ''),
+        _sentence(option_text(POSES, '' if scene in POSE_IN_SCENE else pose)
+                  and 'She is ' + option_text(POSES, pose)),
+        _sentence(f'She is holding or near {props.strip()}' if (props or '').strip() else ''),
         _sentence(direction),
         _sentence(expression_text(expression)),
+        _sentence(option_text(GAZES, gaze)),
+        _sentence(', '.join(b for b in (
+            (option_text(HAIR_STYLES, hair) + ', ' + HAIR_SAME) if option_text(HAIR_STYLES, hair) else '',
+            option_text(MAKEUPS, makeup), option_text(SKINS, skin)) if b)),
         _sentence(features),
-        _sentence(', '.join(b for b in (camera_text(camera), light,
+        _sentence(', '.join(b for b in (camera_text(camera), option_text(LENSES, lens),
+                                        option_text(GRADES, grade), light,
                                         SMUDGES.get(glass, '')) if b)),
     ]))
     look = quality_text(quality) + (' ' + CONSISTENCY if has_reference else '')

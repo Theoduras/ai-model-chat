@@ -175,6 +175,19 @@ PROMPTS = {
                    f'{imagegen.SMUDGES["pov-selfie"]}.'),
 }
 
+# The per-shot options added with the redesigned studio: one demo sentence per
+# key, built from the same words the prompt uses, so the tile shows the pick.
+for _prefix, _table in (('angle', imagegen.ANGLES), ('pose', imagegen.POSES), ('gaze', imagegen.GAZES),
+                        ('hair', imagegen.HAIR_STYLES), ('makeup', imagegen.MAKEUPS),
+                        ('skin', imagegen.SKINS), ('lens', imagegen.LENSES), ('grade', imagegen.GRADES)):
+    for _k, _row in _table.items():
+        if _row[1] and f'{_prefix}:{_k}' not in PROMPTS:
+            PROMPTS[f'{_prefix}:{_k}'] = (f'A waist-up photo of her {_SWEATER} {_LIVING}, '
+                                          f'{_row[1]}.')
+
+# Admin edits: key -> sentence, set by the app from its settings before a run.
+OVERRIDES = {}
+
 # Free to make: the phone look is a filter, so these are the plain selfie run
 # through it, never a provider call.
 DERIVED = {'phone-look:light': 'light', 'phone-look:medium': 'medium', 'phone-look:heavy': 'heavy'}
@@ -215,7 +228,7 @@ def prompt_for(key):
     style = STYLE
     if key.startswith('quality:'):
         style = imagegen.QUALITY[key[8:]][1] + ' No text, no watermark, nobody else in the frame.'
-    return ' '.join((PROMPTS[key], LOOK, REFERENCE, style))
+    return ' '.join((OVERRIDES.get(key) or PROMPTS[key], LOOK, REFERENCE, style))
 
 
 def anchor_prompt():
