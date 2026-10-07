@@ -2641,7 +2641,12 @@ class VastProvider(RunPodProvider):
             workers = requests.post('https://run.vast.ai/get_endpoint_workers/',
                                     json={'id': ep['id'], 'api_key': key}, timeout=TIMEOUT).json()
             for w in workers if isinstance(workers, list) else ():
-                if w.get('status') == 'unavail':
+                if w.get('status') != 'unavail':
+                    continue
+                # A worker still pulling its image can read unavailable too.
+                inst = requests.get(f'https://console.vast.ai/api/v0/instances/{w["id"]}/',
+                                    headers=self._headers(), timeout=TIMEOUT).json().get('instances') or {}
+                if inst.get('actual_status') == 'exited':
                     logger.warning('vast %s: deleting unavailable worker %s', name, w['id'])
                     requests.delete(f'https://console.vast.ai/api/v0/instances/{w["id"]}/',
                                     headers=self._headers(), timeout=TIMEOUT)
