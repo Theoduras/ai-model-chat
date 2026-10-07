@@ -2641,7 +2641,12 @@ class VastProvider(RunPodProvider):
             workers = requests.post('https://run.vast.ai/get_endpoint_workers/',
                                     json={'id': ep['id'], 'api_key': key}, timeout=TIMEOUT).json()
             for w in workers if isinstance(workers, list) else ():
-                if w.get('status') == 'unavail':
+                if w.get('status') != 'unavail':
+                    continue
+                # A worker still pulling its image can read unavailable too.
+                inst = requests.get(f'https://console.vast.ai/api/v0/instances/{w["id"]}/',
+                                    headers=self._headers(), timeout=TIMEOUT).json().get('instances') or {}
+                if inst.get('actual_status') == 'exited':
                     logger.warning('vast %s: deleting unavailable worker %s', name, w['id'])
                     requests.delete(f'https://console.vast.ai/api/v0/instances/{w["id"]}/',
                                     headers=self._headers(), timeout=TIMEOUT)
@@ -2674,12 +2679,20 @@ class VastProvider(RunPodProvider):
         return dict(body, _key=key)
 
     def _run(self, model, payload):
-        auth = self._route(VAST_ENDPOINTS[model])
-        key = auth.pop('_key')
-        url = auth['url'].rstrip('/')
-        sess = self._post(f'{url}/session/create', {'auth_data': auth, 'payload': {
-            # Every poll extends it; an orphaned job frees the worker this long after.
-            'lifetime': 900}}, key=key)
+        for attempt in range(5):
+            auth = self._route(VAST_ENDPOINTS[model])
+            key = auth.pop('_key')
+            url = auth['url'].rstrip('/')
+            try:
+                sess = self._post(f'{url}/session/create', {'auth_data': auth, 'payload': {
+                    # Every poll extends it; an orphaned job frees the worker this long after.
+                    'lifetime': 900}}, key=key)
+                break
+            except ProviderUnreachable:
+                # Routed to a worker that was stopping or restarting: route again.
+                if attempt == 4:
+                    raise
+                time.sleep(30)
         body = self._post(f'{url}/run', {'auth_data': auth, 'session_id': sess['session_id'],
                                          'payload': payload}, timeout=VIDEO_TIMEOUT, key=key)
         # Stored in generation_jobs.provider_job_id (2000 chars), so the endpoint

@@ -51,12 +51,38 @@ def load_workflow(workflow_path):
         prompt['834']['inputs']['steps'] = steps
         # High-noise model for the first half, low-noise for the rest.
         prompt['829']['inputs']['step'] = steps // 2
+    # torch.compile breaks on the newer ComfyUI's fp8 requantize: route each
+    # compile node's consumers straight to the model it was handed.
+    for cid, node in list(prompt.items()):
+        if 'Compile' in node.get('class_type', '') and isinstance(node['inputs'].get('model'), list):
+            src = node['inputs']['model']
+            for other in prompt.values():
+                for k, v in other.get('inputs', {}).items():
+                    if isinstance(v, list) and len(v) == 2 and str(v[0]) == cid:
+                        other['inputs'][k] = src
+            del prompt[cid]
     # Newer ComfyUI-Frame-Interpolation (the Vast image) made these required.
     for node in prompt.values():
         if node.get('class_type') == 'RIFE VFI':
             for k, v in (('dtype', 'float32'), ('torch_compile', False), ('batch_size', 1)):
                 node['inputs'].setdefault(k, v)
     return prompt
+
+
+_gv_queue = queue_prompt
+
+
+def queue_prompt(prompt):
+    # Newer ComfyUI (the Vast image) only loads images from its input folder.
+    import shutil
+    for node in prompt.values():
+        img = node.get('inputs', {}).get('image') if node.get('class_type') == 'LoadImage' else None
+        if isinstance(img, str) and img.startswith('/') and os.path.exists(img):
+            name = img.strip('/').replace('/', '_')
+            os.makedirs('/ComfyUI/input', exist_ok=True)
+            shutil.copy(img, os.path.join('/ComfyUI/input', name))
+            node['inputs']['image'] = name
+    return _gv_queue(prompt)
 
 
 _gv_handler = handler
@@ -84,7 +110,7 @@ def patch(src):
     if MARK in src:
         # A restarted worker keeps its disk: swap in this version of the block.
         src = src[:src.index(MARK)] + src[src.rindex(start):]
-    needed = ('def load_workflow(', 'def handler(')
+    needed = ('def load_workflow(', 'def handler(', 'def queue_prompt(')
     if not all(n in src for n in needed):
         return src
     at = src.rindex(start)
