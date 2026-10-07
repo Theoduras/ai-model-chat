@@ -2668,7 +2668,8 @@ class VastProvider(RunPodProvider):
         key = auth.pop('_key')
         url = auth['url'].rstrip('/')
         sess = self._post(f'{url}/session/create', {'auth_data': auth, 'payload': {
-            'lifetime': 3 * 3600}}, key=key)
+            # Every poll extends it; an orphaned job frees the worker this long after.
+            'lifetime': 900}}, key=key)
         body = self._post(f'{url}/run', {'auth_data': auth, 'session_id': sess['session_id'],
                                          'payload': payload}, timeout=VIDEO_TIMEOUT, key=key)
         job = json.dumps({'url': url, 'auth': auth, 'session': sess['session_id'],
