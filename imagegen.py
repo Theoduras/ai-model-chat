@@ -181,7 +181,7 @@ for _m in VAST_MODELS:
     RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # Vast has no queue: a submit waits here while a cold worker boots.
-VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '1200'))
+VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '3600'))
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
 # they take an uploaded track or none, never a generated one.
 SILENT_MODELS = tuple(m for m in RUNPOD_MODELS if m != 'h3-gv')

@@ -11,7 +11,7 @@ $base = 'https://raw.githubusercontent.com/Theoduras/ai-model-chat/develop/infra
 $dir = Join-Path $env:USERPROFILE 'vast-build'
 New-Item -ItemType Directory -Force $dir | Out-Null
 Set-Location $dir
-foreach ($f in 'gv.Dockerfile', 'gv_steps.py') {
+foreach ($f in 'gv.Dockerfile', 'gv_steps.py', 'h3.Dockerfile') {
     Invoke-WebRequest "$base/$f" -OutFile $f -UseBasicParsing
 }
 
