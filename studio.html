@@ -1697,7 +1697,7 @@ function renderModelChips() {
   // picker having lied.
   const want = genRating === 'nsfw' ? 'nsfw' : 'sfw';
   const ratings = genPrices.ratings || {};
-  const order = ['seedream-4-5', 'nano-banana-2', 'nano-banana-pro'];
+  const order = ['seedream-4-5', 'nano-banana-2', 'nano-banana-2-1', 'nano-banana-pro'];
   const rank = m => (order.indexOf(m) + 1) || order.length + 1;
   const keys = Object.keys(genPrices.images)
     .filter(m => m !== 'seedream-5-pro' && (ratings[m] || ['sfw']).includes(want))

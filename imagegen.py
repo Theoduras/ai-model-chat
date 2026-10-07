@@ -82,12 +82,13 @@ RUNWARE_MODELS = {
     'seedream-5-pro': os.getenv('RW_MODEL_SEEDREAM_5PRO', 'bytedance:seedream@5.0-pro'),
     'nano-banana-pro': os.getenv('RW_MODEL_NANO_BANANA_PRO', 'google:4@2'),
     'nano-banana-2': os.getenv('RW_MODEL_NANO_BANANA_2', 'google:4@3'),
+    'nano-banana-2-1': os.getenv('RW_MODEL_NANO_BANANA_2_1', 'google:nano-banana@2.1'),
 }
 
 # Google's image models, whatever Runware calls them, refuse explicit content
 # at any safety level. They are safe-work rungs only, and an explicit shot is
 # moved off them before it is priced rather than after it is refused.
-SFW_ONLY_MODELS = ('nano-banana-pro', 'nano-banana-2')
+SFW_ONLY_MODELS = ('nano-banana-pro', 'nano-banana-2', 'nano-banana-2-1')
 RUNWARE_VIDEO_MODEL = os.getenv('RW_MODEL_VIDEO', 'runware:201@1')
 
 # Video models, keyed the same way the image ones are.
@@ -440,6 +441,7 @@ MODEL_PX = {
     'seedream-5-pro':  {'1k': (1664, 2432), '2k': (1664, 2432), '4k': (3072, 4096)},
     'nano-banana-pro': {'1k': (848, 1264), '2k': (1696, 2528), '4k': (3392, 5096)},
     'nano-banana-2':   {'1k': (848, 1264), '2k': (1696, 2528), '4k': (3392, 5096)},
+    'nano-banana-2-1': {'1k': (848, 1264), '2k': (1696, 2528), '4k': (3392, 5096)},
 }
 RESOLUTION_PX = {
     '1k': (1664, 2432),
@@ -476,7 +478,7 @@ def dimensions(model_key, resolution, aspect=None):
     base = sizes.get(resolution) or sizes.get('2k') or RESOLUTION_PX['2k']
     if aspect not in IMAGE_ASPECTS:
         return base
-    if model_key in ('nano-banana-pro', 'nano-banana-2'):
+    if model_key in SFW_ONLY_MODELS:
         w, h = GOOGLE_PX_2K[aspect]
         # Google's 1K list is its 2K list halved.
         return (w // 2, h // 2) if resolution == '1k' else (w, h)

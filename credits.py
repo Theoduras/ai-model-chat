@@ -46,7 +46,7 @@ MIN_MARGIN_MULTIPLE = 2.25
 MIN_DISCOUNT_MARGIN_MULTIPLE = 1.75
 
 IMAGE_MODELS = ('seedream-4-5', 'seedream-5-pro', 'nano-banana-pro', 'nano-banana-2',
-                'wan-2-2-char')
+                'nano-banana-2-1', 'wan-2-2-char')
 RESOLUTIONS = ('1k', '4k')
 VIDEO_RESOLUTIONS = ('480p', '720p', '1080p')
 # The presets the picker offers. Any whole number in VIDEO_SECONDS_RANGE is
@@ -90,6 +90,8 @@ PROVIDER_COST_USD = {
     'seedream-4-5':    {'1k': 0.04, '2k': 0.04, '4k': 0.04},
     'seedream-5-pro':  {'1k': 0.04, '2k': 0.04, '4k': 0.04},
     'nano-banana-2':   {'1k': 0.06895, '2k': 0.10255, '4k': 0.2051},
+    # Unmeasured: priced as Nano Banana 2 until a real run says otherwise.
+    'nano-banana-2-1': {'1k': 0.06895, '2k': 0.10255, '4k': 0.2051},
     'nano-banana-pro': {'1k': 0.138, '2k': 0.138, '4k': 0.276},
     # A still on our char-lora endpoint (infra/runpod-lora). Unmeasured guess:
     # ~1 min of an 80-96 GB card plus its share of cold starts.
@@ -274,6 +276,7 @@ MODEL_LABELS = {
     'seedream-5-pro': 'Seedream 5.0 Pro',
     'nano-banana-pro': 'Ultra Realism',
     'nano-banana-2': 'True Life',
+    'nano-banana-2-1': 'True Life 2.1',
     'wan-2-5': 'Wan 2.5',
     'wan-2-7': 'Wan 2.7',
     'seedance-2-5': 'Seedance 2.5',
@@ -300,6 +303,7 @@ MODEL_LABELS_NSFW = {'seedream-4-5': 'Creative Pro 18+ Full LoRA'}
 MODEL_TAGLINES = {
     'seedream-4-5': 'Bold ideas, brought to life.',
     'nano-banana-2': 'Real moments, made in seconds.',
+    'nano-banana-2-1': 'Real moments, sharper.',
     'nano-banana-pro': 'Indistinguishable from reality.',
 }
 MODEL_TAGLINES_NSFW = {'seedream-4-5': 'Your character. Every scene. No limits.'}
@@ -316,6 +320,7 @@ MODEL_RATINGS = {
     'seedream-5-pro': ('sfw',),
     'nano-banana-pro': ('sfw',),
     'nano-banana-2': ('sfw',),
+    'nano-banana-2-1': ('sfw',),
     'wan-2-2-char': ('sfw', 'nsfw'),
 }
 

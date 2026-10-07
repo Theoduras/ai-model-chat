@@ -25,7 +25,7 @@ logger = logging.getLogger('studio_examples')
 EXAMPLE_ENGINE = 'nano-banana-2'
 FALLBACK_ENGINE = 'seedream-4-5'
 # The image engines the studio offers. Her LoRA has no demo LoRA to run.
-ENGINES = ('nano-banana-2', 'nano-banana-pro', 'seedream-4-5')
+ENGINES = ('nano-banana-2', 'nano-banana-2-1', 'nano-banana-pro', 'seedream-4-5')
 RESOLUTION = '1k'
 ASPECT = '3:2'
 ANCHOR_ASPECT = '2:3'

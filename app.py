@@ -35473,7 +35473,7 @@ def _char_submit(call):
         return provider_job, result, model
 
 
-CHAR_SFW_CHOICES = ('nano-banana-pro', 'nano-banana-2')
+CHAR_SFW_CHOICES = ('nano-banana-pro', 'nano-banana-2', 'nano-banana-2-1')
 
 
 def _char_model(v, sfw_model=None):
