@@ -4105,20 +4105,20 @@ function openFanvueUpload() {
 // The persona wizard's frame over the studio's own panels, one at a time. The
 // panels are borrowed, not copied, so everything done in the guide is real.
 PageWizard.pageTour({
-  name: 'StudioWizard', key: 'page:studio',
+  name: 'StudioWizard', key: 'page:studio:v2',
   steps: [
-    {anchor: '#gen-p-type', placement: 'right', title: '1 · Photo or video',
-     body: 'What you are making. The video jobs sit under Video.'},
-    {anchor: '#gen-p-rating', placement: 'right', title: '2 · Rating',
-     body: 'It narrows the engines, jobs and shots on offer, so pick it before the engine.'},
-    {anchor: '#gen-p-engine', placement: 'right', title: '3 · Engine',
-     body: 'The model that makes the photo. Photos and Photo to Video are open on every plan.'},
-    {anchor: '#gen-p-character', placement: 'right', title: '4 · Character',
-     body: 'Pick whose photos these are. Her approved character, or her face and body photos, keep her looking the same in every shot.'},
-    {anchor: '#gen-p-prompt', placement: 'left', title: '5 · Prompt',
-     body: 'Pick a scene, a shot and her expression and the direction fills itself in. Clothing, typed or an uploaded outfit photo, replaces every other outfit. Write the prompt turns it all into words, or type your own. The free phone look makes a still read like a phone snap; the unfiltered copy is kept too.'},
-    {anchor: '#gen-p-result', placement: 'left', title: '6 · Size & shape',
-     body: 'Choose size, shape and how many; the price is on the button. Results land unapproved: Keep moves a photo into her vault, the rest delete themselves after 3 days.'},
+    {anchor: '#gen-p-type', placement: 'right', title: 'Photo or video',
+     body: 'Everything is on one page. Start here: a photo, or a clip made from a photo you kept.'},
+    {anchor: '#gen-p-character', placement: 'right', title: 'Who',
+     body: 'Pick her from the list; her face shows in the frame. Her approved character keeps her looking the same in every shot.'},
+    {anchor: '#gen-p-rating', placement: 'right', title: 'How much she shows',
+     body: 'Safe, Tease, Spicy or Explicit. It narrows the shots and engines below.'},
+    {anchor: '#gen-p-prompt', placement: 'left', title: 'The shot',
+     body: 'Pick a place, a shot and her expression and the prompt writes itself. Clothing you type replaces every other outfit.'},
+    {anchor: '#gen-p-engine', placement: 'left', title: 'Engine and size',
+     body: 'The model, size and how many. The price is on the Generate button. Results land unapproved: Keep moves one into her vault, the rest delete themselves after 3 days.'},
+    {anchor: '#st-rail', placement: 'right', title: 'Jump around',
+     body: 'This list jumps to any part. A green tick is ready; ! or × marks what still needs you.'},
   ],
 });
 
