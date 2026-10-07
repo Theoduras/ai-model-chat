@@ -38045,7 +38045,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 if (spec.get('model') in imagegen.RUNPOD_MODELS and _row
                         and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
-                                             f"{_wish_file_token(_row['id'], ttl=900)}")
+                                             f"{_wish_file_token(_row['id'], ttl=900 + (imagegen.VAST_ROUTE_WAIT if spec.get('model') in imagegen.VAST_MODELS else 0))}")
                 if spec.get('model') == 'h3-gv' and not spec.get('video_prompt'):
                     call['prompt'] = imagegen.write_h3_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), spec)

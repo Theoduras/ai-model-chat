@@ -51,6 +51,11 @@ def load_workflow(workflow_path):
         prompt['834']['inputs']['steps'] = steps
         # High-noise model for the first half, low-noise for the rest.
         prompt['829']['inputs']['step'] = steps // 2
+    # Newer ComfyUI-Frame-Interpolation (the Vast image) made these required.
+    for node in prompt.values():
+        if node.get('class_type') == 'RIFE VFI':
+            for k, v in (('dtype', 'float32'), ('torch_compile', False), ('batch_size', 1)):
+                node['inputs'].setdefault(k, v)
     return prompt
 
 
@@ -74,8 +79,11 @@ def handler(job):
 
 def patch(src):
     start = 'runpod.serverless.start('
-    if MARK in src or start not in src:
+    if start not in src:
         return src
+    if MARK in src:
+        # A restarted worker keeps its disk: swap in this version of the block.
+        src = src[:src.index(MARK)] + src[src.rindex(start):]
     needed = ('def load_workflow(', 'def handler(')
     if not all(n in src for n in needed):
         return src
