@@ -4113,10 +4113,10 @@ PageWizard.pageTour({
      body: 'Pick her from the list; her face shows in the frame. Her approved character keeps her looking the same in every shot.'},
     {anchor: '#gen-p-rating', placement: 'right', title: 'How much she shows',
      body: 'Safe, Tease, Spicy or Explicit. It narrows the shots and engines below.'},
+    {anchor: '#gen-p-engine', placement: 'left', title: 'Engine, size and length',
+     body: 'The model, size and how many. The price is on the Generate button. Results land unapproved: Keep moves one into her vault, the rest delete themselves after 3 days.'},
     {anchor: '#gen-p-prompt', placement: 'left', title: 'The shot',
      body: 'Pick a place, a shot and her expression and the prompt writes itself. Clothing you type replaces every other outfit.'},
-    {anchor: '#gen-p-engine', placement: 'left', title: 'Engine and size',
-     body: 'The model, size and how many. The price is on the Generate button. Results land unapproved: Keep moves one into her vault, the rest delete themselves after 3 days.'},
     {anchor: '#st-rail', placement: 'right', title: 'Jump around',
      body: 'This list jumps to any part. A green tick is ready; ! or × marks what still needs you.'},
   ],
@@ -4594,15 +4594,17 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const lv = () => (LVL4.find(l => l[0] === lvlNow()) || LVL4[0])[1];
     const who = { title: 'Who', ids: ['gen-p-type', 'gen-p-character'], sum: () => txt('persona') || 'Pick whose photos' };
     const lev = { title: 'Content level', ids: ['gen-p-rating'], sum: lv };
-    if (genMake === 'image') return [who, lev,
+    const eng6 = { title: 'Engine and size', ids: ['gen-p-engine', 'gen-p-result'], sum: () => [eng(), txt('gen-res')].filter(Boolean).join(' · ') };
+    if (genMake === 'image') return [who, lev, eng6,
       { title: 'The shot', ids: ['gen-p-prompt'], g: 3, sum: () => [txt('gen-scene'), txt('gen-shot'), txt('gen-pose')].filter(Boolean).join(' · ') },
       { title: 'Her', ids: ['gen-p-prompt'], g: 4, sum: () => [txt('gen-expression'), (el('gen-clothing') || {}).value].filter(Boolean).join(' · ') },
       { title: 'Camera and light', ids: ['gen-p-prompt'], g: 5, sum: () => [txt('gen-lighting'), txt('gen-camera')].filter(Boolean).join(' · ') },
-      { title: 'Engine and size', ids: ['gen-p-engine', 'gen-p-result', 'gen-p-prompt'], g: 6, sum: () => [eng(), txt('gen-res')].filter(Boolean).join(' · ') }];
+      { title: 'More options', ids: ['gen-p-prompt'], g: 6, sum: () => '' }];
     return [who, lev,
-      { title: 'The clip', ids: ['gen-p-prompt'], sum: motionText },
+      { title: 'Engine and length', ids: ['gen-p-engine', 'gen-p-result'], sum: () => [eng(), txt('gen-vsecs'), txt('gen-vres')].filter(Boolean).join(' · ') },
+      { title: 'The clip', ids: ['gen-p-prompt', 'gen-p-vprompt'], sum: motionText },
       { title: 'Sound', ids: ['gen-p-sound'], sum: () => (document.querySelector('#gen-audio-modes [aria-pressed="true"]') || {}).textContent || 'Sound' },
-      { title: 'Generate', ids: ['gen-p-engine', 'gen-p-result', 'gen-p-vprompt'], sum: () => [eng(), txt('gen-vres')].filter(Boolean).join(' · ') }];
+];
   }
   function stepOf(sec) {
     const st = stepList(), i = st.findIndex(x => x.ids.includes(sec) && (sec !== 'gen-p-prompt' || x.g === undefined || x.g === 3));
