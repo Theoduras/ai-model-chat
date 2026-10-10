@@ -7,7 +7,7 @@
     "api/index.py": {
       "memory": 1024,
       "maxDuration": 60,
-      "includeFiles": "{*.py,*.html,*.json,*.txt,*.ico,*.png,css/**,js/**,img/**,personas/**,templates/**,character_looks/**,docs/**}"
+      "includeFiles": "{*.py,*.html,*.json,*.txt,*.ico,*.png,css/**,js/**,img/**,personas/**,templates/**,character_looks/**,docs/**,masshype-preview/**}"
     }
   },
   "crons": [

@@ -1,0 +1,418 @@
+<!DOCTYPE html><html lang="en" data-theme="light"><head><meta name="robots" content="noindex, nofollow"><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><style>#page-loader{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:var(--bg,#0e0e0e);transition:opacity .2s ease}#page-loader.out{opacity:0;pointer-events:none}#page-loader i{width:34px;height:34px;border-radius:50%;border:3px solid rgba(124, 92, 255,.18);border-top-color:#7c5cff;animation:pl-spin .8s linear infinite}@keyframes pl-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion: reduce){#page-loader i{animation:none;border-color:#7c5cff}}</style>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>Pricing · MassHype</title><meta name="description" content="MassHype plans and prices: start free with AI character building and content generation, then add the AI chatbot and social funnel when you are ready.">
+
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
+:root{--bg:#0e0e0e;--panel:#111113;--surface:#1c1c1c;--border:#2e2e2e;
+--text:#f0ece9;--text-2:#bdb8b4;--text-3:#97918d;--text-muted:#6b6663;
+--accent:#7c5cff;--accent-2:#00c2ff;--accent-3:#7c3aed;
+--grad:linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 60%,#00c2ff 80%,#7c5cff);
+--font:'Inter',system-ui,sans-serif;--display:'Sora','Inter',system-ui,sans-serif}
+/* Light theme — same token names and values as css/style.css, so these pages
+   follow the theme js/theme.js stored from the dashboard. */
+:root[data-theme="light"]{--bg:#faf9f8;--panel:#ffffff;--surface:#f3f1ef;--border:#d9d5d0;
+--text:#1a1614;--text-2:#3b3532;--text-3:#57504b;--text-muted:#6e6762;--accent:#5b3fe0}
+:root[data-theme="light"] .err{background:#fdecec;border-color:#f0b4b4;color:#9b1c1c}
+:root[data-theme="light"] .ok{background:#e8f6ed;border-color:#a8ddbd;color:#0f7038}
+:root[data-theme="light"] .tier:hover{border-color:#bdb7b1}
+@keyframes sweep{0%{background-position:0% 50%}100%{background-position:150% 50%}}
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:var(--bg);color:var(--text);font-family:var(--font);display:flex;align-items:center;justify-content:center;min-height:100vh;padding:32px 16px}
+.wrap{width:100%;max-width:420px}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:36px 32px}
+h1,h2{font-family:var(--display);letter-spacing:-.015em}
+h1{font-size:1.35rem;font-weight:800;margin-bottom:8px}
+p.sub{color:var(--text-muted);font-size:.9rem;margin-bottom:24px}
+label{display:block;font-size:.8rem;color:var(--text-3);margin-bottom:6px}
+input{width:100%;background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:12px 14px;color:var(--text);font-size:.95rem;outline:none;margin-bottom:16px;font-family:var(--font);transition:border-color .2s}
+input:focus{border-color:var(--accent)}
+button{width:100%;background:var(--grad);background-size:300% 100%;color:#fff;border:none;border-radius:12px;padding:14px;font-size:.95rem;font-weight:600;cursor:pointer;font-family:var(--font);transition:transform .1s,box-shadow .2s}
+button:hover{transform:translateY(-2px);box-shadow:0 8px 26px #00c2ff55;animation:sweep .55s linear infinite}
+button:disabled{opacity:.6;cursor:not-allowed;transform:none;animation:none}
+.err{background:#3f1515;border:1px solid #7f1d1d;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#fca5a5;margin-bottom:16px}
+.ok{background:#14321f;border:1px solid #166534;border-radius:10px;padding:10px 14px;font-size:.85rem;color:#86efac;margin-bottom:16px}
+.ok a,.err a{color:inherit;font-weight:600;text-decoration:underline}
+.alt{text-align:center;margin-top:18px;font-size:.85rem;color:var(--text-muted)}
+.alt a{color:var(--accent);text-decoration:none}
+.gbtn{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;background:#fff;color:#1f1f1f;border:1px solid #dadce0;border-radius:12px;padding:13px;font-size:.95rem;font-weight:600;font-family:var(--font);cursor:pointer;text-decoration:none;transition:box-shadow .2s}
+.gbtn:hover{box-shadow:0 2px 10px #0003}
+.gbtn svg{width:18px;height:18px}
+.orsep{display:flex;align-items:center;gap:12px;color:var(--text-muted);font-size:.78rem;margin:18px 0}
+.orsep:before,.orsep:after{content:'';flex:1;height:1px;background:var(--border)}
+.tiers{display:grid;gap:16px;margin-top:8px;align-items:stretch}
+.tier{background:var(--panel);border:1px solid var(--border);border-radius:14px;padding:22px;transition:border-color .2s,box-shadow .2s;display:flex;flex-direction:column;height:100%}
+.tokpacks{display:grid;grid-template-columns:repeat(auto-fit,minmax(168px,1fr));gap:14px;margin-top:20px}
+.tokpack{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:18px;text-align:center;position:relative}
+.tokpack .n{font-size:1.5rem;font-weight:700}
+.tokpack .n span{font-size:.8rem;font-weight:500;color:var(--text-2)}
+.tokpack .p{margin:6px 0 2px;font-size:1.05rem}
+.tokpack .per{color:var(--text-2);font-size:.76rem}
+.tokpack button{width:100%;margin-top:12px;border-radius:9px;padding:9px;font-size:.84rem;font-weight:600;border:0;cursor:pointer;background:var(--grad);background-size:300% 100%;color:#fff}
+.tokpack button.alt{margin-top:7px;background:var(--surface);color:var(--text);border:1px solid var(--border)}
+.tokpack button[disabled]{opacity:.5;cursor:default}
+.tokpack .save{position:absolute;top:-9px;left:50%;transform:translateX(-50%);background:#a78bfa;color:#fff;border-radius:99px;padding:2px 9px;font-size:.68rem;font-weight:600;white-space:nowrap}
+.tokpack.is-test{border-color:#fbbf24}
+.tokpack.is-test .save{background:#fbbf24;color:#3b2c05}
+.tier:hover{border-color:#3d3d3d}
+.tier .tag{margin-left:auto;font-size:.62rem;font-weight:700;letter-spacing:.08em;padding:3px 9px;border-radius:999px;background:var(--surface);border:1px solid var(--border);color:var(--text-2)}
+.tier.selected .tag{border-color:var(--accent-2);color:var(--accent-2)}
+/* The card is the plan picker; the buttons inside it are the payment step. */
+.tier[data-select]{cursor:pointer}
+.tier[data-select]:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.tier.selected,:root[data-theme="light"] .tier.selected:hover{border-color:var(--accent-2)}
+.tier.selected{box-shadow:0 0 0 1px var(--accent-2) inset,0 10px 30px #00c2ff22}
+.tier .pick{display:flex;align-items:center;gap:8px;min-height:22px;font-size:.72rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase;color:var(--text-muted);margin-bottom:10px}
+.tier .pick:before{content:'';width:14px;height:14px;border-radius:50%;border:1.5px solid var(--border);flex:none}
+.tier.selected .pick{color:var(--accent-2)}
+.tier .pick .on{display:none}
+.tier.selected .pick .off{display:none}
+.tier.selected .pick .on{display:inline}
+.tier.selected .pick:before{border-color:var(--accent-2);background:var(--accent-2);box-shadow:inset 0 0 0 3px var(--panel)}
+/* Every card is a column of the same height, and the feature list absorbs the
+   slack — so the pay buttons line up across the row. */
+.tier>[data-period]{display:flex;flex-direction:column;flex:1}
+.tier>[data-period][hidden]{display:none}
+.vtoggle{display:flex;gap:4px;margin:8px 0 4px;background:var(--surface);border-radius:99px;padding:3px;width:max-content}
+.vtoggle button{border:0;background:transparent;color:var(--text-2);border-radius:99px;padding:4px 12px;font-size:.78rem;font-weight:600;cursor:pointer}
+.vtoggle button.active{background:var(--accent);color:#fff}
+.vtoggle .vplus{position:relative;overflow:visible}
+.vtoggle .vplus .gem{color:#a5b4fc}
+.vtoggle .vplus.active{color:#1e1b4b;background:linear-gradient(110deg,#e0f2fe 0%,#a5b4fc 35%,#f0abfc 55%,#e0f2fe 75%,#a5b4fc 100%);background-size:250% 100%;box-shadow:0 0 12px #a5b4fc88}
+.vtoggle .vplus.active .gem{color:#4338ca}
+.vtoggle .vplus i{position:absolute;width:5px;height:5px;background:#fff;opacity:0;pointer-events:none;
+  clip-path:polygon(50% 0,62% 38%,100% 50%,62% 62%,50% 100%,38% 62%,0 50%,38% 38%)}
+.vtoggle .vplus i:nth-of-type(1){top:-3px;right:4px}
+.vtoggle .vplus i:nth-of-type(2){bottom:-2px;left:10px;width:4px;height:4px}
+.vtoggle .vplus i:nth-of-type(3){top:2px;left:-3px;width:6px;height:6px}
+.vtoggle .vplus.active i{opacity:1}
+.tier.is-plus{position:relative;border-color:transparent;box-shadow:0 0 0 1px #a5b4fc66 inset,0 10px 34px #a5b4fc44,0 0 22px #f0abfc22}
+.tier.is-plus:before{content:'';position:absolute;inset:-1px;border-radius:15px;padding:1.5px;pointer-events:none;
+  background:linear-gradient(120deg,#e0f2fe,#a5b4fc,#f0abfc,#e0f2fe,#a5b4fc);background-size:300% 300%;
+  -webkit-mask:linear-gradient(#000 0 0) content-box,linear-gradient(#000 0 0);-webkit-mask-composite:xor;mask-composite:exclude}
+.tier.is-plus .price{background:linear-gradient(110deg,var(--text) 40%,#a5b4fc 50%,var(--text) 60%);background-size:250% 100%;-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent}
+.tier.is-plus .price span{-webkit-text-fill-color:var(--text-2)}
+@keyframes vshine{0%{background-position:100% 0}100%{background-position:-150% 0}}
+@keyframes vtwinkle{0%,100%{transform:scale(.2) rotate(0);opacity:0}50%{transform:scale(1) rotate(45deg);opacity:1}}
+@media (prefers-reduced-motion:no-preference){
+.vtoggle .vplus.active{animation:vshine 3.2s linear infinite}
+.vtoggle .vplus.active i{animation:vtwinkle 1.8s ease-in-out infinite}
+.vtoggle .vplus.active i:nth-of-type(2){animation-delay:.6s}
+.vtoggle .vplus.active i:nth-of-type(3){animation-delay:1.2s}
+.tier.is-plus:before{animation:vshine 5s linear infinite}
+.tier.is-plus .price{animation:vshine 4s linear infinite}}
+.plusval{color:#4ec9a0}
+.tier ul{flex:1}
+.tier .cta{margin-top:auto;padding-top:4px}
+.tier .cta .spacer{visibility:hidden;margin-top:8px}
+.tier h2{font-size:1.05rem;font-weight:700;margin-bottom:4px}
+.price{font-family:var(--display);font-size:1.95rem;font-weight:800;margin:10px 0 2px;letter-spacing:-.02em}
+.price span{font-family:var(--font);font-size:.85rem;font-weight:400;color:var(--text-muted)}
+.blurb{color:var(--text-3);font-size:.85rem;margin-bottom:12px;min-height:2.6em}
+.tier ul{list-style:none;margin-bottom:16px}
+.tier li{font-size:.85rem;color:var(--text-2);padding:4px 0}
+.tier li:before{content:'✓';color:var(--accent);margin-right:8px}
+.bar{display:flex;justify-content:space-between;align-items:center;margin-bottom:20px;font-size:.85rem;color:var(--text-3)}
+.bar a{color:var(--accent);text-decoration:none}
+.ptoggle{display:flex;justify-content:center;gap:4px;background:var(--surface);border:1px solid var(--border);border-radius:999px;padding:4px;width:fit-content;margin:0 auto 22px}
+.ptoggle button{width:auto;background:none;color:var(--text-2);border-radius:999px;padding:8px 18px;font-size:.85rem;box-shadow:none;animation:none}
+.ptoggle button:hover{transform:none;box-shadow:none;animation:none}
+.ptoggle button.active{background:var(--grad);background-size:300% 100%;color:#fff}
+.ptoggle .save{font-size:.7rem;opacity:.85;margin-left:4px}
+.permo{font-size:.75rem;color:var(--text-muted);margin-bottom:10px}
+.vat{font-family:var(--font);font-size:.7rem;font-weight:500;color:var(--text-muted);letter-spacing:0}
+.tier.soon{opacity:.85}
+/* Site header — same links and theme switch as the marketing pages. */
+.site-nav{position:fixed;top:0;left:0;right:0;z-index:60;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:12px 24px;background:var(--panel);border-bottom:1px solid var(--border)}
+.site-nav .brand{font-family:var(--display);font-weight:800;font-size:1.05rem;color:var(--text);text-decoration:none;letter-spacing:-.01em}
+.site-nav .brand i{color:var(--accent);font-style:normal}
+.site-nav .links{display:flex;align-items:center;gap:8px}
+.site-nav a{font-size:.82rem;font-weight:600;text-decoration:none;padding:8px 15px;border-radius:999px;white-space:nowrap;transition:background .2s,color .2s,border-color .2s}
+.site-nav .nav-ghost{color:var(--text-2);border:1px solid var(--border)}
+.site-nav .nav-ghost:hover{color:var(--text);background:var(--surface)}
+.site-nav .nav-btn{color:#fff;background:var(--accent);border:1px solid var(--accent)}
+.site-nav .nav-btn:hover{background:var(--accent-2);border-color:var(--accent-2)}
+.site-nav .nav-left{display:flex;align-items:center;gap:16px;min-width:0}
+.site-nav .nav-studio{display:inline-flex;align-items:center;gap:8px;color:#fff;font-weight:700;
+  background:linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 60%,#00c2ff 80%,#7c5cff);background-size:300% 100%;
+  animation:nav-studio-shift 6s linear infinite;box-shadow:0 0 0 2px rgba(124, 92, 255,.3),0 6px 20px rgba(0, 194, 255,.35)}
+.site-nav .nav-studio small{font-weight:600;font-size:.7rem;padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.28)}
+.site-nav .nav-studio:hover{box-shadow:0 0 0 3px rgba(124, 92, 255,.45),0 10px 26px rgba(0, 194, 255,.5)}
+@keyframes nav-studio-shift{to{background-position:300% 0}}
+@media(prefers-reduced-motion:reduce){.site-nav .nav-studio{animation:none}}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:34px;height:34px;flex:none;padding:0;border-radius:999px;border:1px solid var(--border);background:none;color:var(--text-2);cursor:pointer}
+.theme-toggle:hover{color:var(--accent);background:var(--surface);transform:none;box-shadow:none;animation:none}
+.theme-toggle svg{width:17px;height:17px}
+.theme-toggle .ico-moon{display:none}
+:root[data-theme="light"] .theme-toggle .ico-sun{display:none}
+:root[data-theme="light"] .theme-toggle .ico-moon{display:block}
+body[data-page="pricing"]{display:block;padding:92px 16px 48px}
+body[data-page="pricing"] .wrap{margin:0 auto}
+@media(max-width:700px){.site-nav{padding:10px 14px;gap:8px}
+.site-nav .nav-left{gap:8px}.site-nav .nav-studio small{display:none}
+.site-nav .brand{font-size:.95rem}
+.site-nav .links{gap:6px}
+.site-nav a{padding:7px 11px;font-size:.75rem}
+/* On a phone the header only has room for the brand, the theme switch and
+   where to go next — and this page is already Pricing. */
+.site-nav .nav-pricing{display:none}
+body[data-page="pricing"]{padding-top:80px}}
+@media(min-width:700px){.wrap.wide{max-width:760px}.tiers{grid-template-columns:repeat(2,1fr)}}
+@media(min-width:1180px){.wrap.wide{max-width:1240px}.tiers{grid-template-columns:repeat(4,1fr)}
+.wrap.wide:has(.tiers.five){max-width:1480px}.tiers.five{grid-template-columns:repeat(5,1fr)}}
+.in-workspace body>header.site-nav{display:none}
+.in-embed body>header.site-nav,.in-embed .bar,.in-embed [data-edit-id="h1"],.in-embed [data-edit-id="sub"],.in-embed .ok,.in-embed .err,.in-embed .spw{display:none!important}
+.in-embed body[data-page="pricing"]{padding:4px 0 8px;background:transparent}
+.in-embed body[data-page="pricing"] .wrap{max-width:none!important}
+.in-workspace body[data-page="pricing"]{padding-top:32px}
+.in-workspace body[data-page="pricing"] .wrap{max-width:none!important}
+.in-workspace body[data-page="pricing"] .bar{display:none}
+
+</style><!-- X conversion tracking base code -->
+
+<!-- End X conversion tracking base code -->
+<link rel="canonical" href="/masshype#pricing">
+<style>.spw{display:none!important}.site-nav{display:none!important}</style></head><body data-page="pricing">
+<header class="site-nav">
+<div class="nav-left"><a class="brand" href="/masshype">MassHype<i>.ai</i></a>
+<a class="nav-studio" href="/masshype">✦ Generation Studio <small>15 free tokens</small></a></div>
+<div class="links">
+<button type="button" class="theme-toggle" onclick="toggleTheme()" title="Dark mode" aria-label="Switch to dark mode">
+<svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"></path></svg>
+<svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"></path></svg>
+</button>
+<a class="nav-ghost nav-pricing" href="/masshype#pricing">Pricing</a>
+<a class="nav-ghost" href="/masshype">Log in</a><a class="nav-btn" href="/masshype">Register</a>
+</div>
+</header>
+<div class="wrap wide">
+
+
+<h1 style="margin-bottom:6px" data-edit-id="h1">Choose a plan</h1>
+<p class="sub" data-edit-id="sub">Pay by card or crypto. Access unlocks as soon as it confirms.</p>
+
+
+
+
+
+<div class="ptoggle">
+<button type="button" class="active" data-set-period="month">Monthly</button>
+<button type="button" data-set-period="year">Annual <span class="save">Save 25%</span></button>
+</div>
+<p class="permo" style="margin:2px 0 10px" data-edit-id="vat-note">All prices exclude VAT — any VAT due is added at checkout. Card plans renew automatically and can be cancelled any time from your account. Crypto payments are one-off — you re-pay when the plan runs out.</p>
+
+
+<div class="tiers five" role="radiogroup" aria-label="Plans">
+<div class="tier" data-select="free" role="radio" aria-checked="false" tabindex="-1" aria-label="Free plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span></div>
+<h2>Free</h2><div class="blurb">Content creation only: unlimited characters, generated with tokens. 15 tokens on us.</div>
+<div class="price">€0<span>/month</span></div>
+<ul><li>Unlimited Character Creator</li><li>Generation Studio access</li><li>15 generation tokens to get started (one-time) — up to 15 photos or 0 videos</li><li>Buy more tokens any time</li><li>Community support</li></ul>
+<div class="cta">
+<button type="button" onclick="window.top.location.href='/register'">Start free</button>
+</div>
+</div>
+
+<div class="tier " data-select="starter" role="radio" aria-checked="false" tabindex="-1" aria-label="Starter plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span>
+</div>
+<h2 data-std="Starter" data-plus="Starter Plus">Starter</h2>
+<div class="vtoggle" role="group" aria-label="Plan size">
+<button type="button" class="active" data-set-variant="std">Standard</button>
+<button type="button" class="vplus" data-set-variant="plus"><span class="gem">◆</span> Plus<i></i><i></i><i></i></button></div><div class="blurb">One persona on every platform, fully monetised.</div>
+
+
+<div data-period="month" data-variant="std">
+
+<div class="price">€25<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+
+<ul><li>1 × AI Persona</li><li>Unlimited Character Creator</li><li>Every social media platform integration</li><li>Generation Studio access</li><li>Social media funnel to her exclusives</li><li>Full exclusives engine: ladders, per-user pricing, timed re-offers</li><li>Up to 3 funnel phases + CTA</li><li>Content Planner Tool</li><li>Unlimited photo uploads in Content Vault</li><li>75 generation tokens a month — up to 75 photos or 4 videos</li><li>Email support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="std" hidden="">
+<div class="price">€225<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€18.75/mo billed annually</div>
+
+<ul><li>1 × AI Persona</li><li>Unlimited Character Creator</li><li>Every social media platform integration</li><li>Generation Studio access</li><li>Social media funnel to her exclusives</li><li>Full exclusives engine: ladders, per-user pricing, timed re-offers</li><li>Up to 3 funnel phases + CTA</li><li>Content Planner Tool</li><li>Unlimited photo uploads in Content Vault</li><li>75 generation tokens a month — up to 75 photos or 4 videos</li><li>Email support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+<div data-period="month" data-variant="plus" hidden="">
+
+<div class="price">€69<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+<div class="permo plusval">Worth €84 a month as Starter + token packs: save €15</div>
+<ul><li>1 × AI Persona</li><li>Unlimited Character Creator</li><li>Every social media platform integration</li><li>Generation Studio access</li><li>Social media funnel to her exclusives</li><li>Full exclusives engine: ladders, per-user pricing, timed re-offers</li><li>Up to 3 funnel phases + CTA</li><li>Content Planner Tool</li><li>Unlimited photo uploads in Content Vault</li><li>500 generation tokens a month — up to 500 photos or 29 videos</li><li>Email support</li><li>10% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="plus" hidden="">
+<div class="price">€621<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€51.75/mo billed annually</div>
+<div class="permo plusval">Worth €84 a month as Starter + token packs: save €15</div>
+<ul><li>1 × AI Persona</li><li>Unlimited Character Creator</li><li>Every social media platform integration</li><li>Generation Studio access</li><li>Social media funnel to her exclusives</li><li>Full exclusives engine: ladders, per-user pricing, timed re-offers</li><li>Up to 3 funnel phases + CTA</li><li>Content Planner Tool</li><li>Unlimited photo uploads in Content Vault</li><li>500 generation tokens a month — up to 500 photos or 29 videos</li><li>Email support</li><li>10% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+</div>
+<div class="tier featured selected" data-select="pro" role="radio" aria-checked="true" tabindex="0" aria-label="Pro plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span>
+<span class="tag">Most popular</span></div>
+<h2 data-std="Pro" data-plus="Pro Plus">Pro</h2>
+<div class="vtoggle" role="group" aria-label="Plan size">
+<button type="button" class="active" data-set-variant="std">Standard</button>
+<button type="button" class="vplus" data-set-variant="plus"><span class="gem">◆</span> Plus<i></i><i></i><i></i></button></div><div class="blurb">Three personas, every platform.</div>
+
+
+<div data-period="month" data-variant="std">
+
+<div class="price">€59<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+
+<ul><li>Everything in Starter, plus:</li><li>3 × AI Persona</li><li>Unlimited Character Creator</li><li>2 team seats</li><li>Media tagging</li><li>Up to 10 funnel phases with photo rates</li><li>Scheduled follow-ups</li><li>300 generation tokens a month — up to 300 photos or 17 videos</li><li>Priority support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="std" hidden="">
+<div class="price">€531<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€44.25/mo billed annually</div>
+
+<ul><li>Everything in Starter, plus:</li><li>3 × AI Persona</li><li>Unlimited Character Creator</li><li>2 team seats</li><li>Media tagging</li><li>Up to 10 funnel phases with photo rates</li><li>Scheduled follow-ups</li><li>300 generation tokens a month — up to 300 photos or 17 videos</li><li>Priority support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+<div data-period="month" data-variant="plus" hidden="">
+
+<div class="price">€169<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+<div class="permo plusval">Worth €217 a month as Pro + token packs: save €48</div>
+<ul><li>Everything in Starter, plus:</li><li>3 × AI Persona</li><li>Unlimited Character Creator</li><li>2 team seats</li><li>Media tagging</li><li>Up to 10 funnel phases with photo rates</li><li>Scheduled follow-ups</li><li>1,600 generation tokens a month — up to 1,600 photos or 94 videos</li><li>Priority support</li><li>15% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="plus" hidden="">
+<div class="price">€1521<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€126.75/mo billed annually</div>
+<div class="permo plusval">Worth €217 a month as Pro + token packs: save €48</div>
+<ul><li>Everything in Starter, plus:</li><li>3 × AI Persona</li><li>Unlimited Character Creator</li><li>2 team seats</li><li>Media tagging</li><li>Up to 10 funnel phases with photo rates</li><li>Scheduled follow-ups</li><li>1,600 generation tokens a month — up to 1,600 photos or 94 videos</li><li>Priority support</li><li>15% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+</div>
+<div class="tier " data-select="agency" role="radio" aria-checked="false" tabindex="-1" aria-label="Agency plan">
+<div class="pick"><span class="off">Select</span><span class="on">Selected</span>
+</div>
+<h2 data-std="Agency" data-plus="Agency Plus">Agency</h2>
+<div class="vtoggle" role="group" aria-label="Plan size">
+<button type="button" class="active" data-set-variant="std">Standard</button>
+<button type="button" class="vplus" data-set-variant="plus"><span class="gem">◆</span> Plus<i></i><i></i><i></i></button></div><div class="blurb">Ten personas and a team to run them.</div>
+
+
+<div data-period="month" data-variant="std">
+
+<div class="price">€179<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+
+<ul><li>Everything in Pro, plus:</li><li>10 × AI Persona</li><li>Unlimited Character Creator</li><li>6 team seats with roles</li><li>Conversation and revenue analytics</li><li>Unlock reconciliation against earnings</li><li>1,000 generation tokens a month — up to 1,000 photos or 58 videos</li><li>Dedicated support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="std" hidden="">
+<div class="price">€1611<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€134.25/mo billed annually</div>
+
+<ul><li>Everything in Pro, plus:</li><li>10 × AI Persona</li><li>Unlimited Character Creator</li><li>6 team seats with roles</li><li>Conversation and revenue analytics</li><li>Unlock reconciliation against earnings</li><li>1,000 generation tokens a month — up to 1,000 photos or 58 videos</li><li>Dedicated support</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+<div data-period="month" data-variant="plus" hidden="">
+
+<div class="price">€449<span>/month</span> <span class="vat">excl. VAT</span></div>
+
+<div class="permo plusval">Worth €577 a month as Agency + token packs: save €128</div>
+<ul><li>Everything in Pro, plus:</li><li>10 × AI Persona</li><li>Unlimited Character Creator</li><li>6 team seats with roles</li><li>Conversation and revenue analytics</li><li>Unlock reconciliation against earnings</li><li>5,000 generation tokens a month — up to 5,000 photos or 294 videos</li><li>Dedicated support</li><li>20% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+<div data-period="year" data-variant="plus" hidden="">
+<div class="price">€4041<span>/year</span> <span class="vat">excl. VAT</span></div>
+<div class="permo">€336.75/mo billed annually</div>
+<div class="permo plusval">Worth €577 a month as Agency + token packs: save €128</div>
+<ul><li>Everything in Pro, plus:</li><li>10 × AI Persona</li><li>Unlimited Character Creator</li><li>6 team seats with roles</li><li>Conversation and revenue analytics</li><li>Unlock reconciliation against earnings</li><li>5,000 generation tokens a month — up to 5,000 photos or 294 videos</li><li>Dedicated support</li><li>20% off every token pack</li></ul>
+<div class="cta">
+
+
+<button disabled="">Payments not configured</button>
+
+</div>
+</div>
+
+</div>
+<div class="tier soon">
+<div class="pick" style="visibility:hidden"><span class="off">Select</span></div>
+<h2>Custom</h2><div class="blurb">More than 10 personas, or something built to fit.</div>
+<div class="price">Let's talk</div>
+<div class="permo">Not open yet.</div>
+<ul><li>Everything in Agency, plus:</li><li>Unlimited AI Personas</li><li>Unlimited Character Creator</li><li>Custom generation token allowance</li><li>PPV selling tuned to your catalogue</li><li>Custom funnel phases + integrations</li><li>Onboarding and roster migration</li><li>Named contact on our team</li></ul>
+<div class="cta"><button disabled="">Coming soon</button>
+
+</div>
+</div>
+</div>
+
+
+</div>
+</body></html>

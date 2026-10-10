@@ -1,0 +1,691 @@
+<!DOCTYPE html><html lang="en" data-theme="light"><head><meta name="robots" content="noindex, nofollow">
+<meta name="msvalidate.01" content="5252263607B441EE4C8248EA84E60521">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<link rel="icon" href="/favicon.ico" sizes="any">
+<link rel="icon" type="image/png" href="/favicon.png">
+<title>MassHype · AI companions people love to talk to</title>
+<meta name="description" content="MassHype: build a safe-for-work AI companion with its own look, voice and memory. Chat on MassHype or on Discord, Telegram and X, and share exclusive photos, voice notes and stories.">
+<meta name="robots" content="index,follow,max-image-preview:large">
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="MassHype">
+<meta property="og:url" content="https://masshype.ai/">
+<meta property="og:title" content="MassHype.ai · AI companions people love to talk to">
+<meta property="og:description" content="Build a safe-for-work AI companion with its own look, voice and memory, then share it everywhere people chat.">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="MassHype.ai · AI companions people love to talk to">
+<meta name="twitter:description" content="Build a safe-for-work AI companion with its own look, voice and memory, then share it everywhere people chat.">
+
+
+
+<!-- Not deferred: theme.js sets data-theme before first paint, otherwise the
+     page flashes dark for a user who chose light. -->
+<style>/* The site menu, shared by the marketing pages and the app pages. Colours are
+   derived from currentColor rather than the palette variables: the two halves of
+   the app name their tokens differently (--text-soft/--hair here,
+   --text-2/--border in css/style.css), and this way one stylesheet is correct in
+   both, in light and dark. */
+
+.site-nav{position:fixed;top:32px;left:60px;right:auto;z-index:1000;
+  display:inline-flex;align-items:center;justify-content:flex-start;gap:20px;
+  padding:14px 18px;border-radius:9999px;background:transparent;box-shadow:none;
+  max-width:calc(100vw - 120px);
+  transition:background-color .5s cubic-bezier(.16,1,.3,1),box-shadow .5s cubic-bezier(.16,1,.3,1),
+             padding .4s cubic-bezier(.16,1,.3,1),backdrop-filter .5s ease,
+             transform .5s cubic-bezier(.34,1.56,.64,1);
+  animation:snIn .9s cubic-bezier(.16,1,.3,1) both}
+.site-nav.scrolled{padding:12px 22px;background:var(--nav-bg,rgba(127,127,127,.12));
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 rgba(128,128,128,.25);
+  transform:translateY(-4px) scale(.99)}
+@keyframes snIn{
+  0%{opacity:0;transform:translateY(-30px) scale(.92)}
+  60%{opacity:1;transform:translateY(5px) scale(1.015)}
+  100%{opacity:1;transform:translateY(0) scale(1)}
+}
+.site-nav .brand{font-family:'Sora','Inter',system-ui,sans-serif;font-weight:800;font-size:22px;
+  letter-spacing:-.01em;color:inherit;text-decoration:none}
+.site-nav .brand i{color:var(--accent,#7c5cff);font-style:normal}
+.site-nav .sn-links a{transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.site-nav .sn-links a:hover{transform:translateY(-2px)}
+
+/* Account pill: the right-hand half of the menu on marketing pages. */
+.sn-account{position:fixed;top:32px;right:60px;z-index:1000;display:inline-flex;align-items:center;
+  gap:8px;padding:14px 18px;border-radius:9999px;background:transparent;
+  transition:background-color .5s cubic-bezier(.16,1,.3,1),box-shadow .5s cubic-bezier(.16,1,.3,1),
+             padding .4s cubic-bezier(.16,1,.3,1),backdrop-filter .5s ease,
+             transform .5s cubic-bezier(.34,1.56,.64,1);
+  animation:snIn .9s cubic-bezier(.16,1,.3,1) both}
+.sn-account.scrolled{padding:12px 16px;background:var(--nav-bg,rgba(127,127,127,.12));
+  backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 rgba(128,128,128,.25);
+  transform:translateY(-4px) scale(.99)}
+.sn-account .sn-links a{transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.sn-account .sn-links a:hover{transform:translateY(-2px)}
+.sn-acct-btn{display:none;align-items:center;justify-content:center;width:40px;height:40px;
+  border-radius:9999px;border:1px solid rgba(128,128,128,.38);background:transparent;
+  color:inherit;cursor:pointer;padding:0}
+.sn-ico{display:inline-flex;width:15px;height:15px;flex:0 0 15px}
+.sn-ico svg{width:100%;height:100%}
+.sn-gap{flex:1}
+
+.sn-links{display:flex;align-items:center;gap:8px}
+.sn-links a{display:inline-flex;align-items:center;gap:7px;
+  font-size:13px;font-weight:600;text-decoration:none;padding:9px 14px;
+  border-radius:9999px;white-space:nowrap;transition:all .2s;
+  color:inherit;opacity:.72;border:1px solid rgba(128,128,128,.38)}
+.sn-links a:hover{opacity:1;border-color:rgba(128,128,128,.7);
+  background:color-mix(in srgb, currentColor 8%, transparent)}
+.sn-links a[aria-current="page"]{opacity:1;border-color:rgba(128,128,128,.7)}
+.sn-links a.sn-cta{opacity:1;color:#fff;background:var(--accent,#7c5cff);
+  border-color:var(--accent,#7c5cff)}
+.sn-links a.sn-hot{opacity:1;color:#ff8a3d;font-weight:600}
+.sn-links a.sn-hot:hover{color:#ffb070}
+.sn-links a.sn-cta:hover{filter:brightness(1.08);background:var(--accent,#7c5cff)}
+/* The token count wears the app's btn-primary (the "+ New persona" button):
+   the same sweeping gradient and radius, with fallbacks for pages whose
+   stylesheet does not define them. */
+.sn-links a.sn-cta[data-sn-tokens]{border:0;border-radius:var(--r,12px);
+  background:var(--grad,linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 60%,#00c2ff 80%,#7c5cff));
+  background-size:300% 100%;color:var(--accent-ink,#fff)}
+.sn-links a.sn-cta[data-sn-tokens]:hover{filter:none;transform:translateY(-1px);
+  box-shadow:0 8px 24px #00c2ff55;animation:snSweep 3s ease-in-out infinite alternate}
+@keyframes snSweep{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+@media(prefers-reduced-motion:reduce){.sn-links a.sn-cta[data-sn-tokens]:hover{animation:none}}
+
+/* The Features dropdown. The button is styled as a nav link so the bar reads
+   as one row; the panel is absolutely positioned off it. */
+.sn-menu{position:relative;display:inline-flex}
+.sn-menu-btn{display:inline-flex;align-items:center;gap:5px;
+  font-family:inherit;font-size:13px;font-weight:600;padding:9px 14px;
+  border-radius:9999px;white-space:nowrap;transition:all .2s;cursor:pointer;
+  color:inherit;opacity:.72;background:none;border:1px solid rgba(128,128,128,.38)}
+.sn-menu-btn:hover,.sn-menu.open .sn-menu-btn,.sn-menu-here .sn-menu-btn{
+  opacity:1;border-color:rgba(128,128,128,.7)}
+.sn-menu-btn:hover{background:color-mix(in srgb, currentColor 8%, transparent)}
+.sn-caret{width:13px;height:13px;transition:transform .2s}
+.sn-menu.open .sn-caret{transform:rotate(180deg)}
+.sn-menu-panel{display:none;position:absolute;top:calc(100% + 10px);left:0;z-index:1001;
+  padding:16px;border-radius:18px;
+  grid-template-columns:repeat(3,max-content);gap:6px 14px;
+  background:var(--panel,#111);border:1px solid var(--hair,rgba(128,128,128,.28));
+  box-shadow:0 18px 44px rgba(0,0,0,.38)}
+.sn-menu.open .sn-menu-panel{display:grid}
+.sn-menu-group{display:flex;flex-direction:column;gap:2px;min-width:0}
+.sn-menu-label{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;
+  opacity:.5;padding:4px 10px 6px}
+.sn-links .sn-menu-panel a{display:flex;align-items:center;justify-content:space-between;
+  gap:10px;padding:8px 10px;border:0;border-radius:10px;
+  font-size:13px;font-weight:600;opacity:.85;white-space:nowrap}
+.sn-links .sn-menu-panel a:hover{opacity:1;border:0}
+.sn-soon{flex:0 0 auto;font-style:normal;font-size:10px;font-weight:700;letter-spacing:.04em;
+  text-transform:uppercase;opacity:.55;border:1px solid rgba(128,128,128,.45);
+  border-radius:9999px;padding:1px 6px}
+
+
+/* Inline mode: the links sit inside a page's own header, so they carry no
+   positioning of their own. */
+.sn-inline .sn-links a{padding:7px 14px;font-size:13px}
+
+/* An app header has its brand, badges and menu buttons beside these, so on a
+   narrow screen they drop to icons. The token count keeps its number: that is
+   the point of it (on a phone, only the number, beside the coin). */
+@media(max-width:900px){
+  .sn-inline a:not([data-sn-tokens]) .sn-label{display:none}
+  .sn-inline.sn-links a{padding:8px 10px}
+}
+
+@media(max-width:600px){
+  .site-nav{gap:12px;padding:10px 14px;top:16px;left:14px;max-width:calc(100vw - 28px)}
+  .site-nav .brand{font-size:18px}
+  .sn-links{gap:7px}
+  .sn-links a{padding:8px 13px;font-size:13px}
+  /* Everything but the primary action would push a phone's nav past the
+     viewport; the brand still links home and the blog is one tap from there.
+     The account links keep their own button, so this is the left pill only. */
+  .site-nav .sn-links a:not(.sn-cta):not([data-keep]){display:none}
+  .sn-inline .sn-tok-unit{display:none}
+  .sn-menu-btn{padding:8px 13px}
+  /* The bar is a pill near the left edge, so the panel is pinned to the
+     viewport instead of to the button, which would overflow it. */
+  .sn-menu-panel{position:fixed;top:64px;left:14px;right:14px;
+    grid-template-columns:1fr;gap:2px;max-height:calc(100vh - 84px);overflow-y:auto}
+
+  /* The account pill collapses to one round button with a dropdown. */
+  .sn-account{top:16px;right:14px;padding:0;gap:6px}
+  .sn-account.scrolled{padding:0;background:transparent;box-shadow:none;backdrop-filter:none;
+    -webkit-backdrop-filter:none}
+  .sn-acct-btn{display:inline-flex}
+  .sn-account .sn-acct-links{display:none;position:absolute;top:52px;right:0;flex-direction:column;
+    align-items:stretch;gap:6px;min-width:190px;padding:10px;border-radius:16px;
+    background:var(--nav-bg,rgba(127,127,127,.12));
+    backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+    box-shadow:0 18px 44px rgba(0,0,0,.28),0 1px 0 rgba(128,128,128,.25)}
+  .sn-account.open .sn-acct-links{display:flex}
+  .sn-account .sn-acct-links a{justify-content:flex-start;padding:11px 14px;border-radius:10px}
+}
+.sn-avatar{display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0!important;border-radius:50%;overflow:hidden;border:1px solid var(--border,#2e2e2e);background:var(--surface-2,rgba(255,255,255,.06));color:var(--text-2,#bbb);flex:0 0 32px}
+.sn-avatar:hover{border-color:var(--accent,#7c5cff)}
+.sn-avatar img{width:100%;height:100%;object-fit:cover}
+.sn-avatar .sn-ico{width:17px;height:17px;flex-basis:17px}
+
+/* The Generation Studio button, first in every marketing menu. */
+.site-nav .sn-links a.studio-cta{display:inline-flex;flex:none;white-space:nowrap;align-items:center;gap:8px;padding:9px 16px;border-radius:999px;color:#fff;
+  font-weight:700;font-size:.9rem;text-decoration:none;background:var(--grad,linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 60%,#00c2ff 80%,#7c5cff));background-size:300% 100%;
+  animation:studio-cta-shift 6s linear infinite;box-shadow:0 0 0 2px rgba(124, 92, 255,.35),0 8px 28px rgba(0, 194, 255,.45)}
+.site-nav .sn-links a.studio-cta small{font-weight:600;font-size:.72rem;padding:2px 8px;border-radius:999px;background:rgba(0,0,0,.28)}
+.site-nav .sn-links a.studio-cta:hover{transform:translateY(-2px);box-shadow:0 0 0 3px rgba(124, 92, 255,.5),0 12px 34px rgba(0, 194, 255,.6)}
+@keyframes studio-cta-shift{to{background-position:300% 0}}
+@media (prefers-reduced-motion:reduce){.site-nav .sn-links a.studio-cta{animation:none}}
+/* Tightening steps fitBars applies when the bar still overlaps the account pill. */
+.sn-studio-short{display:none}
+.site-nav.sn-tight .sn-studio-long,.site-nav.sn-tight a.studio-cta small{display:none}
+.site-nav.sn-tight .sn-studio-short{display:inline}
+.site-nav.sn-tighter [data-sn-suffix]{display:none}
+.site-nav.sn-tightest .sn-studio-short{display:none}
+.site-nav.sn-tightest .sn-links a.studio-cta{padding:9px 13px}
+</style>
+<style>/* Space is reserved before a lazily-loaded asset arrives, so decoding it never
+   reflows what is already on screen. */
+
+img, video, iframe {
+  background-color: rgba(255, 255, 255, 0.04);
+}
+
+/* An <img> with no src yet is a placeholder box, not a broken-image glyph. */
+img:not([src]), img[src=""] {
+  visibility: hidden;
+}
+
+/* Chat photos arrive at unknown sizes; object-fit crops into the reserved box. */
+.bubble-photo { aspect-ratio: 3 / 4; }
+
+/* Thumbnails whose grid cell does not already fix a height. */
+.pl-slot-thumb, .outfit-seed-img { aspect-ratio: 1 / 1; object-fit: cover; }
+
+/* Avatars are always square, whatever the source image is. */
+.msg-av, .rail-avatar { aspect-ratio: 1 / 1; object-fit: cover; }
+
+/* ── Loading skeletons ───────────────────────────────────────────────────────
+   A panel waiting on a fetch holds its own height, so the answer arriving
+   replaces the placeholder in place instead of shoving the page around. */
+
+.skel {
+  border-radius: 10px;
+  background: linear-gradient(100deg,
+    rgba(255, 255, 255, 0.045) 30%,
+    rgba(255, 255, 255, 0.10) 50%,
+    rgba(255, 255, 255, 0.045) 70%) 0 0 / 300% 100%;
+  animation: skel-sweep 1.4s ease-in-out infinite;
+}
+
+/* The sweep is a white tint, which vanishes on the light theme's pale ground. */
+:root[data-theme="light"] .skel {
+  background: linear-gradient(100deg,
+    rgba(0, 0, 0, 0.04) 30%,
+    rgba(0, 0, 0, 0.08) 50%,
+    rgba(0, 0, 0, 0.04) 70%) 0 0 / 300% 100%;
+}
+
+@keyframes skel-sweep {
+  from { background-position: 150% 0; }
+  to   { background-position: -50% 0; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .skel { animation: none; }
+}
+
+.skel-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.skel-days {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .skel-days { grid-template-columns: 1fr; }
+}
+</style>
+
+<style>#page-loader{position:fixed;inset:0;z-index:2147483000;display:flex;align-items:center;justify-content:center;background:var(--bg,#0e0e0e);transition:opacity .2s ease}#page-loader.out{opacity:0;pointer-events:none}#page-loader i{width:34px;height:34px;border-radius:50%;border:3px solid rgba(124, 92, 255,.18);border-top-color:#7c5cff;animation:pl-spin .8s linear infinite}@keyframes pl-spin{to{transform:rotate(360deg)}}@media (prefers-reduced-motion: reduce){#page-loader i{animation:none;border-color:#7c5cff}}</style>
+
+
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Sora:wght@600;700;800&family=Inter:wght@400;500;600&display=swap');
+*{margin:0;padding:0;box-sizing:border-box}
+:root{
+  --accent:#7c5cff;
+  --grad:linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 60%,#00c2ff 80%,#7c5cff);
+  --bg:#0e0e0e;
+  --panel:#111;
+  --text:#fff;
+  --text-soft:#a7a7a7;
+  --text-dim:#6b6b6b;
+  --field:#1c1c1c;
+  --field-border:#2e2e2e;
+  --hair:#ffffff26;
+  --hair-strong:#ffffff55;
+  --hover:#ffffff0d;
+}
+:root[data-theme="light"]{
+  --bg:#f6f5f4;
+  --panel:#fff;
+  --text:#12100f;
+  --text-soft:#5c5651;
+  --text-dim:#8a837d;
+  --field:#f2f0ee;
+  --field-border:#dedad6;
+  --hair:#12100f1f;
+  --hair-strong:#12100f4d;
+  --hover:#12100f0a;
+  --nav-bg:rgba(255,255,255,.72);
+}
+:root{--nav-bg:rgba(17,17,17,.6)}
+html{scroll-behavior:smooth}
+html,body{min-height:100%}
+body{font-family:'Inter',system-ui,sans-serif;background:var(--bg);color:var(--text)}
+/* ── Fixed nav ── */
+.site-nav{position:fixed;top:32px;left:60px;right:auto;z-index:1000;display:inline-flex;align-items:center;justify-content:flex-start;gap:20px;
+  padding:14px 18px;border-radius:9999px;background:transparent;box-shadow:none;max-width:calc(100vw - 120px)}
+.site-nav{
+  transition:background-color .5s cubic-bezier(.16,1,.3,1),box-shadow .5s cubic-bezier(.16,1,.3,1),
+             padding .4s cubic-bezier(.16,1,.3,1),backdrop-filter .5s ease,transform .5s cubic-bezier(.34,1.56,.64,1);
+  animation:navIn .9s cubic-bezier(.16,1,.3,1) both}
+.site-nav.scrolled{padding:12px 22px;background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);-webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair);transform:translateY(-4px) scale(.99)}
+@keyframes navIn{
+  0%{opacity:0;transform:translateY(-30px) scale(.92)}
+  60%{opacity:1;transform:translateY(5px) scale(1.015)}
+  100%{opacity:1;transform:translateY(0) scale(1)}
+}
+.site-nav .auth a{transition:all .2s cubic-bezier(.34,1.56,.64,1)}
+.site-nav .auth a:hover{transform:translateY(-2px)}
+.split{display:grid;grid-template-columns:1.05fr .95fr;min-height:100vh}
+/* ── Left ── */
+.left{background:var(--panel);padding:136px 60px 56px;display:flex;flex-direction:column;justify-content:space-between;min-height:100vh;transition:padding .35s ease}
+.brand{font-family:'Sora';font-weight:800;font-size:22px;letter-spacing:-.01em;transition:font-size .35s ease}
+.brand i{color:var(--accent);font-style:normal}
+.auth{display:flex;align-items:center;gap:10px}
+.auth a{font-size:13px;font-weight:600;text-decoration:none;padding:9px 14px;border-radius:9999px;transition:all .2s;white-space:nowrap}
+.auth-ghost{color:var(--text-soft);border:1px solid var(--hair)}
+.auth-ghost:hover{color:var(--text);border-color:var(--hair-strong);background:var(--hover)}
+.auth-btn{color:#fff;background:var(--accent);border:1px solid var(--accent)}
+.auth-btn:hover{filter:brightness(1.08)}
+.theme-toggle{display:inline-flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:9999px;border:1px solid var(--hair);background:transparent;color:var(--text-soft);cursor:pointer;transition:all .2s}
+.theme-toggle:hover{color:var(--accent);border-color:var(--hair-strong);background:var(--hover)}
+.theme-toggle svg{width:18px;height:18px}
+.theme-toggle .ico-sun{display:block}
+.theme-toggle .ico-moon{display:none}
+:root[data-theme="light"] .theme-toggle .ico-sun{display:none}
+:root[data-theme="light"] .theme-toggle .ico-moon{display:block}
+.lc{max-width:560px;margin:auto 0}
+.pill{display:inline-flex;align-items:center;gap:10px;font-size:12px;letter-spacing:.22em;text-transform:uppercase;color:var(--text-soft);margin-bottom:28px}
+.pill .d{width:8px;height:8px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #7c5cff33;animation:pulse 2s infinite}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 4px #7c5cff33}50%{box-shadow:0 0 0 7px #7c5cff11}}
+h1{font-family:'Sora';font-weight:800;font-size:58px;line-height:1.08;letter-spacing:-.02em;margin-bottom:24px}
+h1 u{text-decoration:none;background:linear-gradient(120deg,#7c5cff,#00c2ff 30%,#7c3aed 55%,#00c2ff 80%,#7c5cff);background-size:300% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;animation:sweep 4s ease-in-out infinite alternate}
+p.sub{font-size:17px;color:var(--text-soft);line-height:1.65;margin-bottom:36px;max-width:480px}
+@keyframes sweep{0%{background-position:0% 50%}100%{background-position:100% 50%}}
+.meta{display:flex;gap:26px;font-size:13px;color:var(--text-dim)}
+.meta a{color:var(--text-dim);text-decoration:none;transition:color .2s}
+.meta a:hover{color:var(--text)}
+/* ── Right ── */
+.right{position:relative;overflow:hidden;background:radial-gradient(120% 90% at 100% 0%,#00c2ff40,transparent 55%),radial-gradient(90% 70% at 0% 100%,#7c3aed33,transparent 60%),#221226;padding:124px 56px 56px;display:flex;flex-direction:column;justify-content:flex-start;min-height:100vh}
+.right::after{content:"";position:absolute;inset:0;background:radial-gradient(circle at 85% 12%,#7c5cff26,transparent 40%);pointer-events:none}
+.ring{position:absolute;border:1.5px solid #ffffff14;border-radius:50%}
+.ring.a{width:360px;height:360px;top:-70px;right:-120px}
+.ring.b{width:210px;height:210px;top:6px;right:-10px}
+.who{list-style:none;display:grid;gap:8px;margin:-16px 0 32px;max-width:480px;font-size:15px;color:var(--text-soft)}
+.who b{color:var(--text);margin-right:6px}
+.right{min-height:100vh;padding:clamp(92px,13vh,124px) 56px clamp(72px,12vh,128px);gap:clamp(48px,8vh,80px)}
+.rhead,.clips{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto}
+.rhead{display:grid;gap:clamp(8px,1.4vh,14px)}
+.rlabel{font-size:11px;font-weight:700;letter-spacing:.18em;text-transform:uppercase;color:#ff9fbf}
+.rtitle{font-family:'Sora';font-weight:800;font-size:clamp(26px,3.9vh,36px);line-height:1.17;letter-spacing:-.015em;color:#fff;max-width:640px}
+.rtitle em{font-style:normal;color:#7c5cff}
+.rsub{font-size:15px;color:#e9dcec;line-height:1.5;max-width:540px}
+.rcta{display:flex;flex-wrap:wrap;align-items:center;gap:12px 16px;margin-top:4px}
+.rcta span{font-size:13px;color:#cdbfd1}
+.flow-cta{display:inline-flex;align-items:center;min-height:46px;background:linear-gradient(120deg,#7c5cff,#00c2ff,#7c3aed);background-size:300% 100%;background-position:0% 50%;color:#fff;font-weight:600;text-decoration:none;padding:0 22px;border-radius:12px;box-shadow:0 10px 30px #00c2ff40;transition:background-position .25s ease-out}
+.flow-cta:hover{background-position:100% 50%}
+.flow-cta:focus-visible,.step:focus-visible{outline:2px solid #7c5cff;outline-offset:2px}
+/* Four steps, one big: data-slot 0 is the big box, 1-3 the cards beside it. */
+.clips{flex:none;display:grid;grid-template-columns:minmax(0,1fr) clamp(170px,24%,210px);grid-template-rows:repeat(3,minmax(0,1fr));gap:18px 36px}
+.step{position:relative;overflow:hidden;min-width:0;min-height:120px;padding:0;border:1px solid #ffffff1f;border-radius:16px;background:#140a17;color:#fff;font:inherit;text-align:left;cursor:pointer;transform-origin:0 0;transition:border-color .2s}
+.step:hover{border-color:#ffffff40}
+.step[data-slot="0"]{grid-column:1;grid-row:1/-1;align-self:center;aspect-ratio:900/669;min-height:0;border-radius:24px;cursor:default;box-shadow:0 20px 60px #0009}
+.step[data-slot="1"]{grid-column:2;grid-row:1}
+.step[data-slot="2"]{grid-column:2;grid-row:2}
+.step[data-slot="3"]{grid-column:2;grid-row:3}
+.step.moving{z-index:3}
+.step video{position:absolute;inset:0;display:block;width:100%;height:100%;object-fit:cover;background:#140a17}
+.step .card{position:absolute;inset:0;display:grid;align-content:start;gap:5px;padding:16px 18px;background:#2d1a33;transition:opacity .3s}
+.step .card i{font-style:normal;font-size:22px;margin-bottom:4px}
+.step .card b{font-size:14.5px}
+.step .card span{font-size:12.5px;color:#e0d2e4;line-height:1.4}
+.step .card em{position:absolute;top:16px;right:16px;font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
+.step[data-slot="0"] .card{opacity:0;pointer-events:none}
+.now{position:relative;z-index:2;max-width:880px;width:100%;margin:0 auto calc(14px - clamp(48px,8vh,80px));display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#fff}
+.now em{font:700 12px 'Sora';font-style:normal;color:#ff6b9a}
+@media(max-height:700px){.rsub{display:none}}
+/* Below this the side column squeezes the video to a stamp, so the cards go under it. */
+@media(max-width:1599px){
+  .clips{grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:auto auto;gap:28px}
+  .step[data-slot="0"]{grid-column:1/-1;grid-row:1}
+  .step[data-slot="1"],.step[data-slot="2"],.step[data-slot="3"]{grid-row:2}
+  .step[data-slot="1"]{grid-column:1}
+  .step[data-slot="2"]{grid-column:2}
+  .step[data-slot="3"]{grid-column:3}
+}
+@media(max-width:900px){
+  .split{grid-template-columns:1fr}
+  .left{min-height:auto;padding:160px 26px 40px}
+  .site-nav{top:20px;left:20px;right:20px;flex-wrap:wrap;gap:14px;padding:14px 20px;border-radius:24px}
+  .site-nav.scrolled{padding:11px 18px}
+  .auth a{padding:8px 15px;font-size:13px}
+  h1{font-size:46px}
+  .right{height:auto;min-height:auto;max-height:none;padding:40px 20px}
+  .rsub{display:block}
+  .ring.a{width:240px;height:240px}
+}
+@media(max-width:600px){
+  .left{padding:180px 18px 28px}
+  .site-nav{top:14px;left:14px;right:14px;padding:12px 16px}
+  .site-nav.scrolled{padding:10px 14px}
+  .brand{font-size:19px}
+  .pill{font-size:11px;margin-bottom:20px}
+  h1{font-size:32px;margin-bottom:16px}
+  p.sub{font-size:15px;margin-bottom:26px}
+  .meta{flex-wrap:wrap;gap:14px;font-size:12px}
+  .right{padding:32px 16px}
+  .rtitle{font-size:24px}
+  .clips{grid-template-rows:auto 132px;gap:8px}
+  .step .card{padding:10px}
+  .step .card i{font-size:18px;margin-bottom:2px}
+  .step .card b{font-size:13px}
+  .step .card span{font-size:11.5px}
+  .ring.a,.ring.b{display:none}
+  .auth a{padding:7px 12px;font-size:12.5px}
+}
+/* ── Features ── */
+.features{padding:110px 60px 30px;background:var(--bg);scroll-margin-top:96px;position:relative;overflow:hidden}
+.features::before{content:"";position:absolute;left:50%;top:-140px;width:760px;height:340px;transform:translateX(-50%);
+  background:radial-gradient(closest-side,#00c2ff26,transparent 72%);pointer-events:none;filter:blur(6px)}
+.sec-head{text-align:center;max-width:680px;margin:0 auto 34px;position:relative}
+.sec-eyebrow{display:inline-flex;align-items:center;gap:9px;font-size:11.5px;letter-spacing:.22em;text-transform:uppercase;
+  color:var(--text-soft);border:1px solid var(--hair);border-radius:9999px;padding:7px 15px;margin-bottom:20px}
+.sec-eyebrow .d{width:7px;height:7px;border-radius:50%;background:var(--accent);box-shadow:0 0 0 4px #7c5cff33}
+.sec-head h2{font-family:'Sora';font-weight:800;font-size:40px;letter-spacing:-.025em;margin-bottom:14px;line-height:1.12}
+.sec-head h2 em{font-style:normal;background:var(--grad);background-size:200% 100%;-webkit-background-clip:text;
+  background-clip:text;color:transparent}
+.sec-head p{color:var(--text-soft);font-size:16px;line-height:1.65}
+
+.tier-toggle{position:relative;display:flex;justify-content:center;gap:4px;margin:0 auto 22px;background:var(--field);
+  border:1px solid var(--field-border);border-radius:9999px;padding:5px;width:max-content;max-width:100%;flex-wrap:wrap}
+.tier-toggle .tpill{position:absolute;top:5px;bottom:5px;left:5px;border-radius:9999px;background:var(--grad);
+  background-size:300% 100%;box-shadow:0 8px 22px #00c2ff40;transition:transform .38s cubic-bezier(.22,1,.36,1),width .38s cubic-bezier(.22,1,.36,1)}
+.tier-toggle button{position:relative;z-index:1;border:0;background:transparent;color:var(--text-soft);
+  font:600 14px 'Inter',system-ui,sans-serif;padding:10px 20px;border-radius:9999px;cursor:pointer;
+  transition:color .25s;display:flex;align-items:baseline;gap:7px}
+.tier-toggle button:hover{color:var(--text)}
+.tier-toggle button .tprice{font-size:12px;font-weight:500;opacity:.75}
+.tier-toggle.ready button.on{color:#fff}
+.tier-toggle.ready button.on .tprice{opacity:.9}
+.tier-toggle:not(.ready) button.on{color:var(--text)}
+.tier-toggle:not(.ready) .tpill{opacity:0}
+
+.feature-note{text-align:center;color:var(--text-soft);font-size:14px;margin:0 auto 26px;max-width:620px}
+.feature-note b{color:var(--text);font-weight:600}
+
+.hl-row{display:flex;justify-content:center;flex-wrap:wrap;gap:10px;max-width:1180px;margin:0 auto 34px}
+.hl{flex:1 1 150px;max-width:220px;background:var(--panel);border:1px solid var(--hair);border-radius:14px;
+  padding:16px 14px;text-align:center;position:relative;overflow:hidden}
+.hl::after{content:"";position:absolute;inset:0 0 auto 0;height:2px;background:var(--grad);background-size:300% 100%;opacity:.9}
+.hl .v{font-family:'Sora';font-weight:800;font-size:26px;letter-spacing:-.02em;background:var(--grad);
+  background-size:200% 100%;-webkit-background-clip:text;background-clip:text;color:transparent;line-height:1.2}
+.hl .l{font-size:11.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--text-dim);margin-top:4px}
+
+.feature-groups{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:18px;align-items:start;max-width:1180px;margin:0 auto}
+@media(max-width:1180px){.feature-groups{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.feature-group{background:var(--panel);border:1px solid var(--hair);border-radius:18px;padding:24px 24px 10px;
+  transition:border-color .25s,transform .25s,box-shadow .25s;animation:riseIn .38s ease both}
+.feature-group:hover{border-color:var(--hair-strong);transform:translateY(-2px);box-shadow:0 18px 40px rgba(0,0,0,.14)}
+.feature-group h3{display:flex;align-items:center;gap:10px;font-family:'Sora';font-weight:700;font-size:13px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--text-dim);margin-bottom:6px}
+.feature-group h3 .gi{width:26px;height:26px;border-radius:8px;display:grid;place-items:center;font-size:13px;
+  background:var(--grad);background-size:300% 100%;color:#fff;letter-spacing:0}
+.feature-group h3 .cnt{margin-left:auto;font-family:'Inter';font-size:11.5px;letter-spacing:.04em;color:var(--text-dim);
+  border:1px solid var(--hair);border-radius:9999px;padding:3px 9px;text-transform:none}
+.feature-group ul{list-style:none;margin:0;padding:0}
+.feature-group li{display:flex;gap:12px;padding:13px 0;border-top:1px solid var(--hair);align-items:flex-start}
+.feature-group .mark{flex:0 0 20px;width:20px;height:20px;border-radius:50%;display:grid;place-items:center;
+  font-size:11px;font-weight:700;color:#fff;background:var(--grad);background-size:300% 100%;margin-top:1px}
+.feature-group li.off .mark{background:none;border:1px dashed var(--hair-strong);color:var(--text-dim)}
+.feature-group li.off .label{color:var(--text-dim)}
+.feature-group li.off .detail{color:var(--text-dim);opacity:.85}
+.feature-group .label{display:flex;align-items:center;gap:8px;font-size:14.5px;font-weight:600;color:var(--text)}
+.feature-group .detail{display:block;font-size:13px;color:var(--text-soft);line-height:1.55;margin-top:3px}
+.feature-group li{cursor:pointer}
+.feature-group li>span:nth-child(2){flex:1;min-width:0}
+.feature-group .chev{flex:0 0 14px;margin:5px 0 0 auto;color:var(--text-dim);font-size:11px;
+  transition:transform .3s cubic-bezier(.22,1,.36,1),color .2s}
+.feature-group li.open .chev{transform:rotate(90deg);color:var(--accent)}
+.feature-group li:hover .chev{color:var(--accent)}
+.feature-group .explain{display:block;font-size:13px;line-height:1.6;color:var(--text-soft);
+  max-height:0;opacity:0;overflow:hidden;transition:max-height .38s cubic-bezier(.22,1,.36,1),
+  opacity .28s ease,margin .3s ease;border-left:2px solid transparent}
+.feature-group li.open .explain{max-height:420px;opacity:1;margin:9px 0 3px;padding-left:11px;
+  border-left-color:var(--accent)}
+.feature-group .tag{font-size:10.5px;letter-spacing:.08em;text-transform:uppercase;font-weight:700;color:var(--accent);
+  border:1px solid #7c5cff66;background:#7c5cff14;border-radius:9999px;padding:2px 8px}
+.features-cta{text-align:center;margin:30px auto 0}
+.features-cta a{display:inline-block;text-decoration:none;font-weight:600;font-size:14px;padding:13px 26px;border-radius:9999px;
+  color:#fff;background:var(--grad);background-size:300% 100%;animation:gsweep 6s linear infinite;box-shadow:0 10px 26px #00c2ff33}
+@keyframes gsweep{to{background-position:300% 0}}
+@keyframes riseIn{from{opacity:0;transform:translateY(14px) scale(.985)}to{opacity:1;transform:none}}
+@keyframes rowIn{from{opacity:0;transform:translateX(-10px)}to{opacity:1;transform:none}}
+@keyframes popIn{0%{opacity:0;transform:scale(.4) rotate(-25deg)}70%{transform:scale(1.15) rotate(3deg)}100%{opacity:1;transform:none}}
+@keyframes floatGlow{0%,100%{transform:translateX(-50%) translateY(0);opacity:.85}50%{transform:translateX(-50%) translateY(18px);opacity:1}}
+@keyframes shimmer{to{background-position:-200% 0}}
+.features::before{animation:floatGlow 11s ease-in-out infinite}
+.feature-group li{animation:rowIn .34s cubic-bezier(.22,1,.36,1) both}
+.feature-group .mark{animation:popIn .4s cubic-bezier(.34,1.56,.64,1) both;transition:transform .2s}
+.feature-group li:hover .mark{transform:scale(1.15) rotate(-6deg)}
+.feature-group li{transition:background .2s,padding-left .2s;border-radius:8px}
+.feature-group li:hover{background:var(--hover);padding-left:6px}
+.feature-group li.off:hover .tag{background:#7c5cff26}
+.feature-group .tag{transition:background .2s}
+.hl{animation:riseIn .45s cubic-bezier(.22,1,.36,1) both;transition:transform .25s,border-color .25s,box-shadow .25s}
+.hl:hover{transform:translateY(-4px);border-color:var(--hair-strong);box-shadow:0 16px 34px rgba(0,0,0,.16)}
+.hl::after{animation:gsweep 5s linear infinite}
+.hl .v{display:inline-block;transition:transform .2s}
+.hl:hover .v{transform:scale(1.08)}
+.sec-eyebrow{animation:riseIn .5s ease both}
+.sec-head h2 em{animation:gsweep 7s linear infinite}
+.tier-toggle button:not(.on):hover{background:var(--hover)}
+.features-cta a{transition:transform .2s,box-shadow .2s}
+.features-cta a:hover{transform:translateY(-2px) scale(1.03);box-shadow:0 16px 34px #00c2ff55}
+.features-cta a.soon{opacity:.6;pointer-events:none}
+.feature-group h3 .gi{transition:transform .3s}
+.feature-group:hover h3 .gi{transform:rotate(8deg) scale(1.08)}
+/* Scroll reveal: sections rise in the first time they come into view. */
+.reveal{opacity:0;transform:translateY(26px);transition:opacity .7s cubic-bezier(.22,1,.36,1),transform .7s cubic-bezier(.22,1,.36,1)}
+.reveal.in{opacity:1;transform:none}
+@media(prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}.reveal{opacity:1;transform:none}}
+@media(max-width:900px){.features{padding:74px 22px 10px}.feature-groups{grid-template-columns:1fr}
+  .sec-head h2{font-size:30px}.hl{flex-basis:calc(50% - 10px)}.tier-toggle button{padding:9px 14px}}
+/* ── Pricing ── */
+.pricing{padding:100px 60px 110px;background:var(--bg);scroll-margin-top:96px}
+.gen-compare{max-width:860px;margin:64px auto 0;padding:28px 26px;border:1px solid var(--line,rgba(255,255,255,.12));border-radius:16px}
+.gen-compare h3{font-family:'Sora';font-weight:700;font-size:22px;letter-spacing:-.01em;margin:0 0 10px}
+.gen-compare-lede{color:var(--text-soft);font-size:15px;line-height:1.6;margin:0 0 20px;max-width:56ch}
+.gen-compare-scroll{overflow-x:auto}
+.gen-compare-table{border-collapse:collapse;width:100%;min-width:540px;font-size:14.5px}
+.gen-compare-table th{text-align:left;font-size:11px;letter-spacing:.09em;text-transform:uppercase;color:var(--text-soft);font-weight:600;padding:0 14px 10px}
+.gen-compare-table td{padding:13px 14px;border-top:1px solid var(--line,rgba(255,255,255,.1))}
+.gen-compare-table td:first-child{font-weight:600}
+.gen-compare-table tr.is-us td{background:rgba(255,255,255,.04)}
+.gen-compare-table .yes{color:#4ec9a0;font-weight:600}
+.gen-compare-table .no{color:var(--text-soft)}
+.gen-compare-note{color:var(--text-soft);font-size:14px;line-height:1.6;margin:18px 0 0;max-width:60ch}
+@media (max-width:640px){.gen-compare{padding:22px 16px;margin-top:44px}}
+@media(max-width:900px){
+  .pricing{padding:70px 24px 80px}
+}
+/* The nav's links reach the dark artwork panel at any width once site-nav.js
+   has added its own, and in light mode their dark text vanishes on it. The
+   bar always carries its own backdrop instead. */
+.site-nav{background:var(--nav-bg);backdrop-filter:blur(18px) saturate(180%);
+  -webkit-backdrop-filter:blur(18px) saturate(180%);
+  box-shadow:0 14px 38px rgba(0,0,0,.18),0 1px 0 var(--hair)}
+</style>
+<!-- X conversion tracking base code -->
+
+<!-- End X conversion tracking base code -->
+<link rel="canonical" href="/masshype">
+<style>.spw{--spw-bg:#ffffff;--spw-surface:#f3f1ef;--spw-border:#d9d5d0;--spw-text:#1a1614;--spw-muted:#6e6762;--spw-accent:#5b3fe0;--spw-grad:linear-gradient(135deg,#7c5cff,#00c2ff 55%,#7c3aed);font-family:Inter,system-ui,sans-serif;}:root[data-theme="dark"] .spw{--spw-bg:#111113;--spw-surface:#1c1c1c;--spw-border:#2e2e2e;--spw-text:#f0ece9;--spw-muted:#97918d;--spw-accent:#7c5cff;}.spw-fab{position:fixed;right:20px;bottom:20px;width:56px;height:56px;border-radius:50%;border:none;background:var(--spw-grad);color:#fff;cursor:pointer;display:flex;align-items:center;justify-content:center;box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:2147482000;transition:transform .2s;padding:0;}.spw-fab:hover{transform:scale(1.06);}.spw-fab svg{width:26px;height:26px;}.spw-badge{position:absolute;top:-3px;right:-3px;min-width:20px;height:20px;padding:0 5px;border-radius:999px;background:#e11d48;color:#fff;font-size:.7rem;font-weight:700;display:none;align-items:center;justify-content:center;border:2px solid var(--spw-bg);}.spw-badge.on{display:flex;}.spw-watch{position:fixed;right:20px;bottom:84px;max-width:240px;padding:8px 12px;border-radius:12px;background:var(--spw-grad);color:#fff;font:600 .76rem Inter,system-ui,sans-serif;line-height:1.35;box-shadow:0 8px 24px rgba(0,0,0,.28);z-index:2147481999;display:none;align-items:center;gap:7px;}.spw-watch.on{display:flex;}.spw-peek{position:fixed;right:16px;bottom:86px;max-width:min(280px,calc(100vw - 32px));padding:10px 30px 10px 12px;border-radius:14px 14px 4px 14px;background:var(--spw-bg);color:var(--spw-text);border:1px solid var(--spw-border);box-shadow:0 8px 24px rgba(0,0,0,.22);z-index:2147481999;font-size:.84rem;line-height:1.4;cursor:pointer;opacity:0;transform:translateY(8px);pointer-events:none;transition:opacity .25s,transform .25s;}.spw-peek.on{opacity:1;transform:none;pointer-events:auto;}.spw-peek .w{font-size:.7rem;font-weight:700;color:var(--spw-accent);margin-bottom:2px;}.spw-peek .b{display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}.spw-peek .c{position:absolute;top:4px;right:4px;width:22px;height:22px;border:none;background:none;color:var(--spw-muted);font-size:.95rem;cursor:pointer;padding:0;line-height:1;}.spw-watch .d{width:9px;height:9px;border-radius:50%;background:#fff;flex:none;animation:spwp 1.4s infinite;}@keyframes spwp{0%,100%{opacity:1;}50%{opacity:.3;}}.spw-panel{position:fixed;right:20px;bottom:88px;width:370px;height:540px;max-height:calc(100vh - 110px);background:var(--spw-bg);color:var(--spw-text);border:1px solid var(--spw-border);border-radius:18px;box-shadow:0 18px 48px rgba(0,0,0,.3);z-index:2147482001;display:none;flex-direction:column;overflow:hidden;}.spw-panel.on{display:flex;}.spw-head{padding:14px 16px;background:var(--spw-grad);color:#fff;display:flex;align-items:center;gap:10px;}.spw-head .t{font-weight:700;font-size:.95rem;}.spw-head .s{font-size:.75rem;opacity:.9;margin-top:1px;}.spw-head .grow{flex:1;min-width:0;}.spw-x{background:rgba(255,255,255,.18);border:none;color:#fff;width:30px;height:30px;border-radius:50%;cursor:pointer;font-size:1rem;line-height:1;padding:0;}.spw-list{flex:1;overflow-y:auto;padding:14px;display:flex;flex-direction:column;gap:8px;}.spw-m{max-width:84%;padding:9px 12px;border-radius:14px;font-size:.87rem;line-height:1.45;white-space:pre-wrap;word-wrap:break-word;}.spw-m.user{align-self:flex-end;background:var(--spw-accent);color:#fff;border-bottom-right-radius:4px;}.spw-m.ai,.spw-m.admin{align-self:flex-start;background:var(--spw-surface);border-bottom-left-radius:4px;}.spw-m.admin{border:1px solid var(--spw-accent);}.spw-by{display:block;font-size:.66rem;color:var(--spw-muted);margin-bottom:2px;font-weight:600;}.spw-typing{align-self:flex-start;color:var(--spw-muted);font-size:.8rem;padding:4px 2px;}.spw-bar{display:flex;justify-content:space-between;align-items:center;gap:8px;padding:6px 14px;border-top:1px solid var(--spw-border);font-size:.74rem;color:var(--spw-muted);}.spw-bar button,.spw-bar a{background:none;border:none;color:var(--spw-accent);cursor:pointer;font:inherit;font-weight:600;padding:0;text-decoration:none;}.spw-form{display:flex;gap:8px;padding:10px 12px 12px;}.spw-form textarea{flex:1;resize:none;height:42px;max-height:120px;border:1px solid var(--spw-border);background:var(--spw-surface);color:var(--spw-text);border-radius:12px;padding:10px 12px;font:inherit;font-size:.88rem;outline:none;}.spw-form textarea:focus{border-color:var(--spw-accent);}.spw-send{width:42px;height:42px;border-radius:12px;border:none;background:var(--spw-grad);color:#fff;cursor:pointer;flex-shrink:0;display:flex;align-items:center;justify-content:center;padding:0;}.spw-send:disabled{opacity:.5;cursor:default;}.spw-send svg{width:18px;height:18px;}@media(max-width:520px){.spw-panel{right:0;left:0;bottom:0;top:0;width:auto;height:auto;max-height:none;border-radius:0;border:none;}.spw-fab{display:none;}.spw-open .spw-fab{display:none;}}</style><style>.spw{display:none!important}</style></head>
+<body data-page="home"><div style="position:fixed;left:0;right:0;bottom:0;z-index:99999;padding:10px 16px;background:#7c5cff;color:#fff;font:600 14px/1.4 Inter,system-ui,sans-serif;text-align:center">MassHype preview &middot; sign-up and chat open at launch</div>
+<header class="site-nav scrolled" id="site-nav">
+  <div class="brand"><span data-sn-brand="" data-edit-id="brand-name">MassHype</span><i data-sn-suffix="">.ai</i></div>
+  <nav class="auth sn-links">
+    
+  <a data-sn="" data-keep="" href="/masshype" class="studio-cta" aria-label="Generation Studio">✦<span class="sn-studio-long">Generation Studio</span><span class="sn-studio-short">Studio</span> <small>15 free tokens</small></a><div class="sn-menu" data-sn=""><button type="button" class="sn-menu-btn" aria-expanded="false"><span class="sn-label">Features</span><svg class="sn-caret" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"></path></svg></button><div class="sn-menu-panel"><div class="sn-menu-group"><span class="sn-menu-label">Platforms</span><a href="/masshype">Telegram AI chatbot</a><a href="/masshype">Discord AI chatbot</a><a href="/masshype">X (Twitter) AI bot</a><a href="/masshype">Instagram posting</a><a href="/masshype">Threads auto-reply</a><a href="/masshype">Reddit posting bot<i class="sn-soon">Soon</i></a><a href="/masshype">TikTok posting<i class="sn-soon">Soon</i></a></div><div class="sn-menu-group"><span class="sn-menu-label">Your page</span><a href="/masshype">Your own chat page</a></div><div class="sn-menu-group"><span class="sn-menu-label">Tools</span><a href="/masshype">AI content planner</a><a href="/masshype">AI generation studio</a><a href="/masshype">Character Lock</a><a href="/masshype">Free link in bio</a></div></div></div><a data-sn="" href="/masshype/discover" data-keep=""><span class="sn-label">Discover</span></a><a data-sn="" href="/masshype" data-keep=""><span class="sn-label">Create</span></a><a data-sn="" href="/masshype#pricing"><span class="sn-label">Pricing</span></a><a data-sn="" href="/masshype" class="sn-hot" style="display: none;"><span class="sn-label">Free Link Builder</span></a></nav>
+</header>
+<div class="split">
+
+  <div class="left">
+    <div class="lc">
+      <div class="pill"><span class="d"></span><span data-edit-id="pill-text">Safe for work, always</span></div>
+      <h1><span data-edit-id="h1-line1">AI companions</span><br><u><span data-edit-id="h1-highlight">people love to talk to.</span></u></h1>
+      <p class="sub" data-edit-id="sub-text">Design a companion, give it a voice and a memory, and create on-brand photos and videos of it. Then let MassHype.ai bring it to life: it chats, remembers, and shares exclusive photos, voice notes and stories, on MassHype and wherever your community lives.</p>
+      <ul class="who">
+        <li><b>Creators</b> Give your community a companion that is always there.</li>
+        <li><b>Everyone</b> Build your own companion, or chat with one from Discover.</li>
+      </ul>
+    </div>
+  </div>
+
+  <div class="right">
+    <div class="ring a"></div><div class="ring b"></div>
+    <div class="rhead">
+      <div class="rlabel">Character builder</div>
+      <div class="rtitle">Build your companion in 30 minutes. <em>No prompts.</em></div>
+      <div class="rsub">Pick every detail by choosing options. When she's done, create photos and videos with the exact same face and body.</div>
+      <div class="rcta"><a class="flow-cta" href="/masshype">Start building →</a><span>About 30 minutes · No photos needed</span></div>
+    </div>
+    <div class="now" aria-live="polite"><em>1</em><span>Choose or upload</span></div>
+    <div class="clips">
+      <button type="button" class="step" data-slot="0" aria-pressed="true">
+        
+        <span class="card"><em>1</em><i aria-hidden="true">🎛️</i><b>Choose or upload</b><span>Face, body, every detail</span></span>
+      </button>
+      <button type="button" class="step" data-slot="1" aria-pressed="false">
+        
+        <span class="card"><em>2</em><i aria-hidden="true">🔒</i><b>Face &amp; body locked</b><span>The same her in every shot</span></span>
+      </button>
+      <button type="button" class="step" data-slot="2" aria-pressed="false">
+        
+        <span class="card"><em>3</em><i aria-hidden="true">✨</i><b>Create content</b><span>Photos and videos, prompt or no prompt</span></span>
+      </button>
+      <button type="button" class="step" data-slot="3" aria-pressed="false">
+        
+        <span class="card"><em>4</em><i aria-hidden="true">💬</i><b>Chat &amp; share</b><span>On MassHype, Discord, Telegram and X</span></span>
+      </button>
+    </div>
+  </div>
+
+</div>
+
+<section class="features" id="pricing">
+  <iframe id="plans-frame" src="/masshype/plans" title="Plans" style="display: block; width: 100%; max-width: 1480px; height: 1500px; margin: 0px auto 64px; border: 0px; background: transparent;"></iframe>
+  
+  <div class="sec-head reveal in">
+    <div class="sec-eyebrow"><span class="d"></span><span data-edit-id="features-eyebrow">What you get</span></div>
+    <h2><span data-edit-id="features-title-a">What each plan</span> <em data-edit-id="features-title-b">includes</em></h2>
+    <p data-edit-id="features-subtitle">Switch the plan to see exactly what it unlocks. Dimmed lines are the ones that plan does not include.</p>
+  </div>
+  <div class="tier-toggle reveal ready in" id="tier-toggle"><span class="tpill" style="width: 92.6875px; height: 37px; transform: translateX(227.328px);"></span><button type="button" data-tier="free">Free<span class="tprice">Free</span></button><button type="button" data-tier="starter">Starter<span class="tprice">€25</span></button><button type="button" data-tier="pro" class="on">Pro<span class="tprice">€59</span></button><button type="button" data-tier="agency">Agency<span class="tprice">€179</span></button><button type="button" data-tier="custom">Custom<span class="tprice">Let's talk</span></button></div>
+  <div class="feature-note reveal in" id="feature-note"><b>Pro</b> — Three personas, every platform. €59/month, excl. VAT.<br><b>Pro Plus</b> — same plan, 1,600 tokens a month instead of 300 and 15% off token packs: €169/month. Worth €217 as Pro + token packs, so you save €48.</div>
+  <div class="hl-row reveal in" id="hl-row"><div class="hl" style="animation-delay:0ms"><div class="v" data-to="∞">∞</div><div class="l">Characters</div></div><div class="hl" style="animation-delay:60ms"><div class="v" data-to="3">3</div><div class="l">Personas</div></div><div class="hl" style="animation-delay:120ms"><div class="v" data-to="5">5</div><div class="l">Platforms</div></div><div class="hl" style="animation-delay:180ms"><div class="v" data-to="10">10</div><div class="l">Funnel phases</div></div><div class="hl" style="animation-delay:240ms"><div class="v" data-to="300">300</div><div class="l">Tokens / mo</div></div><div class="hl" style="animation-delay:300ms"><div class="v" data-to="2">2</div><div class="l">Team seats</div></div></div>
+  <div class="feature-groups reveal in" id="feature-groups"><div class="feature-group" style="animation-delay:0ms"><h3><span class="gi">◆</span>Persona &amp; chat<span class="cnt">7/7</span></h3><ul><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:45ms"><span class="mark" style="animation-delay:135ms">✓</span><span><span class="label">AI personas</span><span class="detail">3 × AI Persona</span><span class="explain" data-edit-id="feat-ai-personas">A persona is a character you connect a chatbot and your accounts to, with her own voice, funnel and connected account. Your plan sets how many you can run at once; the characters you build are not limited.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:90ms"><span class="mark" style="animation-delay:180ms">✓</span><span><span class="label">Character Creator</span><span class="detail">Unlimited Character Creator</span><span class="explain" data-edit-id="feat-character-creator">Build her look once — face, body, style — and approve it. Every photo and clip is generated from that approved character, so she looks the same in every set. Build as many characters as you like on every plan.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:135ms"><span class="mark" style="animation-delay:225ms">✓</span><span><span class="label">AI persona builder</span><span class="detail">Visual builder, or generate backstory, voice and triggers</span><span class="explain" data-edit-id="feat-ai-persona-builder">Fill in a form — name, age, backstory, archetype, warmth, escalation pace — and the system prompt behind every reply is written for you. Stuck? Generate the backstory, speech style and triggers, then edit what you like. No prompt engineering, no code.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:180ms"><span class="mark" style="animation-delay:270ms">✓</span><span><span class="label">Generation Studio</span><span class="detail">300 generation tokens a month — up to 300 photos or 17 videos</span><span class="explain" data-edit-id="feat-generation-studio">Create on-brand photos and short clips of her — her look, her outfit, the setting — without booking a shoot. A token buys a photo on the cheapest model; a five-second clip costs twelve. Top up any time.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:225ms"><span class="mark" style="animation-delay:315ms">✓</span><span><span class="label">Content Vault</span><span class="detail">Unlimited uploads, organised in sets, media tagging</span><span class="explain" data-edit-id="feat-content-vault">Upload your own safe-for-work sets. From Pro, tag every photo and clip so the funnel picks the right one for the moment and never sends a user the same photo twice.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:270ms"><span class="mark" style="animation-delay:360ms">✓</span><span><span class="label">Live chat engine</span><span class="detail">Memory of every user, in-character replies, tone matching</span><span class="explain" data-edit-id="feat-live-chat-engine">She remembers what each user told her, answers in character and matches their tone, so the conversation reads like a person rather than a bot.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:315ms"><span class="mark" style="animation-delay:405ms">✓</span><span><span class="label">Test chat + shareable landing page</span><span class="detail">Talk to her yourself and send fans a hosted landing page</span><span class="explain" data-edit-id="feat-test-chat-shareable-landing-page">Talk to her yourself before any fan does, and send fans a hosted page where they can start chatting straight away.</span></span><span class="chev">❯</span></li></ul></div><div class="feature-group" style="animation-delay:70ms"><h3><span class="gi">▲</span>Funnel, selling &amp; platforms<span class="cnt">5/7</span></h3><ul><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:115ms"><span class="mark" style="animation-delay:205ms">✓</span><span><span class="label">Social media funnel</span><span class="detail">Every platform, funnelled to your paid page</span><span class="explain" data-edit-id="feat-social-media-funnel">Connect her accounts and she chats and posts there directly. Followers who find her are walked, conversation by conversation, to the page where they pay.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:160ms"><span class="mark" style="animation-delay:250ms">✓</span><span><span class="label">Exclusives engine</span><span class="detail">Unlockable photos, voice notes and stories</span><span class="explain" data-edit-id="feat-exclusives-engine">Price ladders and timed re-offers for safe-for-work exclusives: she prices the unlock to the person in front of her, and follows up when they hesitate.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:205ms"><span class="mark" style="animation-delay:295ms">✓</span><span><span class="label">Funnel phases</span><span class="detail">Up to 10 phases with photo rates</span><span class="explain" data-edit-id="feat-funnel-phases">The conversation moves through phases — warm, engage, tease, offer, close — and you set the pace and the photo rate for each one.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:250ms"><span class="mark" style="animation-delay:340ms">✓</span><span><span class="label">Content Planner Tool</span><span class="detail">Plan, draft and schedule posts on every platform</span><span class="explain" data-edit-id="feat-content-planner-tool">Plan, draft and schedule her posts across every platform without leaving the dashboard.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:295ms"><span class="mark" style="animation-delay:385ms">✓</span><span><span class="label">Scheduled follow-ups</span><span class="detail">Win back users who go quiet, on your schedule</span><span class="explain" data-edit-id="feat-scheduled-follow-ups">Fans who go quiet get a message back in their inbox on the schedule you choose, written in her voice rather than a template.</span></span><span class="chev">❯</span></li><li class="off" tabindex="0" role="button" aria-expanded="false" style="animation-delay:340ms"><span class="mark" style="animation-delay:430ms">✕</span><span><span class="label">Conversation + revenue analytics<span class="tag">Upgrade</span></span><span class="detail">Agency and up</span><span class="explain" data-edit-id="feat-conversation-revenue-analytics">See which stage every conversation is in, where conversations stall, and what each persona earns you per month.</span></span><span class="chev">❯</span></li><li class="off" tabindex="0" role="button" aria-expanded="false" style="animation-delay:385ms"><span class="mark" style="animation-delay:475ms">✕</span><span><span class="label">Unlock reconciliation<span class="tag">Upgrade</span></span><span class="detail">Agency and up</span><span class="explain" data-edit-id="feat-unlock-reconciliation">Every unlock she sends is matched against your earnings, so you can see what actually converted instead of guessing.</span></span><span class="chev">❯</span></li></ul></div><div class="feature-group" style="animation-delay:140ms"><h3><span class="gi">■</span>Team &amp; support<span class="cnt">2/3</span></h3><ul><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:185ms"><span class="mark" style="animation-delay:275ms">✓</span><span><span class="label">Team seats</span><span class="detail">2 team seats</span><span class="explain" data-edit-id="feat-team-seats">Invite chatters or managers with their own logins and roles, instead of passing one password around the team.</span></span><span class="chev">❯</span></li><li class="off" tabindex="0" role="button" aria-expanded="false" style="animation-delay:230ms"><span class="mark" style="animation-delay:320ms">✕</span><span><span class="label">Onboarding and roster migration<span class="tag">Upgrade</span></span><span class="detail">Custom only</span><span class="explain" data-edit-id="feat-onboarding-and-roster-migration">Bring an existing roster: we migrate your personas and media and set up the funnels with you.</span></span><span class="chev">❯</span></li><li class="" tabindex="0" role="button" aria-expanded="false" style="animation-delay:275ms"><span class="mark" style="animation-delay:365ms">✓</span><span><span class="label">Support</span><span class="detail">Priority support</span><span class="explain" data-edit-id="feat-support">How you reach us and how fast we come back to you — from the community on Free to a named contact on Custom.</span></span><span class="chev">❯</span></li></ul></div></div>
+  <div class="features-cta reveal in"><a href="/masshype" id="features-cta">Get started</a></div>
+</section>
+
+
+
+<section class="pricing" id="generation">
+  <!-- Capability first, price second: the per-photo number only means something
+       once you know which of these will generate her at all. -->
+  <div class="gen-compare">
+    <h3>Generating her content</h3>
+    <p class="gen-compare-lede">Every plan includes generation tokens — one token is
+    one photo, a five-second video is twelve. Top up any time from €0.09 a photo.</p>
+    <div class="gen-compare-scroll">
+      <table class="gen-compare-table">
+        <thead>
+          <tr><th>&nbsp;</th><th>Creative freedom</th><th>Her face, every time</th>
+              <th>From</th></tr>
+        </thead>
+        <tbody>
+          <tr class="is-us">
+            <td>MassHype.ai</td>
+            <td><span class="yes">Safe for work</span></td>
+            <td><span class="yes">Locked to her approved photo</span></td>
+            <td><strong>€0.09</strong> a photo</td>
+          </tr>
+          <tr>
+            <td>Higgsfield</td>
+            <td><span class="no">Heavily filtered</span></td>
+            <td><span class="no">Prompt only</span></td>
+            <td>$0.14 a photo</td>
+          </tr>
+          <tr>
+            <td>A raw model API</td>
+            <td><span class="no">Depends, and it is on you</span></td>
+            <td><span class="no">You build the pipeline</span></td>
+            <td>$0.04 + your engineering</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="gen-compare-note">A general image tool can make a beautiful woman. It
+    cannot make <em>her</em> — the same face, the same body, in a set your community
+    recognises. That is what the token price buys.</p>
+  </div>
+</section>
+
+<footer style="text-align:center;padding:32px 24px;">
+  <nav style="max-width:900px;margin:0 auto 20px;display:flex;flex-wrap:wrap;justify-content:center;gap:6px 16px;font-size:.82rem;">
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Telegram AI chatbot</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Discord AI chatbot</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">X (Twitter) AI bot</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Instagram posting</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Threads auto-reply</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Reddit posting bot</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">TikTok posting</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Your own chat page</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">AI content planner</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">AI generation studio</a>
+    <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Free link in bio</a>
+  </nav>
+  <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Privacy Statement</a>
+  <span style="opacity:.4;margin:0 10px;">·</span>
+  <a href="/masshype" style="color:inherit;text-decoration:none;opacity:.7;">Terms and Conditions</a>
+</footer>
+
+
+
+
+
+
+
+<nav class="sn-account scrolled"><button class="theme-toggle" onclick="toggleTheme()" title="Dark mode" aria-label="Switch to dark mode">
+      <svg class="ico-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><circle cx="12" cy="12" r="4"></circle><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4" stroke-linecap="round"></path></svg>
+      <svg class="ico-moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z" stroke-linejoin="round"></path></svg>
+    </button><button class="sn-acct-btn" type="button" aria-expanded="false" aria-label="Account menu"><span class="sn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="8" r="4"></circle><path d="M4 21v-1a6 6 0 0 1 6-6h4a6 6 0 0 1 6 6v1"></path></svg></span></button><div class="sn-acct-links sn-links"><a data-sn="" href="/masshype"><span class="sn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"></path><path d="M10 17l5-5-5-5"></path><path d="M15 12H3"></path></svg></span><span class="sn-label">Log in</span></a><a data-sn="" href="/masshype" class="sn-cta"><span class="sn-ico"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M19 8v6M22 11h-6"></path></svg></span><span class="sn-label">Register</span></a></div></nav><div class="spw"><div class="spw-panel" role="dialog" aria-label="Support chat">  <div class="spw-head"><div class="grow"><div class="t">Support</div>    <div class="s" data-mode="">AI assistant · a person can join any time</div></div>    <button type="button" class="spw-x" aria-label="Close">×</button></div>  <div class="spw-list" aria-live="polite"><div class="spw-m ai"><span class="spw-by">AI assistant</span>Hi! I can help with the persona builder, platforms, tokens, plans and billing. What can I help you with?</div></div>  <div class="spw-bar"><span data-hint="">Replies in seconds</span><span>    <button type="button" data-human="">Talk to a human</button></span></div>  <form class="spw-form"><textarea rows="1" placeholder="Ask anything…" maxlength="2000"></textarea>    <button type="submit" class="spw-send" aria-label="Send"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 2 11 13"></path><path d="M22 2 15 22l-4-9-9-4z"></path></svg></button></form></div><button type="button" class="spw-fab" aria-label="Open support chat"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path></svg><span class="spw-badge"></span></button></div></body></html>

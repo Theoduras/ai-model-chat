@@ -1142,7 +1142,7 @@ _PUBLIC_PATHS = {path for path, _, _ in _PUBLIC_PAGES}
 # The fan pages (/chat, /chat.html) are deliberately absent: they
 # carry <meta name="robots" content="noindex">, and a crawler blocked here would
 # never fetch the page to read that tag, leaving anything already indexed stuck.
-_CRAWL_DISALLOW = ['/dashboard', '/admin', '/account', '/billing', '/tokens', '/api/',
+_CRAWL_DISALLOW = ['/dashboard', '/masshype', '/admin', '/account', '/billing', '/tokens', '/api/',
                    '/xbot', '/fanvue', '/onlyfans', '/threads', '/telegram', '/auth/',
                    '/logout', '/go/', '/signup-',
                    # The studio's other rating, fetched only once its toggle is on.
@@ -1189,6 +1189,22 @@ def _www_redirect():
 
 # Ahead of every other hook, so a sign-in redirect never answers on www first.
 app.before_request_funcs.setdefault(None, []).insert(0, _www_redirect)
+
+
+# A static, non-working preview of MassHype (the SFW sister platform, its own
+# repo). Unlisted and noindex until masshype.ai is live.
+_MASSHYPE_PREVIEW = {'': 'index.html', 'discover': 'discover.html', 'plans': 'plans.html'}
+
+
+@app.route('/masshype')
+@app.route('/masshype/<page>')
+def masshype_preview(page=''):
+    fname = _MASSHYPE_PREVIEW.get(page)
+    if not fname:
+        return ('Not found', 404)
+    resp = send_from_directory(os.path.join(BASE_DIR, 'masshype-preview'), fname)
+    resp.headers['X-Robots-Tag'] = 'noindex, nofollow'
+    return resp
 
 
 @app.route('/robots.txt')
