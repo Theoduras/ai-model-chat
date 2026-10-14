@@ -33069,12 +33069,16 @@ def api_x_settings():
             opts[key] = str(data[key] or '').strip()[:300]
     for key in ('dm_replies', 'new_chats', 'comments', 'respond_own',
                 'post_content', 'follow', 'feed_engage', 'feed_comment_posts',
-                'feed_answer_replies', 'feed_like_replies',
-                'army', 'army_like', 'army_comment', 'army_reply_back'):
+                'feed_answer_replies', 'feed_like_replies'):
         if key in data:
             opts[key] = bool(data[key])
-    if data.get('army_mode') in ('auto', 'review'):
-        opts['army_mode'] = data['army_mode']
+    # The army is admin-only while it is tested on real accounts.
+    if (_current_user() or {}).get('is_admin'):
+        for key in ('army', 'army_like', 'army_comment', 'army_reply_back'):
+            if key in data:
+                opts[key] = bool(data[key])
+        if data.get('army_mode') in ('auto', 'review'):
+            opts['army_mode'] = data['army_mode']
     for key, hi in (('new_chat_limit', 5), ('comment_limit', 5),
                     ('feed_post_limit', 15), ('feed_reply_limit', 25),
                     ('post_age_min', 180), ('reply_age_min', 120)):
@@ -33096,6 +33100,9 @@ def api_x_settings():
 def api_x_army_queue():
     """Her army's queued likes, comments and replies. POST approves, edits or
     drops one item: {persona, id, action: approve|drop, text?}."""
+    denied = _require_admin()
+    if denied:
+        return denied
     if request.method == 'GET':
         persona = (request.args.get('persona') or '').strip()
         queue = _x_state_get(persona, 'army_queue', []) if persona else []

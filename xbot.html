@@ -233,7 +233,7 @@
     </div>
   </div>
 
-  <div class="form-section" id="sec-army" data-tab="settings">
+  <div class="form-section" id="sec-army" data-tab="settings" style="display:none;">
     <div class="section-title">🫂 Army — your personas hype each other</div>
     <span class="hint" style="display:block; margin-bottom:14px;">When she posts, your other X personas with Army on like it, one of them comments on the photo ("omg where did you get that top?"), and she answers "link in bio". Every action gets its own random delay.</span>
     <div class="auto-toggles">
@@ -473,7 +473,12 @@ function hydrateAutoConfig(s){
 async function loadArmyQueue(){
   if (!persona()) return;
   let d = {};
-  try { d = await (await fetch('/api/x/army/queue?persona=' + encodeURIComponent(persona()))).json(); } catch (e) { return; }
+  try {
+    const r = await fetch('/api/x/army/queue?persona=' + encodeURIComponent(persona()));
+    if (!r.ok) return;
+    d = await r.json();
+  } catch (e) { return; }
+  document.getElementById('sec-army').style.display = '';
   const mates = d.mates || [];
   document.getElementById('army-mates').textContent = mates.length
     ? 'Mates: ' + mates.join(', ')
