@@ -233,6 +233,23 @@
     </div>
   </div>
 
+  <div class="form-section" id="sec-army" data-tab="settings">
+    <div class="section-title">🫂 Army — your personas hype each other</div>
+    <span class="hint" style="display:block; margin-bottom:14px;">When she posts, your other X personas with Army on like it, one of them comments on the photo ("omg where did you get that top?"), and she answers "link in bio". Every action gets its own random delay.</span>
+    <div class="auto-toggles">
+      <label class="auto-chk"><input type="checkbox" id="army-on"> Army on for this persona</label>
+      <label class="auto-chk"><input type="checkbox" id="army-like" checked> Mates like her posts</label>
+      <label class="auto-chk"><input type="checkbox" id="army-comment" checked> One mate comments</label>
+      <label class="auto-chk"><input type="checkbox" id="army-reply" checked> She replies "link in bio"</label>
+    </div>
+    <div class="field" style="margin-top:12px; max-width:260px;">
+      <label>Comments and replies</label>
+      <select id="army-mode"><option value="review">I approve each one</option><option value="auto">Post automatically</option></select>
+    </div>
+    <div class="hint" id="army-mates" style="display:block; margin-top:12px;"></div>
+    <div id="army-queue" style="margin-top:10px;"></div>
+  </div>
+
   <div class="form-section" id="sec-gather" data-tab="settings">
     <div class="section-title">🧲 Gather new chats — find &amp; message new people</div>
     <span class="hint" style="display:block; margin-bottom:14px;">Finds fresh people from your own audience (recent followers and people who replied to your posts) and opens new in-character chats with them — skipping anyone you already have a conversation with. Runs on its own loop, independent of auto-chat.</span>
@@ -427,6 +444,8 @@ const AUTO_FIELDS = {
   'gather-post-age': 'post_age_min', 'gather-reply-age': 'reply_age_min',
   'auto-interval-min': 'interval_min',
   'post': 'post', 'post-topic': 'post_topic',
+  'army-on': 'army', 'army-like': 'army_like', 'army-comment': 'army_comment',
+  'army-reply': 'army_reply_back',
 };
 const CAP_FIELDS = { 'cap-dms': 'dms', 'cap-follows': 'follows',
   'cap-comments': 'comments', 'cap-likes': 'likes', 'cap-posts': 'posts' };
@@ -444,9 +463,40 @@ function hydrateAutoConfig(s){
     const el = document.getElementById(id);
     if (el && caps[kind] !== undefined) el.value = String(caps[kind]);
   }
+  if (s.army_mode) document.getElementById('army-mode').value = s.army_mode;
   hydrating = false;
   renderDailyUsage(s.daily || {}, caps);
   applyAlwaysOn();
+  loadArmyQueue();
+}
+
+async function loadArmyQueue(){
+  if (!persona()) return;
+  let d = {};
+  try { d = await (await fetch('/api/x/army/queue?persona=' + encodeURIComponent(persona()))).json(); } catch (e) { return; }
+  const mates = d.mates || [];
+  document.getElementById('army-mates').textContent = mates.length
+    ? 'Mates: ' + mates.join(', ')
+    : 'No mates yet — switch Army on for at least one other X persona of yours.';
+  const items = (d.queue || []).filter(q => q.kind !== 'like');
+  document.getElementById('army-queue').innerHTML = items.map(q => `
+    <div class="field" style="border:1px solid var(--border,#333); border-radius:8px; padding:8px; margin-bottom:8px;">
+      <label>${q.kind === 'reply' ? 'She replies' : '@' + esc(q.actor) + ' comments'} on “${esc((q.post_text || '').slice(0, 60))}”
+        ${q.status === 'approved' ? '<span style="color:#4ade80">· approved</span>' : ''}</label>
+      <input type="text" id="aq-${q.id}" value="${esc(q.text)}" ${q.status === 'approved' ? 'disabled' : ''}>
+      ${q.status === 'approved' ? '' : `<div style="display:flex; gap:6px; margin-top:6px;">
+        <button class="btn-ai" onclick="armyAct('${q.id}','approve')">Approve</button>
+        <button class="btn-ai" style="background:#4c0519" onclick="armyAct('${q.id}','drop')">Drop</button></div>`}
+    </div>`).join('');
+}
+
+async function armyAct(id, action){
+  const el = document.getElementById('aq-' + id);
+  try {
+    await fetch('/api/x/army/queue', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: persona(), id, action, text: el ? el.value : '' }) });
+  } catch (e) {}
+  loadArmyQueue();
 }
 
 function collectAutoConfig(){
@@ -461,6 +511,7 @@ function collectAutoConfig(){
     const el = document.getElementById(id);
     if (el) body.daily_caps[kind] = parseInt(el.value || '0', 10);
   }
+  body.army_mode = document.getElementById('army-mode').value;
   return body;
 }
 
@@ -509,6 +560,7 @@ for (const id of Object.keys(AUTO_FIELDS).concat(Object.keys(CAP_FIELDS))) {
   const el = document.getElementById(id);
   if (el) el.addEventListener('change', () => { applyAlwaysOn(); persistAutoConfig(); });
 }
+document.getElementById('army-mode').addEventListener('change', persistAutoConfig);
 
 // ── Console shell ────────────────────────────────────────────────────────────
 // The Overview / Inbox / Settings / Advanced shell that /fanvue and /telegram

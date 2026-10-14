@@ -17604,6 +17604,191 @@ def _x_feed_engage_round(persona, post_limit=4, reply_limit=8, post_age_min=None
     return actions, log
 
 
+# The army: a creator's own X personas liking and commenting on each other's
+# posts. Every action is queued with its own random delay, and only one mate
+# comments per post — several accounts of one owner piling onto a post within
+# the same minute is the pattern X looks for.
+X_ARMY_SCAN_MIN = 10
+X_ARMY_POST_AGE_H = 6
+X_ARMY_LIKE_DELAY = (2, 25)
+X_ARMY_COMMENT_DELAY = (8, 45)
+X_ARMY_REPLY_DELAY = (4, 20)
+X_ARMY_QUEUE_MAX = 60
+
+
+def _x_army_mates(persona):
+    """Her other connected X personas, same owner, with the army switched on."""
+    owner = _persona_owner(persona)
+    if not owner:
+        return []
+    return [p for p in _x_enabled_list()
+            if p != persona and _persona_owner(p) == owner and _x_behavior(p).get('army')]
+
+
+def _x_army_image(url):
+    if not url:
+        return None
+    try:
+        req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=15) as r:
+            return r.read(5_000_000), r.headers.get('Content-Type') or 'image/jpeg'
+    except Exception as e:
+        logger.info('army image fetch failed: %s', str(e)[:120])
+        return None
+
+
+def _x_army_comment_text(mate, post_text, image):
+    instruction = (
+        'A girlfriend of yours just posted this on X. Leave one short, excited '
+        'comment as her friend, about what she is wearing or what is in the '
+        'picture — the kind that makes people ask too, like "omg girl where did '
+        'you get that top??". One line, casual, no hashtags, no links, no pitch. '
+        f'Her caption: "{(post_text or "")[:300]}"')
+    text = ''
+    if image:
+        try:
+            text = _persona_text(mate, instruction, max_tokens=120, temperature=1.0, image=image)
+        except Exception as e:
+            logger.info('army comment with image failed for %s: %s', mate, str(e)[:120])
+    if not text:
+        text = _persona_text(mate, instruction, max_tokens=120, temperature=1.0)
+    return _strip_placeholders(_fv_trim(text, max_sentences=2, hard_cap=200))
+
+
+def _x_army_reply_text(persona, comment):
+    instruction = (
+        'A friend commented under your post. Answer her in one short, playful '
+        'line and point people to the link in your bio for more — e.g. "link in '
+        'bio babe 😘". No URL, no hashtags. '
+        f'She said: "{comment[:200]}"')
+    text = _persona_text(persona, instruction, max_tokens=80, temperature=0.9)
+    return _strip_placeholders(_fv_trim(text, max_sentences=1, hard_cap=140))
+
+
+def _x_army_scan(persona, cfg, queue, log):
+    """Queue the army's likes, one comment and her reply for each fresh post."""
+    mates = _x_army_mates(persona)
+    if not mates:
+        return
+    me_id = _x_me_id(persona)
+    if not me_id:
+        return
+    res = _x_call(persona, 'GET',
+                  f'/users/{me_id}/tweets?max_results=5&exclude=replies,retweets'
+                  '&tweet.fields=created_at&expansions=attachments.media_keys'
+                  '&media.fields=url,preview_image_url,type')
+    media = {m.get('media_key'): m for m in (res.get('includes', {}).get('media') or [])}
+    seen = _x_state_get(persona, 'army_seen', [])
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=X_ARMY_POST_AGE_H)
+    now = int(time.time())
+    review = cfg.get('army_mode') == 'review'
+    status = 'pending' if review else 'approved'
+    for tw in res.get('data') or []:
+        tid = tw.get('id')
+        at = _x_parse_time(tw.get('created_at'))
+        if not tid or tid in seen or (at and at < cutoff):
+            continue
+        seen.append(tid)
+        post_text = (tw.get('text') or '').strip()
+        base = {'post_id': tid, 'post_text': post_text[:200], 'status': status}
+        if cfg.get('army_like', True):
+            for mate in mates:
+                # A like has no words to check, so review never holds one.
+                queue.append({**base, 'status': 'approved',
+                              'id': secrets.token_hex(5), 'kind': 'like',
+                              'actor': mate, 'due': now + 60 * random.randint(*X_ARMY_LIKE_DELAY)})
+        if not cfg.get('army_comment', True):
+            continue
+        mate = random.choice(mates)
+        url = next((media[k].get('url') or media[k].get('preview_image_url')
+                    for k in (tw.get('attachments') or {}).get('media_keys', [])
+                    if k in media), None)
+        comment = _x_army_comment_text(mate, post_text, _x_army_image(url))
+        if not comment:
+            continue
+        cid = secrets.token_hex(5)
+        due = now + 60 * random.randint(*X_ARMY_COMMENT_DELAY)
+        queue.append({**base, 'id': cid, 'kind': 'comment', 'actor': mate,
+                      'text': comment, 'due': due})
+        log.append(f'army: @{mate} will comment on {tid}: {comment[:60]}')
+        if cfg.get('army_reply_back', True):
+            reply = _x_army_reply_text(persona, comment)
+            if reply:
+                queue.append({**base, 'id': secrets.token_hex(5), 'kind': 'reply',
+                              'actor': persona, 'after': cid, 'text': reply, 'due': due})
+    _x_state_set(persona, 'army_seen', seen[-100:])
+
+
+def _x_army_run_one(item, queue):
+    """Do one approved, due action. True when it is finished (done or given up)."""
+    actor = item['actor']
+    caps = _x_behavior(actor).get('daily_caps') or X_DAILY_CAP_DEFAULTS
+    if item['kind'] == 'like':
+        if _x_daily_left(caps, actor, 'likes') == 0:
+            return False
+        me_id = _x_me_id(actor)
+        if me_id and _x_like(actor, me_id, item['post_id']):
+            _x_daily_bump(actor, 'likes', 1)
+        return True
+    if _x_daily_left(caps, actor, 'comments') == 0:
+        return False
+    target = item['post_id']
+    if item['kind'] == 'reply':
+        parent = next((q for q in queue if q['id'] == item.get('after')), None)
+        if parent:
+            if not parent.get('tweet_id'):
+                return False
+            target = parent['tweet_id']
+        elif not item.get('target'):
+            return True
+        else:
+            target = item['target']
+    res = _x_call(actor, 'POST', '/tweets',
+                  body={'text': item['text'][:280], 'reply': {'in_reply_to_tweet_id': target}})
+    item['tweet_id'] = (res.get('data') or {}).get('id', '')
+    _x_daily_bump(actor, 'comments', 1)
+    for q in queue:
+        if q.get('after') == item['id']:
+            q['target'] = item['tweet_id']
+            q['due'] = int(time.time()) + 60 * random.randint(*X_ARMY_REPLY_DELAY)
+    return True
+
+
+def _x_army_round(persona):
+    """Called every worker tick: scan her posts now and then, run what is due."""
+    cfg = _x_behavior(persona)
+    queue = _x_state_get(persona, 'army_queue', [])
+    log = []
+    now = int(time.time())
+    if cfg.get('army') and now - int(_x_state_get(persona, 'army_scan_at', 0) or 0) >= X_ARMY_SCAN_MIN * 60:
+        _x_state_set(persona, 'army_scan_at', now)
+        try:
+            _x_army_scan(persona, cfg, queue, log)
+        except Exception as e:
+            log.append(f'army scan failed: {str(e)[:120]}')
+    keep = []
+    for item in queue:
+        if item.get('status') != 'approved' or item.get('due', 0) > now or item.get('done'):
+            keep.append(item)
+            continue
+        try:
+            finished = _x_army_run_one(item, queue)
+        except Exception as e:
+            log.append(f"army {item['kind']} by @{item['actor']} failed: {str(e)[:120]}")
+            finished = True
+        if finished:
+            item['done'] = True
+            if item['kind'] != 'like':
+                log.append(f"army: @{item['actor']} {item['kind']}: {item.get('text', '')[:60]}")
+        keep.append(item)
+    # A finished comment stays until its reply has gone, since the reply needs its id.
+    waiting = {q.get('after') for q in keep if not q.get('done')}
+    keep = [q for q in keep if not q.get('done') or q['id'] in waiting]
+    if keep or queue:
+        _x_state_set(persona, 'army_queue', keep[-X_ARMY_QUEUE_MAX:])
+    return log
+
+
 def _x_audience_candidates(persona, limit, contacted,
                            post_age_min=None, reply_age_min=None):
     """Find fresh people to DM. Preferred source is live conversation in her
@@ -32839,6 +33024,8 @@ def _x_behavior(persona):
         'feed_post_limit': 4, 'feed_reply_limit': 8,
         'post_age_min': 30, 'reply_age_min': 15,
         'daily_caps': dict(X_DAILY_CAP_DEFAULTS),
+        'army': False, 'army_mode': 'review', 'army_like': True,
+        'army_comment': True, 'army_reply_back': True,
     }
     if raw:
         try:
@@ -32882,9 +33069,12 @@ def api_x_settings():
             opts[key] = str(data[key] or '').strip()[:300]
     for key in ('dm_replies', 'new_chats', 'comments', 'respond_own',
                 'post_content', 'follow', 'feed_engage', 'feed_comment_posts',
-                'feed_answer_replies', 'feed_like_replies'):
+                'feed_answer_replies', 'feed_like_replies',
+                'army', 'army_like', 'army_comment', 'army_reply_back'):
         if key in data:
             opts[key] = bool(data[key])
+    if data.get('army_mode') in ('auto', 'review'):
+        opts['army_mode'] = data['army_mode']
     for key, hi in (('new_chat_limit', 5), ('comment_limit', 5),
                     ('feed_post_limit', 15), ('feed_reply_limit', 25),
                     ('post_age_min', 180), ('reply_age_min', 120)):
@@ -32899,6 +33089,36 @@ def api_x_settings():
     _set_setting(f'x_behavior_{persona}', json.dumps(opts))
     return jsonify({'ok': True,
                     'settings': {**opts, 'daily': _x_daily_counts(persona)}})
+
+
+@app.route('/api/x/army/queue', methods=['GET', 'POST'])
+@platform_scoped
+def api_x_army_queue():
+    """Her army's queued likes, comments and replies. POST approves, edits or
+    drops one item: {persona, id, action: approve|drop, text?}."""
+    if request.method == 'GET':
+        persona = (request.args.get('persona') or '').strip()
+        queue = _x_state_get(persona, 'army_queue', []) if persona else []
+        return jsonify({'queue': [q for q in queue if not q.get('done')],
+                        'mates': _x_army_mates(persona) if persona else []})
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    queue = _x_state_get(persona, 'army_queue', []) if persona else []
+    item = next((q for q in queue if q.get('id') == data.get('id')), None)
+    if not item or item.get('done'):
+        return jsonify({'ok': False, 'error': 'not found'}), 404
+    if data.get('action') == 'drop':
+        drop = {item['id']} | {q['id'] for q in queue if q.get('after') == item['id']}
+        queue = [q for q in queue if q['id'] not in drop]
+    elif data.get('action') == 'approve':
+        text = str(data.get('text') or '').strip()
+        if text and item['kind'] != 'like':
+            item['text'] = text[:280]
+        item['status'] = 'approved'
+    else:
+        return jsonify({'ok': False, 'error': 'action must be approve or drop'}), 400
+    _x_state_set(persona, 'army_queue', queue)
+    return jsonify({'ok': True, 'queue': [q for q in queue if not q.get('done')]})
 
 
 @app.route('/api/telegram/dm-send', methods=['POST'])
@@ -33868,6 +34088,9 @@ def _x_worker():
             with app.app_context():
                 cfg = _x_behavior(persona)
                 _x_state_set(persona, 'worker_last', int(_t.time()))
+                if cfg.get('army'):
+                    for line in _x_army_round(persona):
+                        _x_trace_line(persona, line)
                 if not cfg.get('auto'):
                     replied, dlog = _x_dm_reply_round(persona)
                     nudged, flog = _x_followup_round(persona)
