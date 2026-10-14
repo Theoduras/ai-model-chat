@@ -559,21 +559,21 @@ def test_clip_library_and_places():
         check('Kling 3.0 keeps the clip sound', kling.get('keepOriginalSound') is True)
         check('no background choice without a place', 'backgroundSource' not in kling)
         prov.submit_video(dict(base, place='a beach'))
-        check('a place takes the background from her photo',
-              sent[-1]['providerSettings']['klingai'].get('backgroundSource') == 'input_image')
+        check('a place sends no background parameter Kling would refuse',
+              'backgroundSource' not in sent[-1]['providerSettings']['klingai'])
         calls = []
 
         def refuse(url, payload, headers, timeout=IG.TIMEOUT):
             t = payload[1]
             calls.append(t)
-            if 'backgroundSource' in t.get('providerSettings', {}).get('klingai', {}):
-                return {'errors': [{'message': "Unsupported use of 'backgroundSource' parameter."}]}
+            if 'keepOriginalSound' in t.get('providerSettings', {}).get('klingai', {}):
+                return {'errors': [{'message': "Unsupported use of 'keepOriginalSound' parameter."}]}
             return {'data': [{'videoURL': 'https://example.test/c.mp4'}]}
 
         IG._post = refuse
-        prov.submit_video(dict(base, place='a beach'))
+        prov.submit_video(dict(base))
         check('a refused provider setting is dropped and resent',
-              len(calls) == 2 and 'backgroundSource' not in
+              len(calls) == 2 and 'keepOriginalSound' not in
               calls[-1]['providerSettings']['klingai'])
     finally:
         IG._post = real
