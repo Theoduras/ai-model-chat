@@ -561,7 +561,8 @@
   function loraBox() {
     const l = S.lora;
     if (!l) return '';
-    const body = l.status === 'ready' ? '<span class="pill ok">Trained</span>'
+    const body = l.status === 'ready' ? '<span class="pill ok">Trained' + (l.h3 ? ' · Wan 2.2 + H3' : ' · Wan 2.2') + '</span>'
+        + (l.h3 ? '' : `<input type="checkbox" id="loraH3" checked hidden><button type="button" class="btn btn-ghost btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">Add H3 version (retrains, about 2 hours) · ${+l.h3_price + +l.price ? esc(+l.h3_price + +l.price) + ' tokens' : 'free'}</button>`)
       : l.status === 'training' ? '<span class="pill">Training…</span>'
       : l.photos < l.min_photos ? `<small>Needs ${l.min_photos} approved photos, she has ${l.photos}.</small>`
       : `<label><input type="checkbox" id="loraH3"> Also for H3 sound videos · ${+l.h3_price ? esc(l.h3_price) + ' tokens' : 'free'}</label>
