@@ -74,6 +74,8 @@ def main():
 
     FV_PORT, APP_PORT = free_port(), free_port()
     os.environ['PUBLIC_BASE_URL'] = 'https://ai-model-chat-dev.example.run.app'
+    # Fanvue's Developer Area shows the signing secret; the operator sets it here.
+    os.environ['FANVUE_WEBHOOK_SECRET'] = 'live-secret-abc'
 
     import app
     from db import (SessionLocal, init_db, FanProfile, FanEvent, PpvDrop,
@@ -98,19 +100,13 @@ def main():
         app._set_setting('fanvue_funnels_lilly', json.dumps(
             dict(app.FV_FUNNEL_DEFAULTS, enabled=True, avg_sub_cents=1000)))
 
-    print('1. subscribe')
+    print('1. webhook URL')
     with app.app.app_context():
         res = app._fv_ensure_webhook('lilly')
-    check('subscription created', res.get('ok') and res.get('created'), res)
-    check('Fanvue recorded it', 'wh-1' in MADE, MADE)
-    check('pointing at PUBLIC_BASE_URL',
-          MADE['wh-1']['url'] == 'https://ai-model-chat-dev.example.run.app/webhooks/fanvue',
-          MADE['wh-1']['url'])
-    check('with the churn events',
-          'creator.subscription.deactivated' in MADE['wh-1']['events'], MADE['wh-1']['events'])
-    with app.app.app_context():
-        check('and the minted secret stored',
-              app._fv_stored_hook('lilly').get('secret') == 'live-secret-abc')
+    check('URL points at PUBLIC_BASE_URL',
+          res.get('url', '').startswith(
+              'https://ai-model-chat-dev.example.run.app/webhooks/fanvue?k='), res)
+    check('no Fanvue subscription call', not MADE, MADE)
 
     print('2. a fan is in a funnel with an unbought drop')
     with app.app.app_context():

@@ -543,7 +543,11 @@ def all_sizes():
 def purge_staging(days=STAGING_DAYS):
     """Delete staged objects past their window. Only Blob needs this — GCS has
     a lifecycle rule doing it for free — so it is a no-op elsewhere, and it is
-    the cron's job to call it because no loop is guaranteed to be running."""
+    the cron's job to call it because no loop is guaranteed to be running.
+    R2 sweeps too: its lifecycle rule needs an admin-scoped token, and a token
+    that cannot set it would otherwise leave staged media there forever."""
+    if backend() == 'r2':
+        return _r2_purge_staging(days)
     if backend() != 'blob':
         return 0
     cutoff = datetime.now(timezone.utc) - timedelta(days=days)
@@ -568,6 +572,20 @@ def purge_staging(days=STAGING_DAYS):
         cursor = body.get('cursor')
         if not body.get('hasMore') or not cursor:
             return gone
+
+
+def _r2_purge_staging(days):
+    cutoff = datetime.now(timezone.utc) - timedelta(days=days)
+    gone = 0
+    pages = _r2().get_paginator('list_objects_v2').paginate(
+        Bucket=_r2_bucket(), Prefix=STAGING_PREFIX + '/')
+    for page in pages:
+        stale = [{'Key': o['Key']} for o in page.get('Contents') or []
+                 if o['LastModified'] < cutoff]
+        if stale:
+            _r2().delete_objects(Bucket=_r2_bucket(), Delete={'Objects': stale, 'Quiet': True})
+            gone += len(stale)
+    return gone
 
 
 def ensure_lifecycle():

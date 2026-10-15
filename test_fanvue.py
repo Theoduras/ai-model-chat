@@ -614,79 +614,39 @@ def test_funnel_exits():
 
 
 def test_webhook_subscription():
-    """Fanvue delivers nothing to a URL that was never subscribed, so connecting
-    has to do it — and it has to be idempotent, scope-aware and safe to fail."""
-    calls, store, traced = [], {}, []
+    """Fanvue has no subscribe API (POST /webhooks/subscriptions only ever
+    answered 400), so connecting reports the URL to paste into its Developer
+    Area, makes no Fanvue call, and turns ok once a delivery has arrived."""
+    calls, store = [], {}
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
-    app._fv_trace = lambda p, st, d='', fan='': traced.append((st, d))
     app._callback_origin = lambda: 'https://app.example.com'
-    app._fanvue_tokens = lambda p: {'access_token': 't',
-                                    'scope': 'openid read:self read:chat read:creator'}
-    existing = {'data': []}
-    def api(persona, method, path, body=None):
-        calls.append((method, path, body))
-        if method == 'GET' and path == '/webhooks/subscriptions':
-            return existing
-        if method == 'POST' and path == '/webhooks/subscriptions':
-            return {'id': 'wh-1', 'signingSecret': 'sek-1'}
-        return {}
-    app._fanvue_call = api
+    app._fanvue_call = lambda *a, **k: calls.append(a) or {}
 
     r = app._fv_ensure_webhook('lilly')
-    check('it subscribes on connect', r['ok'] and r['created'], r)
-    posted = [c for c in calls if c[0] == 'POST'][0][2]
-    check('to our own webhook path',
-          posted['url'] == 'https://app.example.com/webhooks/fanvue', posted)
-    check('for the churn events',
-          'creator.subscription.deactivated' in posted['events']
-          and 'creator.refund.created' in posted['events'], posted)
-    check('the secret is stored', app._fv_stored_hook('lilly')['secret'] == 'sek-1')
+    check('connect makes no Fanvue call', not calls, calls)
+    check('it names our own webhook path with its key',
+          r['url'].startswith('https://app.example.com/webhooks/fanvue?k='), r)
+    check('the key is stable', app._fv_ensure_webhook('lilly')['url'] == r['url'])
+    check('it lists the events to tick', r['events'] == list(app.FV_WEBHOOK_EVENTS), r)
+    check('not ok until something arrives', r['ok'] is False and r['url'] in r['reason'], r)
 
-    # Same subscription already present: leave it alone.
-    calls.clear()
-    existing['data'] = [{'id': 'wh-1', 'url': 'https://app.example.com/webhooks/fanvue',
-                         'events': list(app.FV_WEBHOOK_EVENTS)}]
+    store[app.FV_WEBHOOK_LAST_KEY] = '2026-10-15 12:00 UTC'
     r = app._fv_ensure_webhook('lilly')
-    check('a complete subscription is left alone',
-          r['ok'] and not r['created'] and not [c for c in calls if c[0] == 'POST'], r)
-    check('and its secret is not lost', app._fv_stored_hook('lilly')['secret'] == 'sek-1')
-
-    # Missing an event: replace it, because Fanvue cannot amend one.
-    calls.clear()
-    existing['data'] = [{'id': 'wh-1', 'url': 'https://app.example.com/webhooks/fanvue',
-                         'events': ['creator.message.read']}]
-    r = app._fv_ensure_webhook('lilly')
-    check('an incomplete one is replaced',
-          any(c[0] == 'DELETE' for c in calls) and any(c[0] == 'POST' for c in calls), calls)
-
-    # Only the events the connection has scopes for — asking for more fails the
-    # whole call and would take the ones we could have had with it.
-    calls.clear(); existing['data'] = []
-    app._fanvue_tokens = lambda p: {'access_token': 't', 'scope': 'openid read:self read:chat'}
-    r = app._fv_ensure_webhook('lilly')
-    ev = [c for c in calls if c[0] == 'POST'][0][2]['events']
-    check('read:creator events are dropped when not granted',
-          ev == ['creator.message.read'], ev)
-    check('and the gap is reported', 'creator.refund.created' in (r.get('missing') or []), r)
-
-    app._fanvue_tokens = lambda p: {'access_token': 't', 'scope': 'openid read:self'}
-    check('nothing to subscribe means no call',
-          not app._fv_ensure_webhook('lilly')['ok'])
+    check('ok once a delivery is recorded', r['ok'] and '2026-10-15' in r['reason'], r)
 
     # A local or http deployment cannot receive deliveries at all.
     app._callback_origin = lambda: 'http://localhost:8080'
-    check('no subscription without a public https URL',
+    check('no URL without a public https origin',
           not app._fv_ensure_webhook('lilly')['ok'])
     app._callback_origin = lambda: 'https://127.0.0.1'
     check('nor for a loopback https URL', app._fv_webhook_url() == '')
 
     # Connecting must never fail because of this.
-    app._callback_origin = lambda: 'https://app.example.com'
-    def boom(*a, **k):
-        raise RuntimeError('Fanvue is down')
-    app._fanvue_call = boom
+    real_url = app._fv_webhook_url
+    app._fv_webhook_url = lambda: (_ for _ in ()).throw(RuntimeError('boom'))
     r = app._fv_ensure_webhook_safe('lilly')
+    app._fv_webhook_url = real_url
     check('a failure is reported, not raised', r['ok'] is False and r['reason'], r)
 
 
@@ -719,55 +679,33 @@ def test_webhook_accepts_any_known_secret():
 
 
 def test_webhook_diagnosis():
-    """Fanvue can refuse a subscription with a 400 and an empty error body. The
-    check has to narrow that to a cause instead of repeating the empty error."""
+    """The check reports the URL to paste into Fanvue and whether a delivery has
+    arrived, without asking Fanvue anything (it has no subscribe API)."""
     import utils
     utils._is_operator = lambda: True
-    store = {}
+    store, calls = {}, []
     app._get_setting = lambda k, d=None: store.get(k, d)
     app._set_setting = lambda k, v: store.__setitem__(k, v)
     app._callback_origin = lambda: 'https://dev.example.run.app'
     app._fanvue_tokens = lambda p: {'access_token': 't',
                                     'scope': 'openid read:self read:chat'}
+    app._fanvue_call = lambda *a, **k: calls.append(a) or {}
 
-    def run(api):
-        app._fanvue_call = api
+    def run():
         with app.app.test_request_context('/api/fanvue/webhook-check', method='POST',
                                           json={'persona': 'lilly'}):
             return json.loads(app.api_fanvue_webhook_check().get_data())
 
-    def refuse_all(p, m, path, body=None):
-        if m == 'GET':
-            return {'data': []}
-        raise RuntimeError('Fanvue API 400: {"error":""}')
-    r = run(refuse_all)
-    check('a blanket refusal points at the URL', 'points at the URL' in r['verdict'], r)
-    check('and names the URL that was sent',
-          r['url'] == 'https://dev.example.run.app/webhooks/fanvue', r['url'])
-
-    def one_event_ok(p, m, path, body=None):
-        if m == 'GET':
-            return {'data': []}
-        if len(body.get('events', [])) == 1:
-            return {'id': 'wh-2', 'signingSecret': 's2'}
-        raise RuntimeError('Fanvue API 400: {"error":""}')
-    r = run(one_event_ok)
-    check('one event succeeding points at the event list', 'event list' in r['verdict'], r)
-    check('and the subscription that worked is kept',
-          json.loads(store['fanvue_webhook_lilly'])['secret'] == 's2')
-
-    store.clear()
-    def already(p, m, path, body=None):
-        if m == 'GET':
-            return {'data': [{'id': 'wh-x', 'events': ['creator.message.read'],
-                              'url': 'https://dev.example.run.app/webhooks/fanvue'}]}
-        raise AssertionError('must not create a second subscription')
-    r = run(already)
-    check('an existing subscription is recognised', 'already subscribed' in r['verdict'], r)
+    r = run()
+    check('it names the URL to paste',
+          r['url'].startswith('https://dev.example.run.app/webhooks/fanvue?k='), r)
+    check('and says nothing has arrived', not r['received'] and r['url'] in r['verdict'], r)
+    check('without calling Fanvue', not calls, calls)
+    store[app.FV_WEBHOOK_LAST_KEY] = '2026-10-15 12:00 UTC'
+    check('a delivery turns it green', run()['received'])
 
     app._callback_origin = lambda: 'http://localhost:8080'
-    check('a local deployment is told what is missing',
-          'PUBLIC_BASE_URL' in run(refuse_all)['verdict'])
+    check('a local deployment is told what is missing', 'PUBLIC_BASE_URL' in run()['verdict'])
 
 
 def test_unsendable_chats():

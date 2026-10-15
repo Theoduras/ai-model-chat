@@ -136,9 +136,10 @@ check('free may write a hidden home', cc.post('/api/personas/' + homes[0]['slug'
 for path in ('/api/discord/status', '/api/instagram/status', '/api/growth/queue'):
     r = cc.post(path, json={})
     check(f'{path} refused for free', r.status_code == 402, r.status_code)
-for page in ('/planner', '/discord', '/instagram', '/embed-setup'):
+for page in ('/planner', '/discord', '/instagram'):
     check(f'{page} sends free to pricing',
           cc.get(page).status_code == 302 and '/pricing' in cc.get(page).headers['Location'])
+check('free can open its link-in-bio editor', cc.get('/embed-setup').status_code == 200)
 check('free can open the studio', cc.get('/studio').status_code in (200, 302))
 check('free can open characters', cc.get('/characters').status_code == 200)
 tk = cc.get('/api/tokens').get_json()

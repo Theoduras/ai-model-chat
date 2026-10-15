@@ -21136,90 +21136,22 @@ def api_fanvue_funnels():
 @app.route('/api/fanvue/webhook-check', methods=['POST'])
 @platform_scoped
 def api_fanvue_webhook_check():
-    """Work out why Fanvue is refusing the webhook subscription.
-
-    Fanvue can answer a rejected subscription with a 400 and an empty error
-    body, which says nothing. This narrows it down without guessing: what URL
-    was sent, what the account already has, and whether a single-event request
-    is refused too — which separates "the URL is the problem" from "one of the
-    events is"."""
+    """What to paste into Fanvue's Developer Area and whether anything has
+    arrived. There is no subscribe API to interrogate (it only ever answered a
+    bare 400), so this asks Fanvue nothing."""
     d = request.json or {}
     persona = (d.get('persona') or '').strip()
     if not persona:
         return jsonify({'ok': False, 'error': 'Missing persona'}), 400
-    granted = sorted((_fanvue_tokens(persona).get('scope') or '').split())
-    url = _fv_webhook_url()
-    wanted = _fv_wanted_events(persona)
-    out = {'ok': True, 'url': url, 'granted_scopes': granted,
-           'wanted_events': wanted,
-           'missing_scopes': sorted({need for ev, need in FV_WEBHOOK_EVENTS.items()
-                                     if need not in granted}),
-           'stored': {k: v for k, v in _fv_stored_hook(persona).items()
-                      if k != 'secret'},
-           'steps': []}
-
-    def step(name, fn):
-        try:
-            out['steps'].append({'step': name, 'ok': True, 'result': fn()})
-            return True
-        except Exception as e:
-            out['steps'].append({'step': name, 'ok': False,
-                                 'error': str(e)[:300],
-                                 'status': getattr(e, 'code', None)})
-            return False
-
-    if not url:
-        out['verdict'] = ('This deployment has no public https origin, so there '
-                          'is nothing to subscribe. Set PUBLIC_BASE_URL.')
-        return jsonify(out)
-
-    listed = {}
-    step('list existing subscriptions',
-         lambda: listed.setdefault('rows', [
-             {'id': r.get('id'), 'url': r.get('url'), 'events': r.get('events')}
-             for r in (_fv_list(_fanvue_call(persona, 'GET', '/webhooks/subscriptions')) or [])
-         ]))
-    rows = listed.get('rows', [])
-    if any(str(r.get('url') or '').rstrip('/') == url for r in rows):
-        out['verdict'] = ('This URL is already subscribed on the account — the '
-                          'app should be reusing it rather than creating one.')
-        return jsonify(out)
-
-    # One event, on the same URL. If this is accepted the URL is fine and the
-    # event list was the problem; if it is refused the same way, it is the URL.
-    probe_event = 'creator.message.read' if 'read:chat' in granted else (
-        wanted[0] if wanted else '')
-    created = {}
-    if probe_event:
-        ok = step(f'subscribe to {probe_event} only',
-                  lambda: created.setdefault('res', _fanvue_call(
-                      persona, 'POST', '/webhooks/subscriptions',
-                      body={'url': url, 'events': [probe_event]})))
-        if ok:
-            body = created['res']
-            body = body.get('data') if isinstance(body.get('data'), dict) else body
-            # Keep it: a subscription that works is better than none, and the
-            # secret is only ever returned here.
-            _set_setting(_fv_hook_key(persona), json.dumps(
-                {'id': str((body or {}).get('id') or ''), 'url': url,
-                 'events': [probe_event],
-                 'secret': str((body or {}).get('signingSecret') or '')}))
-            out['verdict'] = (
-                'A single-event subscription was accepted, so the URL is fine '
-                'and Fanvue rejected something in the full event list. It has '
-                'been kept, and %s is now delivered.' % probe_event)
-            if len(wanted) > 1:
-                out['verdict'] += (' Re-save the funnel settings to try the rest '
-                                   'again, one at a time.')
-            return jsonify(out)
-
-    out['verdict'] = (
-        'Fanvue refused even a single event on %s. That points at the URL '
-        'itself rather than the events: check that this exact origin is the one '
-        'registered for the app in the Fanvue Developer Area (your app → '
-        'Events), that PUBLIC_BASE_URL matches it, and that no endpoint for it '
-        'already exists there.' % url)
-    return jsonify(out)
+    hook = _fv_ensure_webhook_safe(persona)
+    verdict = hook.get('reason') or ''
+    if not hook.get('url'):
+        verdict = ('This deployment has no public https origin, so Fanvue cannot '
+                   'deliver to it. Set PUBLIC_BASE_URL.')
+    return jsonify({'ok': True, 'url': hook.get('url') or '',
+                    'granted_scopes': sorted((_fanvue_tokens(persona).get('scope') or '').split()),
+                    'wanted_events': list(FV_WEBHOOK_EVENTS),
+                    'received': bool(hook.get('ok')), 'steps': [], 'verdict': verdict})
 
 @app.route('/api/fanvue/funnel-stats')
 @platform_scoped
@@ -39429,6 +39361,7 @@ def _gen_worker():
         _grant_all_monthly_tokens()
     except Exception:
         logger.exception('monthly token sweep failed')
+    last_purge = 0
     while True:
         _t.sleep(10)
         try:
@@ -39436,6 +39369,14 @@ def _gen_worker():
                 _gen_poll_round()
         except Exception:
             logger.exception('generation poll tick failed')
+        # The cron sweeper is not scheduled on an always-on host, so the worker
+        # sweeps staging for a backend with no lifecycle rule doing it.
+        if _t.time() - last_purge > 3600:
+            last_purge = _t.time()
+            try:
+                storage.purge_staging()
+            except Exception:
+                logger.exception('staging purge failed')
 
 
 @app.route('/api/generate/job/<job_id>')

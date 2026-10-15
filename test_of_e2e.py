@@ -145,6 +145,9 @@ def browser_flow():
     port = _serve(root)
     of_connect.SIGNIN_URL = f'http://127.0.0.1:{port}/'
     of_connect.COOKIE_ORIGIN = of_connect.SIGNIN_URL
+    of_connect.SITES['onlyfans'] = dict(of_connect.SITES['onlyfans'],
+                                        url=of_connect.SIGNIN_URL,
+                                        origin=of_connect.COOKIE_ORIGIN)
     # Chrome if the host has one, since that is what the image runs; otherwise
     # whatever Chromium Playwright downloaded, so this still runs on a laptop.
     if not of_connect.browser_path():
