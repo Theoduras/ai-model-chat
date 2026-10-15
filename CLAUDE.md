@@ -18,7 +18,7 @@ This is an **OnlyFans-style AI chatbot platform** where content creators (models
 
 The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. The site runs on
 **Google Cloud Run** (`ai-model-chat-dev`, `europe-west4`, built by Cloud Build from `develop`),
-loops and sign-in browser included. Vercel and Railway are **on hold**: keep their files working,
+loops and sign-in browser included. Vercel (site) and Fly.io (bots) are **the move in progress**: keep their files working,
 but nothing deploys there (see Deployment Rules below).
 
 ---
@@ -76,8 +76,8 @@ personas/
 grok-lilith-prompt.txt          — Legacy location (still loaded as fallback)
 templates/platform.html         — Per-platform marketing pages (text in platform_pages.py)
 .env                            — API keys (never commit)
-Dockerfile                      — Always-on image (Railway: bot loops)
-railway.json / railway.browser.json — Railway services (bots / sign-in browser)
+Dockerfile                      — Always-on image (Fly.io: bot loops)
+fly.toml / fly.browser.toml     — Fly.io apps (bots / sign-in browser); railway*.json kept, unused
 api/index.py                    — Vercel entrypoint (the site)
 api/requirements.txt            — Vercel deps (trimmed; wins over the root file)
 vercel.json                     — Vercel routing + cron config
@@ -220,12 +220,12 @@ Stay completely in character. Never mention being an AI.
 - Static assets served directly from root via Flask `static_folder=BASE_DIR`.
 - Test locally with `python app.py` before pushing.
 - Cloud Run serves everything (`cloudbuild.app.yaml`, `cloudbuild.browser.yaml`).
-  On hold: Vercel serves the site through `api/index.py`; Railway builds the `Dockerfile`.
+  On hold: Vercel serves the site through `api/index.py`; Fly.io builds the `Dockerfile` (`fly.toml`).
   Keep both working when adding routes — everything already routes through
   Flask, so a new `@app.route` needs no config change on either host. A file the
   site reads at runtime must match `includeFiles` in `vercel.json`. See `DEPLOY.md`.
 - The Fanvue, OnlyFans, X, Telegram and Discord loops need an always-on host, so
-  they run on Cloud Run (Railway while on hold) and stay off on Vercel (`IS_VERCEL` in `app.py`).
+  they run on Cloud Run (Fly.io after the move) and stay off on Vercel (`IS_VERCEL` in `app.py`).
 - **Free is the content-creation plan: characters, the studio and token
   top-ups and one link-in-bio page on the account, nothing chatbot.** Its `chatbot` capability is False (True on every
   other plan, admins and grandfathered accounts included) and `personas` is 0.
@@ -463,7 +463,7 @@ live on the Cloud Run service, not in this repository; change them with
 `gcloud run services update ai-model-chat-dev --region europe-west4
 --update-env-vars ...` (never `--set-env-vars`, which wipes the rest).
 
-- Vercel and Railway are on hold. Never run the loops on more than one host:
+- Vercel and Fly.io are not live yet. Never run the loops on more than one host:
   two hosts means two bots answering the same fan.
 - Explicit Photo to Video, "Explicit Video Realism Pro" (`wan-2-2-gv`), runs on our own RunPod
   serverless endpoint `ys8km1d7sayxtz` (hub listing `wlsdml1114/generate_video`,

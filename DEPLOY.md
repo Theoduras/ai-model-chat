@@ -1,15 +1,15 @@
-# Deployment — Vercel (site) + Railway (always-on bots)
+# Deployment — Vercel (site) + Fly.io (always-on bots)
 
 | What | Where |
 |---|---|
 | Website, API, cron | **Vercel** (Hobby), entry `api/index.py`, config `vercel.json` |
 | Database | **Neon Postgres** (Vercel → Storage → Neon), `DATABASE_URL` |
 | Media | **Vercel Blob** (private store), `BLOB_READ_WRITE_TOKEN` |
-| Fanvue / OnlyFans / X / Telegram / Discord loops | **Railway** service from `Dockerfile` (`railway.json`) |
-| OnlyFans/Discord/Instagram sign-in browser | **Railway** service from `Dockerfile.browser` (`railway.browser.json`) |
+| Fanvue / OnlyFans / X / Telegram / Discord loops | **Fly.io** app from `Dockerfile` (`fly.toml`) |
+| OnlyFans/Discord/Instagram sign-in browser | **Fly.io** app from `Dockerfile.browser` (`fly.browser.toml`) |
 
 The loops switch themselves off on Vercel (`IS_VERCEL` / `_worker_enabled`) and
-on everywhere else, so the Railway service runs them and Vercel never does. Both
+on everywhere else, so the Fly bots app runs them and Vercel never does. Both
 hosts share the one database and Blob store.
 
 ---
@@ -46,18 +46,22 @@ Hobby limits: 60 s per request, the `/api/generate/tick` cron runs once a day,
    it skips what is already copied.
 5. Check the new site, then turn GCP billing off.
 
-## 3. Railway (bots + sign-in browser)
+## 3. Fly.io (bots + sign-in browser)
 
-1. railway.com → **New Project → Deploy from GitHub repo** → this repo, branch
-   `develop`. Settings → **Config-as-code path: `railway.json`**.
-2. Variables: the same set as Vercel (same `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`,
-   `PUBLIC_BASE_URL`), plus `STORAGE_BACKEND=blob`.
-3. Add a second service from the same repo with config path
-   `railway.browser.json` and variables `GUNICORN_TARGET=of_browser:service()`,
-   `ONLYFANS_BROWSER_TOKEN=<random>` and the same `DATABASE_URL`. Generate a
-   public domain for it.
-4. On Vercel **and** the bot service set `ONLYFANS_BROWSER_URL=<that domain>` and
-   the same `ONLYFANS_BROWSER_TOKEN`.
+Two apps, one machine each, both in `ams` (`fly.toml`, `fly.browser.toml`).
+
+1. `fly launch --no-deploy --copy-config -c fly.toml` and the same for
+   `fly.browser.toml` (keeps the app names `ai-model-chat-bots` /
+   `ai-model-chat-browser`).
+2. Bots: `fly secrets set -c fly.toml` with the same set as Vercel (same
+   `DATABASE_URL`, `BLOB_READ_WRITE_TOKEN`, `PUBLIC_BASE_URL`), plus
+   `STORAGE_BACKEND=blob`.
+3. Browser: `fly secrets set -c fly.browser.toml ONLYFANS_BROWSER_TOKEN=<random>
+   DATABASE_URL=...`. Its URL is `https://ai-model-chat-browser.fly.dev`.
+4. On Vercel **and** the bots app set `ONLYFANS_BROWSER_URL=<that URL>` and the
+   same `ONLYFANS_BROWSER_TOKEN`.
+5. `fly deploy -c fly.toml` and `fly deploy -c fly.browser.toml`. Fly does not
+   build on push: redeploy both after a change the loops or browser use.
 
 ## 4. Point callbacks at the domain
 
@@ -68,4 +72,4 @@ Reddit/TikTok redirect URIs.
 
 ## Deploying
 
-Push to `develop`. Vercel and Railway both build from it.
+Push to `develop`; Vercel builds from it. Then `fly deploy` both Fly apps.
