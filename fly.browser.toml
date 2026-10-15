@@ -1,0 +1,22 @@
+# Hosted sign-in browser (of_connect.SITES). Two Chromes at once is normal, so
+# it gets the memory the Cloud Run service ran short of. One machine only: a
+# held session lives in that machine's browser.
+app = "ai-model-chat-browser"
+primary_region = "ams"
+
+[build]
+  dockerfile = "Dockerfile.browser"
+
+[env]
+  GUNICORN_TARGET = "of_browser:service()"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  auto_stop_machines = "off"
+  auto_start_machines = false
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-2x"
+  memory = "4gb"
