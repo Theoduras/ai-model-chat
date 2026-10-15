@@ -123,6 +123,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET /link-{handle}` | — | Persona's public link-in-bio page (`BioPage`); `/link-{handle}/go/{block}` counts a click and redirects to the stored URL; `/c/{handle}` is her chat without site nav or support bubble |
 | `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`). `me` is the caller's account page (`acct-<workspace>`), no chat button |
 | `GET /free-link-in-bio` | — | Free tool: build a bio page signed out; Save keeps it in `localStorage.bio_draft`, signup, and the dashboard publishes it via `/embed-setup?persona=me&draft=1` |
+| `GET/POST /verify-email` | — | Unverified sign-up's holding page / resend; `/verify-email/{token}` verifies and continues the sign-up |
+| `GET /unsubscribe/{token}` | — | Marketing-email opt-out (token from `_unsubscribe_url`) |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---
@@ -235,6 +237,13 @@ Stay completely in character. Never mention being an AI.
   for a page, a redirect to `/pricing`. The dashboard shows those rows greyed
   with a "Subscribers only" label and opens the studio as home. It keeps its 15
   one-time tokens and can buy packs.
+- **A password sign-up verifies its email before anything behind sign-in works.**
+  Unverified means `users.email_verify_token` is set, so accounts from before
+  verification count as verified; Google sign-in counts as verified.
+  `_require_verified_email` sends app pages to `/verify-email` and answers API
+  calls 403 `verify: true`. Every account is opted in to platform email unless
+  `email_opt_out` is True (unsubscribe link or admin user page); a marketing
+  email must carry `_unsubscribe_url`.
 - **Characters are unlimited on every plan; personas are what a plan limits.**
   A character's own persona is a hidden `studio_only` home (`_CHAR_HOME`),
   skipped by `_persona_count` and the persona lists (except `?studio=1`), so it

@@ -726,6 +726,12 @@ class User(Base):
     # a fresh request; reset_token_expires makes an old, unclaimed link inert.
     reset_token = Column(String(64), index=True)
     reset_token_expires = Column(DateTime)
+    # Set at password sign-up, cleared when the link is opened: unverified means
+    # a token is present, so accounts from before verification count as verified.
+    email_verify_token = Column(String(64), index=True)
+    email_verified_at = Column(DateTime)
+    # Everyone is opted in to platform email unless this is True (unsubscribed).
+    email_opt_out = Column(Boolean, default=False)
 
     # Stripe recurring billing. The customer id outlives any one subscription,
     # so it is kept even after a cancellation to reuse the saved card and to

@@ -2095,6 +2095,7 @@ def _current_user():
             status = 'expired'
         return {'id': u.id, 'email': u.email, 'name': u.name, 'tier': tier,
                 'status': status, 'role': role, 'avatar': bool(u.avatar),
+                'email_verified': not u.email_verify_token,
                 'onlyfans_grandfathered': bool(owner.onlyfans_grandfathered),
                 'legacy_plan': owner.legacy_plan or '',
                 'workspace_id': ws.id if ws is not None else u.id,
@@ -2616,6 +2617,7 @@ _OPEN_PATHS = (
                # matches on prefix, so they have to be named before it.
                tuple('/' + s for s in platform_pages.PAGES) +
                ('/login', '/register', '/logout', '/pricing', '/billing', '/api/guest/',
+               '/verify-email', '/unsubscribe/',
                '/demo-ends',
                '/auth/google', '/join/', '/api/workspaces',
                '/account', '/api/billing', '/healthz', '/go/', '/webhooks/',
@@ -3261,6 +3263,21 @@ FORGOT_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UT
 <button type="submit"><span data-edit-id="submit-text">Send reset link</span></button></form>
 {% endif %}
 <div class="alt"><a href="/login">Back to sign in</a></div>
+</div></div></body></html>"""
+
+VERIFY_EMAIL_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<link rel="icon" href="/favicon.ico" sizes="any"><link rel="icon" type="image/png" href="/favicon.png"><title>{{ title or 'Verify your email' }}</title>
+<style>""" + ACCOUNT_CSS + """body{padding-top:80px}</style></head><body data-page="verify">""" + AUTH_NAV_HTML + """<div class="wrap"><div class="card">
+<h1>{{ title or 'Verify your email' }}</h1>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if message %}<p class="sub">{{ message }}</p>
+{% else %}<p class="sub">We sent a link to <b>{{ email }}</b>. Open it to activate your account.</p>
+{% if sent %}<div class="sub" style="margin-bottom:18px">A new link is on its way.</div>{% endif %}
+{% if verify_link %}<div class="sub" style="margin-bottom:18px">The email could not be sent, so here's the link directly: <a href="{{ verify_link }}">{{ verify_link }}</a></div>{% endif %}
+<form method="post"><button type="submit">Resend the link</button></form>
+<div class="alt">Wrong address? <a href="/logout">Sign out</a> and register again.</div>{% endif %}
 </div></div></body></html>"""
 
 RESET_PASSWORD_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
@@ -4145,6 +4162,11 @@ n.textContent='Last online '+new Date(t*1000).toLocaleString([], {day:'numeric',
 <input type="hidden" name="action" value="password">
 <label>New password</label><input type="password" name="password" required placeholder="At least 8 characters">
 <button type="submit" class="danger">Set password</button></form></div>
+
+<div class="card" id="email" style="margin-top:16px"><h2>Email</h2>
+<p class="sub">Verified: {% if u.email_verified %}yes{% if u.verified_at %} ({{ u.verified_at }}){% endif %}{% else %}no{% endif %} · Marketing emails: {{ 'on' if u.email_opt_in else 'off' }}</p>
+{% if not u.email_verified %}<form method="post" action="/admin/users/{{ u.id }}"><input type="hidden" name="action" value="verify"><button type="submit">Mark email verified</button></form>{% endif %}
+<form method="post" action="/admin/users/{{ u.id }}" style="margin-top:8px"><input type="hidden" name="action" value="optin"><button type="submit">Turn marketing emails {{ 'off' if u.email_opt_in else 'on' }}</button></form></div>
 
 <div class="card" id="ban" style="margin-top:16px"><h2>IP &amp; ban</h2>
 <p class="sub">Signup IP: {{ u.signup_ip or '—' }} · Last IP: {{ u.last_ip or '—' }}</p>
@@ -5725,6 +5747,17 @@ def admin_user_detail(uid):
                     s.commit()
                     saved = f'{TRIAL_DAYS}-day trial granted.'
                     logger.info('ADMIN TRIAL by=%s target=%s', me['email'], u.email)
+
+            elif action == 'verify':
+                _mark_email_verified(u)
+                s.commit()
+                saved = 'Email marked verified.'
+                logger.info('ADMIN VERIFY EMAIL by=%s target=%s', me['email'], u.email)
+
+            elif action == 'optin':
+                u.email_opt_out = not u.email_opt_out
+                s.commit()
+                saved = 'Marketing emails %s.' % ('off' if u.email_opt_out else 'on')
             if error:
                 s.rollback()
 
@@ -5740,7 +5773,10 @@ def admin_user_detail(uid):
                 'status': u.status, 'tier': u.tier, 'expires': _fmt_date(u.expires_at),
                 'trial_at': _fmt_date(u.trial_at),
                 'signup_ip': u.signup_ip or '', 'last_ip': u.last_ip or '',
-                'domain': _email_domain(u.email)}
+                'domain': _email_domain(u.email),
+                'email_verified': not u.email_verify_token,
+                'verified_at': _fmt_date(u.email_verified_at),
+                'email_opt_in': not u.email_opt_out}
         from db import Visit
         ips = {u.signup_ip, u.last_ip} - {None, ''}
         view['same_ip'] = [x.email for x in s.query(User).filter(
@@ -6361,6 +6397,8 @@ def auth_google_callback():
         # Links an existing password account to the Google account on first use.
         if not u.google_sub:
             u.google_sub = sub
+        if u.email_verify_token and u.email == email:
+            _mark_email_verified(u)
         u.last_login = datetime.now(timezone.utc).replace(tzinfo=None)
         _note_demo_signin(s, u, 'google')
         s.commit()
@@ -6409,6 +6447,7 @@ def register():
                                           email=email, name=name), 403
         claimed = _claim_guest(s, email, generate_password_hash(password), name)
         u = claimed or create_user(s, email, generate_password_hash(password), name)
+        u.email_verify_token = secrets.token_urlsafe(32)
         _stamp_ip(u, signup=True)
         _credit_signup_link(s)
         s.commit()
@@ -6416,13 +6455,21 @@ def register():
         session['user_id'] = u.id
         session['login_at'] = time.time()
         session.permanent = True
+        session['verify_after'] = '/studio' if claimed else ''
+        _send_verify_email(u)
     finally:
         s.close()
+    return redirect('/verify-email')
+
+
+def _after_signup_redirect():
+    """Where a new account lands once its email is verified."""
     pending = session.pop('pending_invite', '')
     if pending:
         return redirect('/join/' + pending)
-    if claimed:
-        return redirect('/studio')
+    after = session.pop('verify_after', '')
+    if after:
+        return redirect(after)
     trial = session.get('trial_code', '')
     return redirect('/trial/' + trial if trial else '/billing?signup=1')
 
@@ -6532,6 +6579,133 @@ def _send_reset_email(to_email, reset_link):
     return _send_email([to_email], 'Reset your password',
                        f'Reset your password: {reset_link}\n\n'
                        'If you did not request this, ignore this email.')
+
+
+def _mark_email_verified(u):
+    u.email_verify_token = None
+    u.email_verified_at = datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def _send_verify_email(u):
+    """Email the verification link. When it cannot go out the link is kept in
+    the session and shown on the page, as forgot-password does, so a mailer
+    outage does not lock every new account out."""
+    link = _site_origin() + '/verify-email/' + u.email_verify_token
+    session['verify_sent_at'] = time.time()
+    if _send_email([u.email], 'Verify your email',
+                   f'Welcome! Confirm your email to activate your account:\n{link}\n\n'
+                   'If you did not create an account, ignore this email.'):
+        session.pop('verify_link', None)
+        return
+    logger.warning('VERIFY LINK (not emailed — SMTP unset or send failed) email=%s link=%s',
+                   u.email, link)
+    session['verify_link'] = link
+
+
+def _unsubscribe_serializer():
+    from itsdangerous import URLSafeSerializer
+    return URLSafeSerializer(app.secret_key, salt='unsubscribe')
+
+
+def _unsubscribe_url(user_id):
+    """The link every marketing email carries."""
+    return _site_origin() + '/unsubscribe/' + _unsubscribe_serializer().dumps(user_id)
+
+
+@app.route('/verify-email', methods=['GET', 'POST'])
+def verify_email():
+    from db import User
+    user = _current_user()
+    if not user:
+        return redirect('/login')
+    if user.get('email_verified'):
+        return redirect('/dashboard')
+    sent = False
+    if request.method == 'POST' and time.time() - session.get('verify_sent_at', 0) >= 60:
+        s = _db_session()
+        try:
+            u = s.get(User, user['id'])
+            u.email_verify_token = secrets.token_urlsafe(32)
+            s.commit()
+            _send_verify_email(u)
+        finally:
+            s.close()
+        sent = True
+    return render_template_string(VERIFY_EMAIL_HTML, email=user['email'], sent=sent,
+                                  verify_link=session.get('verify_link'))
+
+
+@app.route('/verify-email/<token>')
+def verify_email_token(token):
+    from db import User
+    s = _db_session()
+    try:
+        u = s.query(User).filter(User.email_verify_token == token).first()
+        if u is None or u.status in ('deleted', 'banned'):
+            return render_template_string(
+                VERIFY_EMAIL_HTML, title='Link expired',
+                message='That link is invalid or was replaced by a newer one. '
+                        'Sign in to get a fresh link.'), 400
+        _mark_email_verified(u)
+        s.commit()
+        if session.get('user_id') != u.id:
+            # Opened in another browser: none of this session's sign-up state applies.
+            session.pop('pending_invite', None)
+            session.pop('verify_after', None)
+            session['user_id'] = u.id
+            session['login_at'] = time.time()
+            session.permanent = True
+        logger.info('EMAIL VERIFIED user=%s', u.email)
+    finally:
+        s.close()
+    session.pop('verify_link', None)
+    return _after_signup_redirect()
+
+
+@app.route('/unsubscribe/<token>')
+def unsubscribe(token):
+    from itsdangerous import BadSignature
+    from db import User
+    try:
+        uid = _unsubscribe_serializer().loads(token)
+    except BadSignature:
+        return render_template_string(VERIFY_EMAIL_HTML, title='Unsubscribe',
+                                      message='That unsubscribe link is not valid.'), 400
+    s = _db_session()
+    try:
+        u = s.get(User, uid)
+        if u is not None:
+            u.email_opt_out = True
+            s.commit()
+            logger.info('UNSUBSCRIBED user=%s', u.email)
+    finally:
+        s.close()
+    return render_template_string(VERIFY_EMAIL_HTML, title='Unsubscribed',
+                                  message="You won't get any more marketing emails from us.")
+
+
+@app.before_request
+def _require_verified_email():
+    """A password sign-up can use nothing behind sign-in until its email is
+    verified; public pages stay readable."""
+    path = request.path or '/'
+    if '.' in path.rsplit('/', 1)[-1] or not session.get('user_id'):
+        return None
+    if path.startswith(('/verify-email', '/logout', '/unsubscribe/', '/api/support')):
+        return None
+    user = _current_user()
+    if not user or user.get('email_verified') or user.get('is_admin') or _is_guest(user):
+        return None
+    if path.startswith('/api/'):
+        return jsonify({'error': 'Verify your email first', 'verify': True}), 403
+    if path.startswith(_VERIFY_GATED_PAGES) or _path_needs_plan(path, request.method):
+        return redirect('/verify-email')
+    return None
+
+
+_VERIFY_GATED_PAGES = ('/dashboard', '/billing', '/account', '/tokens', '/studio',
+                       '/characters', '/team', '/referrals', '/join/', '/trial/',
+                       '/admin')
 
 
 @app.route('/forgot-password', methods=['GET', 'POST'])
