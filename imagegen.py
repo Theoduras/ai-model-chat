@@ -3129,8 +3129,9 @@ def lora_style(spec):
     examples = '\n\n'.join((l.get('examples') or '').strip() for l in loras
                             if (l.get('examples') or '').strip())
     her = next((l.get('trigger') or '' for l in loras if l.get('name') == 'Her LoRA'), '')
-    return ({'triggers': triggers, 'examples': examples[:3000], 'her': her}
-            if (triggers or examples) else None)
+    if not (triggers or examples):
+        return None
+    return dict({'triggers': triggers, 'examples': examples[:3000]}, **({'her': her} if her else {}))
 
 
 def her_lead(style, text):
