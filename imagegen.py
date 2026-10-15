@@ -251,7 +251,10 @@ VIDEO_JOBS = {
     # removed: explicit video is Photo to Video alone for now.
     # Explicit swaps redraw the clip as her with her LoRA (face and body), or
     # move the face alone (ml-face-swap).
-    'swap': {'models': ('kling-3-0-mc', CHAR_LORA_VIDEO_MODEL, 'ml-face-swap', 'kling-3-0-omni'),
+    # H3 takes no video: its swap starts from the clip's first frame and is
+    # then redrawn as her by the lock, keeping H3's sound.
+    'swap': {'models': ('kling-3-0-mc', CHAR_LORA_VIDEO_MODEL, 'h3-gv', 'ml-face-swap',
+                        'kling-3-0-omni'),
              'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw', 'nsfw'),
              'open': ('sfw', 'nsfw'), 'clause': 'preserve',
              'label': 'Swap',
@@ -1762,6 +1765,24 @@ def last_frame(video):
                 return f.read()
         except Exception as e:
             logging.getLogger(__name__).warning('last frame failed: %s', str(e)[:200])
+            return b''
+
+
+def first_frame(video):
+    """The clip's opening frame as a JPEG; b'' when it cannot be read."""
+    if not HAS_FFMPEG:
+        return b''
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'first.jpg')
+        with open(src, 'wb') as f:
+            f.write(video)
+        try:
+            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', src, '-frames:v', '1',
+                            '-q:v', '2', out], check=True, timeout=60, capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('first frame failed: %s', str(e)[:200])
             return b''
 
 

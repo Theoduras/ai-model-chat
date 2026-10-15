@@ -215,6 +215,9 @@ def test_job_quotes():
             rungs = CR._imagegen_rungs(model)
             durations = CR._imagegen_durations(model) or [
                 CR.VIDEO_SECONDS_MIN, 5, CR.VIDEO_MAX_SECONDS]
+            if job == 'swap':
+                # A swap is one pass over the uploaded clip, never a chain.
+                durations = [d for d in durations if d <= CR.VIDEO_MAX_SECONDS]
             for aspect in CR.ASPECTS:
                 for res in rungs:
                     for secs in durations:

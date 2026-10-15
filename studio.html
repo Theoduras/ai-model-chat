@@ -2625,7 +2625,10 @@ function picksBefore(ssecs) {
 
 // The rating picks the swap engine: safe work on Kling motion control, any
 // explicit rating redrawn as her with her LoRA.
+const EXPLICIT_SWAPS = ['wan-2-2-char-video', 'h3-gv'];
 function swapModel() {
+  const picked = (el('gen-smodel') || {}).value;
+  if (genRating !== 'sfw' && EXPLICIT_SWAPS.includes(picked)) return picked;
   const want = genRating === 'sfw' ? 'kling-3-0-mc' : 'wan-2-2-char-video';
   if (swapModels().includes(want)) return want;
   return (genPrices && genPrices.default_swap_model) || swapModels()[0];
@@ -2710,9 +2713,14 @@ function renderSwapOut() {
   const sres = el('gen-sres'), ssecs = el('gen-ssecs');
   if (!box || !sres || !ssecs || !genPrices) return;
   const smodel = el('gen-smodel');
-  if (smodel && !smodel.options.length) {
-    smodel.innerHTML = swapModels().map(m =>
-      opt(m, videoLabel(m), genPrices.default_swap_model)).join('');
+  if (smodel) {
+    // Safe work has one engine; explicit picks between Wan 2.2 and H3, both as her.
+    const explicit = genRating !== 'sfw';
+    smodel.parentElement.style.display = explicit ? '' : 'none';
+    const keep = smodel.value;
+    smodel.innerHTML = explicit ? [['wan-2-2-char-video', 'Wan 2.2 + her LoRA'],
+      ['h3-gv', 'H3 + her LoRA (with sound)']].map(([m, label]) =>
+      `<option value="${m}" ${m === keep ? 'selected' : ''}>${label}</option>`).join('') : '';
   }
   if (el('gen-smodel-note')) {
     el('gen-smodel-note').textContent = SWAP_NOTES[swapModel()] || '';

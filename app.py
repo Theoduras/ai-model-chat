@@ -35143,6 +35143,12 @@ def _gen_spec(slug, body, user):
             and body.get('lock') is not False and _char_lora_entry(slug)):
         spec['lock'] = True
         spec['addons'].append('lock')
+    if job == 'swap' and model == 'h3-gv' and level != 'sfw':
+        if not _char_lora_entry(slug):
+            raise imagegen.GenerationError(
+                'Train her LoRA first — the H3 swap is redrawn as her with it.')
+        spec['lock'] = True
+        spec['addons'].append('lock')
     if model == imagegen.CHAR_LORA_VIDEO_MODEL and not _char_lora_entry(slug):
         raise imagegen.GenerationError(
             'Train her LoRA first — this clip takes her look from it.')
@@ -38474,6 +38480,13 @@ def _gen_start(job_id, slug, spec, workspace):
             if ref_b64:
                 call['reference_b64'] = ref_b64
                 call['reference_mime'] = ref_mime
+            if spec.get('job') == 'swap' and spec.get('model') == 'h3-gv' and spec.get('source_path'):
+                import base64
+                frame = imagegen.first_frame(storage.get(spec['source_path']) or b'')
+                if not frame:
+                    raise imagegen.GenerationError("The clip's first frame could not be read.")
+                call['reference_b64'] = base64.b64encode(frame).decode()
+                call['reference_mime'] = 'image/jpeg'
             if spec.get('still_path'):
                 import base64
                 call['reference_b64'] = base64.b64encode(storage.get(spec['still_path'])).decode()

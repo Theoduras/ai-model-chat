@@ -340,9 +340,10 @@ Stay completely in character. Never mention being an AI.
   `staging/` either way, so nothing reaches a fan unreviewed.
   **Her trained LoRA is the other identity lock.** **Text to Video** (`text`) makes a Her LoRA
   still first (`_text_still_call`, the `still` add-on), then animates it on the engine picked
-  (`wan-2-2-gv` or `h3-gv`) with her LoRA attached (`_gen_text_animate`). An explicit Swap is
-  `wan-2-2-char-video`, a redraw of the uploaded clip as her on `char-lora` at
-  `imagegen.LOCK_STRENGTH`; the studio's rating picks the swap engine. Both need a ready LoRA. Explicit Photo to Video on `wan-2-2-gv` or `h3-gv` (H3's sound copied back) is redrawn the same way after it finishes
+  (`wan-2-2-gv` or `h3-gv`) with her LoRA attached (`_gen_text_animate`). An explicit Swap picks
+  `wan-2-2-char-video` (a redraw of the uploaded clip as her on `char-lora` at
+  `imagegen.LOCK_STRENGTH`) or `h3-gv` (the clip's first frame animated on H3, then locked,
+  sound kept); safe work stays on Kling. Both need a ready LoRA. Explicit Photo to Video on `wan-2-2-gv` or `h3-gv` (H3's sound copied back) is redrawn the same way after it finishes
   (the `lock` add-on, on by default, `_gen_lock_urls`); a failed lock delivers the clip as
   it was and refunds the lock.
 - **The video surface is five jobs, not a model picker.** `imagegen.VIDEO_JOBS`
