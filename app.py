@@ -35164,7 +35164,12 @@ def _gen_spec(slug, body, user):
                                'trigger': lora.get('trigger', ''),
                                'examples': lora.get('examples', '')})
         her = _char_lora_entry(slug, family) if family in ('wan', 'h3') else None
-        if her:
+        ask = body.get('her_lora') or {}
+        if her and (ask.get('on') is not False or model == imagegen.CHAR_LORA_VIDEO_MODEL):
+            try:
+                her['scale'] = max(0.0, min(2.0, float(ask.get('scale', her['scale']))))
+            except (TypeError, ValueError):
+                pass
             picked = [her] + picked[:3]
         # A toy clip gets the toy LoRA even when none was ticked: close-up
         # wording picks the close-up pair, anything else the full-body one.
@@ -37124,6 +37129,8 @@ def api_persona_character(slug):
         if not row:
             return jsonify({'ok': True, 'character': None})
         out = _char_json(s, row)
+        state = _char_lora(row.id)
+        out['lora_families'] = [f for f, key in (('wan', 'high'), ('h3', 'h3')) if state.get(key)]
         canon = _char_canonicals(s, row.id)
         out['has_approved'] = bool(canon)
         out['sfw_views'] = [

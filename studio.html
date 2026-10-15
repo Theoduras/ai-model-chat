@@ -3449,6 +3449,7 @@ async function jobPayload() {
     video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
     negative: el('gen-vnegative').value.trim(),
     loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })),
+    her_lora: genHerLora,
     chain_motions: chainPlan() ? genChainMotions.slice(0, chainPlan().length - 1) : [],
     chain_prompts: chainPlan() ? genChainPrompts.slice(0, chainPlan().length - 1) : [],
     chain_identity: genChainIdentity,
@@ -3848,7 +3849,7 @@ async function loadLoras() {
 function renderLoras() {
   const row = el('gen-lora-row');
   if (!row) return;
-  const on = genJob === 'animate' && LORA_VIDEO_MODELS.includes(videoModel());
+  const on = (genJob === 'animate' || genJob === 'text') && LORA_VIDEO_MODELS.includes(videoModel());
   row.style.display = on ? '' : 'none';
   if (!on) return;
   if (genLoras === null) { loadLoras(); return; }
@@ -3859,7 +3860,14 @@ function renderLoras() {
   el('gen-lora-high').placeholder = h3 ? '.safetensors link (https://…)' : 'High-noise .safetensors link (https://…)';
   const mine = genLoras.filter(l => (l.family || 'wan') === loraFamily());
   for (const id in genLoraPick) if (!mine.some(l => l.id === id)) delete genLoraPick[id];
-  el('gen-lora-list').innerHTML = mine.length ? mine.map(l => {
+  const fams = (genCharacter && genCharacter.lora_families) || [];
+  const herTrained = fams.includes(loraFamily());
+  const her = genCharacter && genCharacter.lora === 'ready' ? `<label style="display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin:4px 0${herTrained ? '' : ';opacity:.45'}">
+      <input type="checkbox" ${herTrained && genHerLora.on ? 'checked' : ''} ${herTrained ? '' : 'disabled'} onchange="genHerLora.on = this.checked">
+      <span style="flex:1 1 160px;min-width:0;overflow-wrap:anywhere"><b>Her LoRA — ${esc(genCharacter.name || '')}</b>${herTrained ? '' : ' <small class="hint">Not trained for this engine</small>'}</span>
+      <input type="number" min="0" max="2" step="0.05" style="width:80px" value="${genHerLora.scale}" onchange="genHerLora.scale = +this.value">
+    </label>` : '';
+  el('gen-lora-list').innerHTML = her + (mine.length ? mine.map(l => {
     const off = l.enabled === false;
     if (off) delete genLoraPick[l.id];
     const picked = l.id in genLoraPick;
@@ -3873,8 +3881,10 @@ function renderLoras() {
         <button type="button" class="btn-ai btn-ai-secondary" onclick="editLora('${esc(l.id)}')">Edit</button>
         ${l.locked ? '' : `<button type="button" class="btn-ai btn-ai-secondary" onclick="removeLora('${esc(l.id)}')">×</button>`}` : ''}
     </label>`;
-  }).join('') : '<span class="hint">No LoRAs yet.</span>';
+  }).join('') : '<span class="hint">No LoRAs yet.</span>');
 }
+
+let genHerLora = {on: true, scale: 1};
 
 function toggleLora(id, on) {
   const l = (genLoras || []).find(x => x.id === id);

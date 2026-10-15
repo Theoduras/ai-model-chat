@@ -3128,7 +3128,20 @@ def lora_style(spec):
     triggers = [t.strip() for l in loras for t in (l.get('trigger') or '').split(',') if t.strip()]
     examples = '\n\n'.join((l.get('examples') or '').strip() for l in loras
                             if (l.get('examples') or '').strip())
-    return {'triggers': triggers, 'examples': examples[:3000]} if (triggers or examples) else None
+    her = next((l.get('trigger') or '' for l in loras if l.get('name') == 'Her LoRA'), '')
+    return ({'triggers': triggers, 'examples': examples[:3000], 'her': her}
+            if (triggers or examples) else None)
+
+
+def her_lead(style, text):
+    """With her character LoRA in the stack, the prompt opens on her trigger
+    and says outright that the person becomes her."""
+    her = (style or {}).get('her')
+    if not her or not text:
+        return text
+    lead = (f'{her}, the woman is {her}: replace the person in the source with '
+            f"{her}'s exact face and body.")
+    return lead + ' ' + text.replace(lead, '').strip()
 
 
 def _styled_prompt(idea, base, explicit, style, why=None):
@@ -3150,7 +3163,7 @@ def _styled_prompt(idea, base, explicit, style, why=None):
             + f'Action: {idea.strip()}\n\nBase prompt, for the fixed details: {base} /no_think'},
     ], max_tokens=600, why=why)
     missing = [t for t in triggers if t.lower() not in text.lower()]
-    return (', '.join(missing) + ', ' + text) if text and missing else text
+    return her_lead(style, (', '.join(missing) + ', ' + text) if text and missing else text)
 
 
 def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
@@ -3194,9 +3207,9 @@ def write_h3_action(idea, explicit=False, why=None):
 
 def write_h3_prompt(idea, spec, chained=False, why=None):
     style = lora_style(spec) or {}
-    return h3_prompt(write_h3_action(idea, spec.get('explicit'), why), spec.get('explicit'),
-                     chained, style.get('triggers') or (),
-                     merge_negative(spec.get('negative_extra'), video=True))
+    return her_lead(style, h3_prompt(write_h3_action(idea, spec.get('explicit'), why),
+                                     spec.get('explicit'), chained, style.get('triggers') or (),
+                                     merge_negative(spec.get('negative_extra'), video=True)))
 
 
 # ── Selection ─────────────────────────────────────────────────────────────────
