@@ -1,10 +1,11 @@
 """One-off copy of everything off Google Cloud: every table into another
-Postgres (Neon, for Vercel) and every bucket object into Vercel Blob.
+Postgres (Neon, for Vercel) and every bucket object into Cloudflare R2 or
+Vercel Blob.
 
 It runs from the old Cloud Run service, because that is the only place holding
 both the Cloud SQL socket and the bucket credentials. Both halves are
-idempotent — rows go in with ON CONFLICT DO NOTHING and objects already in Blob
-are skipped — so an interrupted run is finished by pressing Start again.
+idempotent — rows go in with ON CONFLICT DO NOTHING and objects already in the
+target store are skipped — so an interrupted run is finished by pressing Start again.
 Objects keep their paths: the database stores paths, never URLs, so every
 reference stays valid on the new store.
 """
@@ -98,32 +99,66 @@ def _blob_existing(token):
             return have
 
 
-def copy_media(token):
-    if storage.backend() != 'gcs':
-        _log('No GCS bucket configured here, so no media to copy')
+def _r2_client(r2):
+    import boto3
+    from botocore.config import Config
+    return boto3.client(
+        's3', region_name='auto',
+        endpoint_url=f"https://{r2['account_id']}.r2.cloudflarestorage.com",
+        aws_access_key_id=r2['access_key_id'],
+        aws_secret_access_key=r2['secret'],
+        config=Config(signature_version='s3v4'))
+
+
+def _r2_existing(client, bucket):
+    have = set()
+    for page in client.get_paginator('list_objects_v2').paginate(Bucket=bucket):
+        have.update(o['Key'] for o in page.get('Contents') or [])
+    return have
+
+
+def _blob_put(token, name, data, mime):
+    requests.put(
+        storage.BLOB_API + '?pathname=' + urllib.parse.quote(name),
+        data=data, timeout=600, headers={
+            'authorization': 'Bearer ' + token,
+            'x-api-version': storage.BLOB_API_VERSION,
+            'x-content-type': mime,
+            'x-add-random-suffix': '0', 'x-allow-overwrite': '1',
+            'x-vercel-blob-access': 'private'}).raise_for_status()
+
+
+def copy_media(blob_token='', r2=None):
+    # The bucket is checked by name, not storage.backend(): R2 credentials on
+    # this host would make backend() say 'r2' and hide the source.
+    if not storage.bucket_name():
+        _log('GCS_BUCKET is not set here, so no media to copy')
         return
     state['step'] = 'media'
-    have = _blob_existing(token)
+    if r2:
+        client = _r2_client(r2)
+        have = _r2_existing(client, r2['bucket'])
+
+        def put(name, data, mime):
+            client.put_object(Bucket=r2['bucket'], Key=name, Body=data, ContentType=mime)
+    else:
+        have = _blob_existing(blob_token)
+
+        def put(name, data, mime):
+            _blob_put(blob_token, name, data, mime)
     objs = [b for b in storage._bucket().list_blobs()
             if not b.name.endswith('/')
             and not b.name.startswith(storage.STAGING_PREFIX + '/')]
     info = state['media'] = {'total': len(objs), 'copied': 0, 'skipped': 0,
-                             'failed': 0, 'bytes': 0}
+                             'failed': 0, 'bytes': 0,
+                             'target': 'r2' if r2 else 'blob'}
     for b in objs:
         if b.name in have:
             info['skipped'] += 1
             continue
         try:
             data = b.download_as_bytes()
-            r = requests.put(
-                storage.BLOB_API + '?pathname=' + urllib.parse.quote(b.name),
-                data=data, timeout=600, headers={
-                    'authorization': 'Bearer ' + token,
-                    'x-api-version': storage.BLOB_API_VERSION,
-                    'x-content-type': b.content_type or storage.mime_of(b.name),
-                    'x-add-random-suffix': '0', 'x-allow-overwrite': '1',
-                    'x-vercel-blob-access': 'private'})
-            r.raise_for_status()
+            put(b.name, data, b.content_type or storage.mime_of(b.name))
             info['copied'] += 1
             info['bytes'] += len(data)
         except Exception as e:
@@ -133,6 +168,7 @@ def copy_media(token):
 
 NEON_FREE = 512 * 1024 ** 2
 BLOB_FREE = 1024 ** 3
+R2_FREE = 10 * 1024 ** 3
 
 
 def sizes():
@@ -162,7 +198,7 @@ def sizes():
     out['database'] = {'bytes': dbytes, 'after_copy_bytes': after,
                        'fits_free': (after or dbytes) <= NEON_FREE,
                        'largest': largest, 'rows': tables}
-    if storage.backend() == 'gcs':
+    if storage.bucket_name():
         kept = staging = n = 0
         for b in storage._bucket().list_blobs():
             if b.name.startswith(storage.STAGING_PREFIX + '/'):
@@ -171,21 +207,32 @@ def sizes():
                 kept += b.size or 0
                 n += 1
         out['media'] = {'files': n, 'bytes': kept, 'staging_bytes_skipped': staging,
-                        'fits_free': kept <= BLOB_FREE}
+                        'fits_free': kept <= BLOB_FREE, 'fits_r2_free': kept <= R2_FREE}
     else:
-        out['media'] = {'note': 'No bucket configured here'}
+        out['media'] = {'note': 'GCS_BUCKET is not set here'}
     return out
 
 
-def _run(database_url, blob_token, trim, compress):
+def _r2_target(r2):
+    r2 = {k: (v or '').strip() for k, v in (r2 or {}).items()}
+    need = ('account_id', 'access_key_id', 'secret', 'bucket')
+    if not any(r2.get(k) for k in need):
+        return None
+    missing = [k for k in need if not r2.get(k)]
+    if missing:
+        raise ValueError('R2 is missing ' + ', '.join(missing))
+    return r2
+
+
+def _run(database_url, blob_token, r2, trim, compress):
     try:
         if compress:
             state['step'] = 'compressing images'
             compress()
         if database_url:
             copy_tables(_target_engine(database_url), trim)
-        if blob_token:
-            copy_media(blob_token)
+        if r2 or blob_token:
+            copy_media(blob_token, r2)
         state['done'] = True
         state['step'] = 'finished'
     except Exception as e:
@@ -195,12 +242,13 @@ def _run(database_url, blob_token, trim, compress):
         state['running'] = False
 
 
-def start(database_url, blob_token, trim=True, compress=None):
+def start(database_url, blob_token, r2=None, trim=True, compress=None):
+    r2 = _r2_target(r2)
     with _lock:
         if state['running']:
             return False
         state.update(running=True, step='starting', tables={}, media={},
                      error='', done=False)
-    threading.Thread(target=_run, args=(database_url, blob_token, trim, compress),
+    threading.Thread(target=_run, args=(database_url, blob_token, r2, trim, compress),
                      daemon=True).start()
     return True
