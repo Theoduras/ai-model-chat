@@ -35133,7 +35133,7 @@ def _gen_spec(slug, body, user):
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
     # Explicit Photo to Video is redrawn as her afterwards (face and body, from
     # her LoRA), so whoever the photo showed ends up as her. On unless asked off.
-    if (job == 'animate' and level != 'sfw' and model == 'wan-2-2-gv'
+    if (job == 'animate' and level != 'sfw' and model in ('wan-2-2-gv', 'h3-gv')
             and not spec.get('chain') and GEN_HAS_WORKER
             and body.get('lock') is not False and _char_lora_entry(slug)):
         spec['lock'] = True
@@ -38826,6 +38826,19 @@ GEN_LOCK_POLLS = int(os.getenv('GEN_LOCK_POLLS', '120'))
 GEN_LOCK_POLL_SECONDS = 15
 
 
+def _lock_keep_sound(job_id, locked, original):
+    """The redraw is silent; an H3 clip's own sound goes back onto it."""
+    import base64
+    try:
+        data, _ = imagegen.fetch_result(locked)
+        source, _ = imagegen.fetch_result(original)
+        data = imagegen.copy_audio(data, source)
+        return 'data:video/mp4;base64,' + base64.b64encode(data).decode()
+    except Exception as e:
+        logger.warning('generation job=%s lock sound not kept: %s', job_id, str(e)[:200])
+        return locked
+
+
 def _gen_lock_urls(job_id, slug, spec, workspace, urls):
     """Redraw each finished clip as her with her LoRA (the face-and-body lock).
     A failed lock hands back the clip as it was and returns the lock's tokens:
@@ -38857,6 +38870,8 @@ def _gen_lock_urls(job_id, slug, spec, workspace, urls):
                     logger.warning('generation job=%s lock poll: %s', job_id, e)
             if result.status == 'done' and result.urls:
                 locked = result.urls[0]
+                if spec.get('model') == 'h3-gv':
+                    locked = _lock_keep_sound(job_id, locked, url)
             else:
                 logger.warning('generation job=%s lock gave nothing: %s',
                                job_id, result.error or result.status)

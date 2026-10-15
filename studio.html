@@ -2088,7 +2088,7 @@ function renderGenForm() {
   el('gen-video-form').style.display = animate || genJob === 'text' ? 'flex' : 'none';
   el('gen-anim-photo-row').style.display = animate ? '' : 'none';
   el('gen-lock-row').style.display = animate && genRating === 'nsfw' && herLoraReady()
-    && videoModel() === 'wan-2-2-gv' ? 'flex' : 'none';
+    && ['wan-2-2-gv', 'h3-gv'].includes(videoModel()) ? 'flex' : 'none';
   if (animate) renderAnimPhotos();
   el('gen-video-note').style.display = animate ? '' : 'none';
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';

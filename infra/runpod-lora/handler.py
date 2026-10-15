@@ -187,6 +187,9 @@ def pipeline():
                    for k in ('transformer', 'transformer_2')}
         _pipe['pipe'] = WanPipeline.from_pretrained(PIPE_REPO, torch_dtype=torch.bfloat16,
                                                     **experts).to('cuda')
+        # The VAE in fp32: the video-to-video pipeline encodes its source frames
+        # as fp32, and Wan's VAE is meant to run in fp32 anyway.
+        _pipe['pipe'].vae.to(torch.float32)
         _pipe['loras'] = None
     return _pipe['pipe']
 

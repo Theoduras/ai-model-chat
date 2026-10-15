@@ -341,7 +341,7 @@ Stay completely in character. Never mention being an AI.
   **Her trained LoRA is the other identity lock.** **Text to Video** (`text`) and the
   `wan-2-2-char-video` Swap make clips from her LoRA alone on the `char-lora` endpoint (T2V,
   or a redraw of an uploaded clip at `imagegen.LOCK_STRENGTH`), offered only with a ready
-  LoRA. Explicit Photo to Video on `wan-2-2-gv` is redrawn the same way after it finishes
+  LoRA. Explicit Photo to Video on `wan-2-2-gv` or `h3-gv` (H3's sound copied back) is redrawn the same way after it finishes
   (the `lock` add-on, on by default, `_gen_lock_urls`); a failed lock delivers the clip as
   it was and refunds the lock.
 - **The video surface is five jobs, not a model picker.** `imagegen.VIDEO_JOBS`
