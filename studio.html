@@ -3627,19 +3627,22 @@ function animPhotos() {
 }
 
 let genAnimPick = '';
+const ANIM_NONE = '-';
 
 function renderAnimPhotos() {
   const box = el('gen-anim-photo');
   if (!box) return;
   const photos = animPhotos();
-  if (!photos.some(v => v.id === genAnimPick)) {
+  // ANIM_NONE is a removed photo: without it the first vault photo would come straight back.
+  if (genAnimPick !== ANIM_NONE && !photos.some(v => v.id === genAnimPick)) {
     let saved = '';
     try { saved = localStorage.getItem('anim_pick_' + slug()) || ''; } catch (e) {}
-    genAnimPick = photos.some(v => v.id === saved) ? saved
+    genAnimPick = saved === ANIM_NONE || photos.some(v => v.id === saved) ? saved
       : (photos.length ? photos[0].id : '');
   }
   const cur = photos.find(v => v.id === genAnimPick);
-  box.innerHTML = VaultPicker.field({ items: cur ? [cur] : [], open: "openPhotoPick('anim')",
+  box.innerHTML = VaultPicker.field({ items: cur ? [cur] : [], remove: 'removeAnimPhoto',
+    open: "openPhotoPick('anim')",
     label: cur ? 'Change photo' : 'Choose from vault', empty: 'A clip starts from one of her photos.' });
   loadMotionIdeas();
   renderLoras();
@@ -3908,7 +3911,11 @@ function writeFromMotion() {
 }
 
 function animPhoto() {
-  return genAnimPick;
+  return genAnimPick === ANIM_NONE ? '' : genAnimPick;
+}
+
+function removeAnimPhoto() {
+  pickAnimPhoto(ANIM_NONE);
 }
 
 // A reel may start from a photo or from nothing, so this picker toggles rather
