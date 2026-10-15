@@ -34981,6 +34981,11 @@ def _gen_spec(slug, body, user):
     elif job == 'text':
         if not spec['prompt_extra'] and not (body.get('motion') or '').strip():
             raise imagegen.GenerationError('Write what she does in the clip.')
+        if not _char_lora_entry(slug):
+            raise imagegen.GenerationError(
+                'Train her LoRA first — the clip starts from a photo made with it.')
+        spec['text_stage'] = 'still'
+        spec['addons'].append('still')
     elif job == 'reel':
         # The one video path that may run from a prompt alone, and therefore
         # the one that claims to be nobody. It still lands unapproved in
@@ -38462,7 +38467,13 @@ def _gen_start(job_id, slug, spec, workspace):
             if ref_b64:
                 call['reference_b64'] = ref_b64
                 call['reference_mime'] = ref_mime
-            if spec.get('undress'):
+            if spec.get('still_path'):
+                import base64
+                call['reference_b64'] = base64.b64encode(storage.get(spec['still_path'])).decode()
+                call['reference_mime'] = 'image/png'
+            if spec.get('text_stage') == 'still':
+                provider_job, result = provider.submit_image(_text_still_call(slug, spec))
+            elif spec.get('undress'):
                 call['prompt'] = UNDRESS_PROMPT
                 call['async_delivery'] = True
                 provider_job, result = provider.submit_image(call)
@@ -38644,10 +38655,58 @@ def _gen_start(job_id, slug, spec, workspace):
                               **({'spec_json': json.dumps(spec)} if spec.get('sent') else {}))
         finally:
             s.close()
-        if result.status == 'done':
+        if result.status == 'done' and spec.get('text_stage') == 'still':
+            _gen_text_animate(job_id, slug, spec, workspace, provider_job, result.urls[0])
+        elif result.status == 'done':
             _gen_finish(job_id, slug, spec, workspace, result.urls)
         elif result.status == 'failed':
             _gen_fail(job_id, workspace, result.error or 'generation failed')
+
+
+def _text_still_call(slug, spec):
+    """Text to Video's first step: one photo of her from her LoRA, in the
+    clip's frame shape, showing the opening moment of what she does."""
+    her = _char_lora_entry(slug)
+    if not her:
+        raise imagegen.GenerationError('Her LoRA is no longer there.')
+    action = (spec.get('prompt_extra') or spec.get('motion') or '').strip()
+    text = _gen_image_prompt(slug, dict(spec, prompt_full=True, prompt_extra=(
+        f'Photo of her at the start of this moment: {action}')), False)
+    aspect = spec.get('aspect') if spec.get('aspect') in imagegen.IMAGE_LORA_PX else '9:16'
+    return {'model': imagegen.CHAR_LORA_IMAGE_MODEL, 'aspect': aspect, 'seed': spec.get('seed'),
+            'loras': [her], 'negative': imagegen.merge_negative(spec.get('negative_extra')),
+            'prompt': ', '.join(t for t in [her.get('trigger', '')] if t) + ', ' + text}
+
+
+def _gen_text_animate(job_id, slug, spec, workspace, provider_job, url):
+    """The still is done: keep it and animate it on the job's own engine."""
+    from db import GenerationJob, update_generation
+    s = _db_session()
+    try:
+        won = (s.query(GenerationJob)
+               .filter(GenerationJob.id == job_id,
+                       GenerationJob.provider_job_id.in_((provider_job, provider_job or '')))
+               .update({'provider_job_id': 'chaining:' + (provider_job or '')},
+                       synchronize_session=False))
+        s.commit()
+    finally:
+        s.close()
+    if not won:
+        return
+    try:
+        data, mime = imagegen.fetch_result(url)
+        spec['still_path'] = storage.put(slug, data, mime or 'image/png')
+    except Exception as e:
+        logger.exception('text job=%s: still unreadable', job_id)
+        _gen_fail(job_id, workspace, str(e)[:200] or 'her photo could not be read')
+        return
+    spec['text_stage'] = 'clip'
+    s = _db_session()
+    try:
+        update_generation(s, job_id, spec_json=json.dumps(spec))
+    finally:
+        s.close()
+    _gen_start(job_id, slug, spec, workspace)
 
 
 def _video_sent(call, provider_name):
@@ -39004,6 +39063,8 @@ def _gen_advance(row):
     except ValueError:
         spec = {}
     parts = len((spec.get('chain') or {}).get('plan') or ()) or 1
+    if spec.get('job') == 'text':
+        parts += 1
     if age > GEN_JOB_TIMEOUT * parts:
         logger.warning('generation job %s timed out after %.0fs', job_id, age)
         _gen_fail(job_id, workspace, 'the provider never finished')
@@ -39036,7 +39097,9 @@ def _gen_advance(row):
         # Some of the batch never arrived: deliver what did, and the settle
         # returns the rest.
         result.status = 'done'
-    if result.status == 'done' and result.urls and spec.get('chain'):
+    if result.status == 'done' and result.urls and spec.get('text_stage') == 'still':
+        _gen_text_animate(job_id, slug, spec, workspace, provider_job, result.urls[0])
+    elif result.status == 'done' and result.urls and spec.get('chain'):
         _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job,
                         result.urls[0])
     elif result.status == 'done' and result.urls:

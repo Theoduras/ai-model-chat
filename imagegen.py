@@ -258,7 +258,9 @@ VIDEO_JOBS = {
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
-                          + (RUNPOD_MODELS if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
+                          + (tuple(m for m in RUNPOD_MODELS
+                                   if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL))
+                             if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
                           + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
@@ -268,7 +270,9 @@ VIDEO_JOBS = {
                 'label': 'Photo to Video',
                 'note': 'One of her approved photos, brought to life as a clip.'},
     # Her trained LoRA is the identity here: no photo behind the clip.
-    'text': {'models': (CHAR_LORA_VIDEO_MODEL,), 'needs': (), 'kind': 'video',
+    # A photo of her from her LoRA first, then that photo animated on the
+    # engine picked here with her LoRA attached: the first frame is already her.
+    'text': {'models': ('wan-2-2-gv', 'h3-gv'), 'needs': (), 'kind': 'video',
              'open': ('sfw', 'nsfw'), 'label': 'Text to Video',
              'note': 'Her LoRA and your prompt — no photo needed.'},
     'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),

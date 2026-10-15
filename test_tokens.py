@@ -643,7 +643,8 @@ def test_wan22_on_runpod():
               gv['lora_pairs'] == [{'high': 'https://h/a.safetensors', 'low': 'https://h/b.safetensors',
                                     'high_weight': 0.8, 'low_weight': 0.8}]
               and gv['seed'] == 7 and gv['length'] == 81
-              and IG2.LORA_VIDEO_MODELS == ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv'))
+              and IG2.LORA_VIDEO_MODELS == ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv',
+                                            IG2.CHAR_LORA_VIDEO_MODEL))
         h3 = IG2.h3_payload(dict(spec, model='h3-gv', seconds=5, seed=7, loras=[
             {'name': 'n', 'high': 'https://h/c.safetensors', 'low': '', 'scale': 0.6}]), 'img')['input']
         wf = h3['workflow']

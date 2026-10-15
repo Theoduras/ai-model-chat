@@ -747,7 +747,7 @@
         <span class="hint">Costs the same whichever you pick — the same pixels, a different shape.</span>
       </div>
       <div class="gen-form" id="gen-swap-out" style="display:none">
-        <label class="gen-f"><span>What to do with the clip</span>
+        <label class="gen-f" style="display:none"><span>What to do with the clip</span>
           <select id="gen-smodel" onchange="genQuote(); syncSwapKling()"></select></label>
         <label class="gen-f"><span>Clip size</span>
           <select id="gen-sres" onchange="genQuote()"></select></label>
@@ -2622,9 +2622,11 @@ function picksBefore(ssecs) {
   return ssecs.dataset.clip === 'locked' && swapTakesDuration();
 }
 
+// The rating picks the swap engine: safe work on Kling motion control, any
+// explicit rating redrawn as her with her LoRA.
 function swapModel() {
-  const picked = (el('gen-smodel') || {}).value;
-  if (picked && swapModels().includes(picked)) return picked;
+  const want = genRating === 'sfw' ? 'kling-3-0-mc' : 'wan-2-2-char-video';
+  if (swapModels().includes(want)) return want;
   return (genPrices && genPrices.default_swap_model) || swapModels()[0];
 }
 

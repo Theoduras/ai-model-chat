@@ -169,6 +169,8 @@ ADDON_COST_USD = {
     # Face-and-body lock: the finished clip redrawn as her with her LoRA on the
     # char-lora endpoint. Unmeasured; priced like a 5s Her LoRA clip plus margin.
     'lock': 0.60,
+    # Text to Video's first step: one Her LoRA still (the wan-2-2-char price).
+    'still': 0.08,
 }
 
 
@@ -252,6 +254,7 @@ ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),
     'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
     'lock': credits_for_cost(ADDON_COST_USD['lock']),
+    'still': credits_for_cost(ADDON_COST_USD['still']),
 }
 
 
