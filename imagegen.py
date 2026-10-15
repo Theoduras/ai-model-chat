@@ -159,7 +159,7 @@ if _GV:
 # Our MiniMax H3 endpoint (infra/runpod-h3): image to video with its own audio.
 # Its weights are Blackwell-only (nvfp4, w6a8), so the endpoint runs RTX PRO 6000s.
 # The id is the default so no host needs config; set the variable empty to drop it.
-_H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'szk0bfj0wywyyv').strip().rstrip('/')
+_H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'fgt7mgn43o4lfg').strip().rstrip('/')
 if _H3:
     RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
@@ -172,12 +172,15 @@ if _LORA_EP:
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
-# Our own models on Vast Serverless (infra/vast), by endpoint name. With
-# VAST_API_KEY set they run there instead of on RunPod, same payloads.
+# Our own models on Vast Serverless (infra/vast), by endpoint name. Only with
+# VAST_ENABLED=1 (and VAST_API_KEY) do they run there instead of on RunPod, same
+# payloads: the key alone left every explicit clip routed to Vast endpoints that
+# no longer existed.
 VAST_API_KEY = (os.getenv('VAST_API_KEY') or '').strip()
 VAST_ENDPOINTS = {m: os.getenv(f'VAST_{m.upper().replace("-", "_")}_ENDPOINT', m)
                   for m in ('wan-2-2-gv', 'h3-gv', CHAR_LORA_IMAGE_MODEL)}
-VAST_MODELS = tuple(VAST_ENDPOINTS) if VAST_API_KEY else ()
+VAST_MODELS = (tuple(VAST_ENDPOINTS)
+               if VAST_API_KEY and os.getenv('VAST_ENABLED', '').strip() == '1' else ())
 for _m in VAST_MODELS:
     RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
@@ -246,7 +249,7 @@ VIDEO_JOBS = {
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
-                          + (RUNPOD_MODELS if RUNPOD_API_KEY or VAST_API_KEY else ('wan-2-7',))
+                          + (RUNPOD_MODELS if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
                           + ('p-video-animate',),
                 'needs': ('first_frame',),
                 'kind': 'video',
