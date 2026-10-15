@@ -165,7 +165,8 @@ if _H3:
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
 # character's approved photos, and makes stills from the same base with it.
 CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
-_LORA_EP = os.getenv('RUNPOD_LORA_ENDPOINT', '').strip().rstrip('/')
+# The id is the default so the LoRA never depends on host config; set it empty to drop it.
+_LORA_EP = os.getenv('RUNPOD_LORA_ENDPOINT', 'x6e9ylow7ss8pa').strip().rstrip('/')
 if _LORA_EP:
     RUNPOD_ENDPOINTS[CHAR_LORA_IMAGE_MODEL] = (
         _LORA_EP if '/' in _LORA_EP else f'https://api.runpod.ai/v2/{_LORA_EP}')
