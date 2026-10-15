@@ -1064,6 +1064,9 @@ async function loadCharacterBadge() {
                    : 'no approved photos yet, so the vault photos are used.')
     + (missing.length
       ? `<br>Missing: ${missing.map(v => esc(v.label)).join(', ')} — <a href="/characters?id=${esc(c.id)}">approve them</a> for a closer match.` : '')
+    + (c.lora === 'ready'
+      ? '<br>Her LoRA: trained. Photos use it with the <b>Her LoRA</b> engine; Explicit Video Realism Pro clips always carry it.'
+      : c.lora === 'training' ? '<br>Her LoRA: still training.' : '')
     + '<br><small>Safe-work shots only ever receive her safe-work photos.</small>';
 }
 document.addEventListener('change', e => {
