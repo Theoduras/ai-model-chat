@@ -124,7 +124,8 @@ requirements.txt                — Python deps: flask, google-genai, python-dot
 | `GET/POST /api/bio/{slug}` | JSON | Link-in-bio editor read / save (editor is `/embed-setup`, sidebar "Link in bio"; renderer shared in `js/bio-render.js`). `me` is the caller's account page (`acct-<workspace>`), no chat button |
 | `GET /free-link-in-bio` | — | Free tool: build a bio page signed out; Save keeps it in `localStorage.bio_draft`, signup, and the dashboard publishes it via `/embed-setup?persona=me&draft=1` |
 | `GET/POST /verify-email` | — | Unverified sign-up's holding page / resend; `/verify-email/{token}` verifies and continues the sign-up |
-| `GET /unsubscribe/{token}` | — | Marketing-email opt-out (token from `_unsubscribe_url`) |
+| `GET/POST /unsubscribe/{token}` | — | Marketing-email opt-out (token from `_unsubscribe_url`; POST is mail clients' one-click) |
+| `GET/POST /admin/email` | form | Super admin: plain-text email to opted-in users by plan, test send, last-send progress |
 | `GET /signup-{code}` | — | Tracked register link: counts the click, and the account made after it (`/admin/register-links`) |
 
 ---
@@ -243,7 +244,10 @@ Stay completely in character. Never mention being an AI.
   `_require_verified_email` sends app pages to `/verify-email` and answers API
   calls 403 `verify: true`. Every account is opted in to platform email unless
   `email_opt_out` is True (unsubscribe link or admin user page); a marketing
-  email must carry `_unsubscribe_url`.
+  email must carry `_unsubscribe_url`. `/admin/email` sends only to verified,
+  opted-in, non-guest, non-banned accounts, one message each with its own
+  `List-Unsubscribe` headers, from a thread whose progress lives in the
+  `email_broadcast` app setting (one run at a time).
 - **Characters are unlimited on every plan; personas are what a plan limits.**
   A character's own persona is a hidden `studio_only` home (`_CHAR_HOME`),
   skipped by `_persona_count` and the persona lists (except `?studio=1`), so it

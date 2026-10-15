@@ -6550,7 +6550,7 @@ def _smtp_config():
     }
 
 
-def _send_email(to_emails, subject, body):
+def _send_email(to_emails, subject, body, headers=None):
     """Send a plain-text email over SMTP. True only if the send succeeded."""
     cfg = _smtp_config()
     if not cfg or not to_emails:
@@ -6561,6 +6561,8 @@ def _send_email(to_emails, subject, body):
     msg['Subject'] = subject
     msg['From'] = cfg['from']
     msg['To'] = ', '.join(to_emails)
+    for k, v in (headers or {}).items():
+        msg[k] = v
     try:
         with smtplib.SMTP(cfg['host'], cfg['port'], timeout=10) as server:
             server.starttls()
@@ -6662,7 +6664,8 @@ def verify_email_token(token):
     return _after_signup_redirect()
 
 
-@app.route('/unsubscribe/<token>')
+# POST is the one-click unsubscribe mail clients send from List-Unsubscribe-Post.
+@app.route('/unsubscribe/<token>', methods=['GET', 'POST'])
 def unsubscribe(token):
     from itsdangerous import BadSignature
     from db import User
@@ -8608,6 +8611,161 @@ def admin_video_image(job_id, key):
     return Response(data, mimetype=mime, headers={'Cache-Control': 'private, max-age=3600'})
 
 
+ADMIN_EMAIL_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="color-scheme" content="light dark"><script src="/js/theme.js"></script>
+<title>Email users</title><style>""" + ACCOUNT_CSS + """
+textarea{width:100%;min-height:220px;box-sizing:border-box;font:inherit;padding:10px;border-radius:8px;
+border:1px solid var(--border,#333);background:transparent;color:inherit;margin-bottom:14px}
+.row{display:flex;gap:10px;flex-wrap:wrap}.row button{flex:1}
+.ok{color:#22c55e}
+</style>{% if last and last.running %}<meta http-equiv="refresh" content="5">{% endif %}</head>
+<body data-page="admin-email"><div class="wrap wide">
+<div class="bar"><span>Email users</span><a href="/admin/hub">Admin</a></div>
+{% if error %}<div class="err">{{ error }}</div>{% endif %}
+{% if saved %}<div class="sub ok">{{ saved }}</div>{% endif %}
+{% if not smtp %}<div class="err">SMTP is not configured (SMTP_HOST), so nothing can be sent.</div>{% endif %}
+<div class="card"><h2>New email</h2>
+<p class="sub">Plain text. Goes to verified accounts that haven't unsubscribed. <code>{name}</code> becomes each user's name; an unsubscribe link is added at the bottom.</p>
+<form method="post" id="f">
+<label>Audience</label><select name="audience" id="aud">
+{% for key, label in audiences %}<option value="{{ key }}" data-n="{{ counts[key] }}"{% if key == audience %} selected{% endif %}>{{ label }} ({{ counts[key] }})</option>{% endfor %}
+</select>
+<label>Subject</label><input type="text" name="subject" required maxlength="200" value="{{ subject or '' }}">
+<label>Message</label><textarea name="body" required>{{ body or '' }}</textarea>
+<div class="row">
+<button type="submit" name="action" value="test">Send test to me</button>
+<button type="submit" name="action" value="send" onclick="var n=document.getElementById('aud').selectedOptions[0].dataset.n;return confirm('Send this email to '+n+' users?')">Send to users</button>
+</div></form></div>
+{% if last %}<div class="card" style="margin-top:16px"><h2>Last send</h2>
+<p class="sub">{{ last.subject }} · {{ last.audience }} · by {{ last.by }} · {{ last.started }}</p>
+<p class="sub">{% if last.running %}Sending… {% elif last.done %}Done. {% else %}Stopped. {% endif %}{{ last.sent }} sent, {{ last.failed }} failed, of {{ last.total }}.</p></div>{% endif %}
+</div></body></html>"""
+
+EMAIL_BROADCAST_SETTING = 'email_broadcast'
+_BROADCAST_AUDIENCES = [('all', 'All opted-in'), ('free', 'Free plan'),
+                        ('paying', 'Paying'), ('unpaid', 'Unpaid or expired')]
+# A run whose last progress write is older than this died with its instance.
+_BROADCAST_STALE = 600
+
+
+def _broadcast_recipients(s, audience):
+    from sqlalchemy import or_
+    from db import User
+    q = s.query(User).filter(or_(User.email_opt_out.is_(None), User.email_opt_out.is_(False)),
+                             User.email_verify_token.is_(None),
+                             ~User.status.in_(('deleted', 'banned')),
+                             ~User.email.endswith(GUEST_DOMAIN))
+    if audience == 'free':
+        q = q.filter(User.tier == FREE_TIER_KEY)
+    elif audience == 'paying':
+        q = q.filter(User.status == 'active', ~User.tier.in_(_UNPAID_TIERS), User.tier != '')
+    elif audience == 'unpaid':
+        q = q.filter(or_(User.status != 'active', User.tier == '', User.tier.is_(None)))
+    return q.all()
+
+
+def _broadcast_message(user_id, body, name):
+    url = _unsubscribe_url(user_id)
+    text = (body.replace('{name}', name or 'there')
+            + '\n\n--\nYou get this because you have an account with us. Unsubscribe: ' + url)
+    return text, {'List-Unsubscribe': '<%s>' % url,
+                  'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click'}
+
+
+def _broadcast_state(s):
+    from db import get_app_setting
+    try:
+        st = json.loads(get_app_setting(s, EMAIL_BROADCAST_SETTING) or '{}')
+    except ValueError:
+        st = {}
+    if st:
+        st['running'] = not st.get('done') and time.time() - st.get('updated', 0) < _BROADCAST_STALE
+    return st
+
+
+def _save_broadcast_state(st):
+    from db import set_app_setting
+    s = _db_session()
+    try:
+        st['updated'] = time.time()
+        set_app_setting(s, EMAIL_BROADCAST_SETTING, json.dumps(st))
+        s.commit()
+    finally:
+        s.close()
+
+
+def _run_broadcast(st, subject, messages):
+    for i, (email, text, headers) in enumerate(messages, 1):
+        if _send_email([email], subject, text, headers=headers):
+            st['sent'] += 1
+        else:
+            st['failed'] += 1
+        if i % 10 == 0:
+            _save_broadcast_state(st)
+        time.sleep(0.2)
+    st['done'] = True
+    _save_broadcast_state(st)
+    logger.info('EMAIL BROADCAST done by=%s audience=%s total=%d sent=%d failed=%d',
+                st['by'], st['audience'], st['total'], st['sent'], st['failed'])
+
+
+@app.route('/admin/email', methods=['GET', 'POST'])
+def admin_email():
+    blocked = _require_super_admin()
+    if blocked:
+        return blocked
+    me = _current_user()
+    audience = request.form.get('audience', 'all')
+    if audience not in dict(_BROADCAST_AUDIENCES):
+        audience = 'all'
+    subject = (request.form.get('subject') or '').strip()
+    body = (request.form.get('body') or '').replace('\r\n', '\n').strip()
+    error = saved = ''
+    s = _db_session()
+    try:
+        last = _broadcast_state(s)
+        if request.method == 'POST':
+            action = request.form.get('action')
+            if not _smtp_config():
+                error = 'SMTP is not configured, so nothing can be sent.'
+            elif not subject or not body:
+                error = 'Write a subject and a message.'
+            elif action == 'test':
+                text, headers = _broadcast_message(me['id'], body, me.get('name'))
+                if _send_email([me['email']], subject, text, headers=headers):
+                    saved = 'Test sent to %s.' % me['email']
+                else:
+                    error = 'The test could not be sent. Check the SMTP settings.'
+            elif action == 'send':
+                if last.get('running'):
+                    error = 'A send is still running. Wait for it to finish.'
+                else:
+                    messages = [(u.email,) + _broadcast_message(u.id, body, u.name)
+                                for u in _broadcast_recipients(s, audience)]
+                    if not messages:
+                        error = 'Nobody in that audience.'
+                    else:
+                        last = {'subject': subject, 'audience': dict(_BROADCAST_AUDIENCES)[audience],
+                                'total': len(messages), 'sent': 0, 'failed': 0,
+                                'by': me['email'], 'done': False,
+                                'started': datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M UTC')}
+                        _save_broadcast_state(last)
+                        logger.info('EMAIL BROADCAST start by=%s audience=%s total=%d',
+                                    me['email'], audience, len(messages))
+                        threading.Thread(target=_run_broadcast, args=(dict(last), subject, messages),
+                                         daemon=True).start()
+                        last['running'] = True
+                        saved = 'Sending to %d users.' % len(messages)
+                        subject = body = ''
+        counts = {k: len(_broadcast_recipients(s, k)) for k, _ in _BROADCAST_AUDIENCES}
+    finally:
+        s.close()
+    return render_template_string(ADMIN_EMAIL_HTML, audiences=_BROADCAST_AUDIENCES, counts=counts,
+                                  audience=audience, subject=subject, body=body, last=last,
+                                  error=error, saved=saved, smtp=bool(_smtp_config()))
+
+
 _ADMIN_PAGES = [
     ('Users', '/admin/users', 'Accounts, plans, roles'),
     ('Media', '/admin/media', 'Every uploaded photo and clip: compress, delete'),
@@ -8617,6 +8775,7 @@ _ADMIN_PAGES = [
     ('Demos', '/admin/demos', 'Demo sessions'),
     ('Trials', '/admin/trials', 'Free-trial links and redemptions'),
     ('Register links', '/admin/register-links', 'Tracked signup links'),
+    ('Email users', '/admin/email', 'Email every opted-in account'),
     ('Permissions', '/admin/permissions', 'What admin seats may do'),
     ('Video log', '/admin/videos', 'Prompts, LoRAs and settings each video ran with'),
     ('X chats', '/admin/xchats', 'X DM conversations'),
