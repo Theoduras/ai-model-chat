@@ -13,3 +13,4 @@ aiohttp
 google-cloud-storage
 requests
 Pillow
+boto3

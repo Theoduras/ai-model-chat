@@ -65,12 +65,36 @@ def _blob_token():
     return (os.getenv('BLOB_READ_WRITE_TOKEN') or '').strip()
 
 
+def _r2_bucket():
+    return (os.getenv('R2_BUCKET') or '').strip()
+
+
+_s3 = [None]
+
+
+def _r2():
+    """Cloudflare R2 speaks the S3 API, so boto3 covers signing, ranges and
+    lifecycle rules with no Cloudflare-specific code."""
+    if _s3[0] is None:
+        import boto3
+        from botocore.config import Config
+        _s3[0] = boto3.client(
+            's3', region_name='auto',
+            endpoint_url=f"https://{os.getenv('R2_ACCOUNT_ID', '').strip()}.r2.cloudflarestorage.com",
+            aws_access_key_id=os.getenv('R2_ACCESS_KEY_ID', '').strip(),
+            aws_secret_access_key=os.getenv('R2_SECRET_ACCESS_KEY', '').strip(),
+            config=Config(signature_version='s3v4'))
+    return _s3[0]
+
+
 def backend():
     """Which store is configured. An explicit STORAGE_BACKEND wins, so a host
     holding credentials for both can still be pinned to one."""
     pick = (os.getenv('STORAGE_BACKEND') or '').strip().lower()
-    if pick in ('gcs', 'blob'):
+    if pick in ('gcs', 'blob', 'r2'):
         return pick
+    if _r2_bucket():
+        return 'r2'
     if bucket_name():
         return 'gcs'
     if _blob_token():
@@ -250,6 +274,9 @@ def replace(path, data, mime, compress=True):
     mime = mime or 'application/octet-stream'
     if compress:
         data = compress_image(data, mime)
+    if backend() == 'r2':
+        _r2().put_object(Bucket=_r2_bucket(), Key=path, Body=data, ContentType=mime)
+        return path
     if backend() == 'blob':
         _blob('PUT', '?pathname=' + urllib.parse.quote(path), body=data,
               headers={'x-content-type': mime, 'x-add-random-suffix': '0',
@@ -261,6 +288,8 @@ def replace(path, data, mime, compress=True):
 
 
 def get(path):
+    if backend() == 'r2':
+        return _r2().get_object(Bucket=_r2_bucket(), Key=path)['Body'].read()
     if backend() == 'blob':
         # The bytes come from the store's own host, not the API — the API's
         # ?url= form answers with the blob's metadata, not its content.
@@ -275,6 +304,9 @@ def get(path):
 
 def delete(path):
     try:
+        if backend() == 'r2':
+            _r2().delete_object(Bucket=_r2_bucket(), Key=path)
+            return
         if backend() == 'blob':
             _blob('POST', '/delete', body=json.dumps({'urls': [_blob_url(path)]}),
                   headers={'content-type': 'application/json'})
@@ -312,6 +344,11 @@ def promote(path):
     if not path or not path.startswith(STAGING_PREFIX + '/'):
         return path
     dest = KEPT_PREFIX + path[len(STAGING_PREFIX):]
+    if backend() == 'r2':
+        _r2().copy_object(Bucket=_r2_bucket(), Key=dest,
+                          CopySource={'Bucket': _r2_bucket(), 'Key': path})
+        delete(path)
+        return dest
     if backend() == 'blob':
         _blob('PUT', '?pathname=' + urllib.parse.quote(dest) +
               '&fromUrl=' + urllib.parse.quote(_blob_url(path)),
@@ -369,6 +406,12 @@ def signed_url(path, ttl=None, disposition=None):
     cannot be built is not worth a 502 on an image that is right there."""
     if backend() == 'blob':
         return None
+    if backend() == 'r2':
+        params = {'Bucket': _r2_bucket(), 'Key': path}
+        if disposition:
+            params['ResponseContentDisposition'] = disposition
+        return _r2().generate_presigned_url('get_object', Params=params,
+                                            ExpiresIn=ttl or signed_url_ttl())
     blob = _bucket().blob(path)
     expiry = timedelta(seconds=ttl or signed_url_ttl())
     extra = {'response_disposition': disposition} if disposition else {}
@@ -399,6 +442,11 @@ def signed_upload_url(path, mime, ttl=None):
     its CORS config for a browser to use it; a caller that gets None here posts
     through the server instead and lives with the cap.
     """
+    if backend() == 'r2':
+        return _r2().generate_presigned_url(
+            'put_object', ExpiresIn=ttl or signed_url_ttl(),
+            Params={'Bucket': _r2_bucket(), 'Key': path,
+                    'ContentType': mime or 'application/octet-stream'})
     if backend() != 'gcs':
         return None
     blob = _bucket().blob(path)
@@ -431,6 +479,9 @@ def read_range(path, start, length):
     """Some bytes out of a stored object. `start` may be negative, meaning that
     many bytes from the end — which is where an MP4 written without faststart
     keeps the header we need to read."""
+    if backend() == 'r2':
+        rng = f'bytes={start}' if start < 0 else f'bytes={start}-{start + length - 1}'
+        return _r2().get_object(Bucket=_r2_bucket(), Key=path, Range=rng)['Body'].read()
     if backend() == 'blob':
         import requests
         if start < 0:
@@ -455,6 +506,8 @@ def read_range(path, start, length):
 
 
 def size_of(path):
+    if backend() == 'r2':
+        return int(_r2().head_object(Bucket=_r2_bucket(), Key=path)['ContentLength'])
     if backend() == 'blob':
         import requests
         resp = requests.get(_blob_url(path), timeout=60, stream=True,
@@ -477,6 +530,11 @@ def all_sizes():
             cursor = body.get('cursor')
             if not body.get('hasMore') or not cursor:
                 return out
+    if backend() == 'r2':
+        out = {}
+        for page in _r2().get_paginator('list_objects_v2').paginate(Bucket=_r2_bucket()):
+            out.update({o['Key']: int(o['Size']) for o in page.get('Contents') or []})
+        return out
     if backend() == 'gcs':
         return {b.name: int(b.size or 0) for b in _bucket().list_blobs()}
     return {}
@@ -517,6 +575,13 @@ def ensure_lifecycle():
     boot: a bucket that already carries the rule is left alone. Blob has no
     lifecycle rules at all, so there this reports nothing to install and
     purge_staging carries the window instead."""
+    if backend() == 'r2':
+        _r2().put_bucket_lifecycle_configuration(
+            Bucket=_r2_bucket(), LifecycleConfiguration={'Rules': [{
+                'ID': 'staging-expiry', 'Status': 'Enabled',
+                'Filter': {'Prefix': STAGING_PREFIX + '/'},
+                'Expiration': {'Days': STAGING_DAYS}}]})
+        return True
     if backend() != 'gcs':
         return False
     bucket = _bucket()
