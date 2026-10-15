@@ -573,8 +573,11 @@
         </details>
       </div>
       <div id="gen-video-form" class="gen-stackform" style="display:none">
-        <div class="gen-f"><span>Photo to animate</span>
+        <div class="gen-f" id="gen-anim-photo-row"><span>Photo to animate</span>
           <div class="anim-strip" id="gen-anim-photo"></div></div>
+        <label class="gen-f" id="gen-lock-row" style="display:none;flex-direction:row;align-items:center;gap:8px">
+          <input type="checkbox" id="gen-lock" checked onchange="genQuote()">
+          <span>Lock her face and body — redraw the finished clip as her, from her LoRA</span></label>
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
@@ -1051,6 +1054,7 @@ async function loadCharacterBadge() {
   } catch (e) {}
   genCharacter = c;
   renderModelChips();
+  renderJobTiles();
   if (genJob === 'reel' || genJob === 'swap') renderGenForm();
   const was = genIdentity;
   renderIdentitySrc();
@@ -1448,6 +1452,10 @@ function jobRow(key) {
 }
 
 // A job the rating does not serve is hidden at that rating, not removed.
+function herLoraReady() {
+  return !!(genCharacter && genCharacter.lora === 'ready');
+}
+
 function jobServes(key) {
   if (key === 'image') return true;
   const r = ((genPrices && genPrices.job_ratings) || {})[key] || ['sfw', 'nsfw'];
@@ -1483,7 +1491,8 @@ function renderJobTiles() {
       <small>${esc(row.note)}</small></button>`;
   };
   // Photo has one job, so the Photo button is it; the video jobs sit under Video.
-  const video = jobKeys().filter(jobServes).filter(k => jobKind(k) !== 'image');
+  const video = jobKeys().filter(jobServes).filter(k => jobKind(k) !== 'image')
+    .filter(k => k !== 'text' || herLoraReady());
   box.innerHTML = `<div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
   box.hidden = genMake === 'image';
   const photo = genMake === 'image';
@@ -2076,7 +2085,10 @@ function renderGenForm() {
   const swap = genMake === 'swap';
   const animate = genJob === 'animate';
   el('gen-image-form').style.display = genMake === 'image' ? 'flex' : 'none';
-  el('gen-video-form').style.display = animate ? 'flex' : 'none';
+  el('gen-video-form').style.display = animate || genJob === 'text' ? 'flex' : 'none';
+  el('gen-anim-photo-row').style.display = animate ? '' : 'none';
+  el('gen-lock-row').style.display = animate && genRating === 'nsfw' && herLoraReady()
+    && videoModel() === 'wan-2-2-gv' ? 'flex' : 'none';
   if (animate) renderAnimPhotos();
   el('gen-video-note').style.display = animate ? '' : 'none';
   el('gen-swap-form').style.display = swap ? 'flex' : 'none';
@@ -3245,6 +3257,7 @@ document.addEventListener('change', e => {
 function jobBlocker() {
   if (genJob === 'swap') return genSwap ? '' : 'Upload a clip first';
   if (genJob === 'animate') return animPhoto() ? '' : 'Keep a photo first';
+  if (genJob === 'text') return ((el('gen-video-motion') || {}).value || '').trim() ? '' : 'Write what she does';
   if (genJob === 'extend') return genExtendClip ? '' : 'Keep a clip first';
   if (genJob === 'multiref') return genSceneRefs.length ? '' : 'Pick a scene photo';
   if (genJob === 'reel') {
@@ -3256,7 +3269,7 @@ function jobBlocker() {
 }
 
 const JOB_VERBS = {
-  reel: 'Make the reel', swap: 'Swap her in', animate: 'Make the video',
+  reel: 'Make the reel', swap: 'Swap her in', animate: 'Make the video', text: 'Make the video',
   extend: 'Extend it', multiref: 'Generate',
 };
 
@@ -3485,7 +3498,8 @@ async function jobPayload() {
     return payload;
   }
   return Object.assign(base, {
-    reference_media: animPhoto(),
+    reference_media: genJob === 'text' ? '' : animPhoto(),
+    lock: genJob === 'animate' && el('gen-lock-row').style.display !== 'none' && el('gen-lock').checked,
     motion: (el('gen-video-motion') || {}).value || '',
     source: genDrive ? genDrive.id : '',
   }, genDrive ? clipExtrasPayload() : {});

@@ -7,6 +7,8 @@
 #                     same photos, for the H3 clips (`h3-gv`).
 #   {"image": {...}}  one still from the same base model with her LoRA, so the
 #                     photos and the explicit clips share one identity file.
+#   {"video": {...}}  a clip from her LoRA: text to video, or with `source` a
+#                     redraw of that clip as her (motion kept, person replaced).
 # Both read the base weights from the network volume (HF_HOME), downloaded on
 # the first job and kept.
 import base64
@@ -189,9 +191,7 @@ def pipeline():
     return _pipe['pipe']
 
 
-def image(job, args):
-    import torch
-    pipe = pipeline()
+def use_loras(pipe, args):
     loras = [l for l in args.get('loras') or [] if l.get('high') and l.get('low')][:3]
     key = tuple((l['high'].split('?')[0], float(l.get('scale', 1))) for l in loras)
     if _pipe['loras'] != key:
@@ -206,6 +206,12 @@ def image(job, args):
             scales = [float(l.get('scale', 1)) for l in loras for _ in (0, 1)]
             pipe.set_adapters(names, adapter_weights=scales)
         _pipe['loras'] = key
+
+
+def image(job, args):
+    import torch
+    pipe = pipeline()
+    use_loras(pipe, args)
     seed = args.get('seed')
     seed = int(seed) if seed is not None else random.randint(0, 2**31 - 1)
     w, h = int(args.get('width') or 1024), int(args.get('height') or 1536)
@@ -220,13 +226,71 @@ def image(job, args):
     return {'image': base64.b64encode(buf.getvalue()).decode(), 'seed': seed}
 
 
+def source_frames(url, count, w, h):
+    """The source clip resampled to 16 fps, cut to `count` frames, at the job's size."""
+    import imageio.v3 as iio
+    from PIL import Image
+    path = os.path.join(WORK, 'source.mp4')
+    os.makedirs(WORK, exist_ok=True)
+    if url.startswith('data:'):
+        with open(path, 'wb') as f:
+            f.write(base64.b64decode(url.split(',', 1)[1]))
+    else:
+        get(url, path)
+    fps = float(iio.immeta(path, plugin='pyav').get('fps') or 16)
+    frames = list(iio.imiter(path, plugin='pyav'))
+    step = max(fps / 16, 1)
+    picked = [frames[int(i * step)] for i in range(count) if int(i * step) < len(frames)]
+    while len(picked) % 4 != 1:
+        picked.pop()
+    return [Image.fromarray(f).convert('RGB').resize((w, h)) for f in picked]
+
+
+def video(job, args):
+    """A clip from her LoRA: from the prompt alone, or redrawing a source clip
+    (`source`) as her. The redraw keeps the source's motion and framing; how
+    much of the person changes is `strength`."""
+    import torch
+    from diffusers import WanVideoToVideoPipeline
+    from diffusers.utils import export_to_video
+    pipe = pipeline()
+    use_loras(pipe, args)
+    seed = args.get('seed')
+    seed = int(seed) if seed is not None else random.randint(0, 2**31 - 1)
+    w, h = int(args.get('width') or 480), int(args.get('height') or 832)
+    w, h = w - w % 16, h - h % 16
+    count = int(args.get('frames') or 81)
+    common = dict(prompt=args['prompt'], negative_prompt=args.get('negative') or '',
+                  num_inference_steps=int(args.get('steps') or 20),
+                  guidance_scale=float(args.get('guidance') or 3.5),
+                  generator=torch.Generator('cuda').manual_seed(seed), output_type='pil')
+    if args.get('source'):
+        # A redraw of 0.85 or less starts below Wan 2.2's expert boundary, so the
+        # low-noise expert alone does all of it; the single-model V2V pipeline fits.
+        strength = min(float(args.get('strength') or 0.7), 0.85)
+        v2v = WanVideoToVideoPipeline(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder,
+                                      transformer=pipe.transformer_2, vae=pipe.vae,
+                                      scheduler=pipe.scheduler)
+        frames = v2v(video=source_frames(args['source'], count, w, h), width=w, height=h,
+                     strength=strength, **common).frames[0]
+    else:
+        frames = pipe(width=w, height=h, num_frames=count, **common).frames[0]
+    out = os.path.join(WORK, 'out.mp4')
+    os.makedirs(WORK, exist_ok=True)
+    export_to_video(frames, out, fps=16)
+    with open(out, 'rb') as f:
+        return {'video': base64.b64encode(f.read()).decode(), 'seed': seed}
+
+
 def handler(job):
     args = job.get('input') or {}
     if args.get('train'):
         return train(job, args['train'])
     if args.get('image'):
         return image(job, args['image'])
-    return {'error': 'nothing to do: send "train" or "image"'}
+    if args.get('video'):
+        return video(job, args['video'])
+    return {'error': 'nothing to do: send "train", "image" or "video"'}
 
 
 if __name__ == '__main__':

@@ -165,11 +165,17 @@ if _H3:
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
 # character's approved photos, and makes stills from the same base with it.
 CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
+CHAR_LORA_VIDEO_MODEL = 'wan-2-2-char-video'
+# How much of the person a lock or a Video to Video redraw changes (0..0.85).
+LOCK_STRENGTH = float(os.getenv('LOCK_STRENGTH', '0.7'))
 # The id is the default so the LoRA never depends on host config; set it empty to drop it.
 _LORA_EP = os.getenv('RUNPOD_LORA_ENDPOINT', 'x6e9ylow7ss8pa').strip().rstrip('/')
 if _LORA_EP:
     RUNPOD_ENDPOINTS[CHAR_LORA_IMAGE_MODEL] = (
         _LORA_EP if '/' in _LORA_EP else f'https://api.runpod.ai/v2/{_LORA_EP}')
+    # The same worker makes clips from her LoRA: from a prompt, or redrawing a
+    # clip as her (Video to Video, and the face-and-body lock on finished clips).
+    RUNPOD_ENDPOINTS[CHAR_LORA_VIDEO_MODEL] = RUNPOD_ENDPOINTS[CHAR_LORA_IMAGE_MODEL]
 # Civitai serves most NSFW files only to a signed-in caller; RunPod fetches the
 # LoRA itself, so the token rides on the link it is handed.
 CIVITAI_TOKEN = (os.getenv('CIVITAI_TOKEN') or '').strip()
@@ -196,7 +202,7 @@ IMAGE_LORA_PX = {'1:1': (1216, 1216), '2:3': (1024, 1536), '3:2': (1536, 1024),
                  '3:4': (1088, 1440), '4:3': (1440, 1088), '9:16': (896, 1600),
                  '16:9': (1600, 896)}
 # Models that run the studio's LoRA library (`spec['loras']`).
-LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv')
+LORA_VIDEO_MODELS = ('wan-2-2-lora', 'wan-2-2-gv', 'h3-gv', CHAR_LORA_VIDEO_MODEL)
 
 
 def lora_family(model_key):
@@ -243,9 +249,11 @@ VIDEO_JOBS = {
              'note': 'A prompt, a photo, or both, as a short clip.'},
     # Swap, Extend and Multi-reference are hidden from explicit work, not
     # removed: explicit video is Photo to Video alone for now.
-    'swap': {'models': ('kling-3-0-mc', 'ml-face-swap', 'kling-3-0-omni'),
-             'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw',),
-             'open': ('sfw',), 'clause': 'preserve',
+    # Explicit swaps redraw the clip as her with her LoRA (face and body), or
+    # move the face alone (ml-face-swap).
+    'swap': {'models': ('kling-3-0-mc', CHAR_LORA_VIDEO_MODEL, 'ml-face-swap', 'kling-3-0-omni'),
+             'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw', 'nsfw'),
+             'open': ('sfw', 'nsfw'), 'clause': 'preserve',
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
@@ -259,6 +267,10 @@ VIDEO_JOBS = {
                 'open': ('sfw', 'nsfw'),
                 'label': 'Photo to Video',
                 'note': 'One of her approved photos, brought to life as a clip.'},
+    # Her trained LoRA is the identity here: no photo behind the clip.
+    'text': {'models': (CHAR_LORA_VIDEO_MODEL,), 'needs': (), 'kind': 'video',
+             'open': ('sfw', 'nsfw'), 'label': 'Text to Video',
+             'note': 'Her LoRA and your prompt — no photo needed.'},
     'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
                'kind': 'video', 'ratings': ('sfw',), 'modes': ('continue', 'longer', 'loop'),
                'label': 'Extend',
@@ -394,6 +406,7 @@ MODEL_RESOLUTION_VALUES = {
     # 1080p at 81 frames was never run on the endpoint.
     'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
     'h3-gv': (('480p', '480p'), ('720p', '720p')),
+    'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
 }
 
 
@@ -575,6 +588,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-6-rp': (5, 10, 15),
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
+    'wan-2-2-char-video': (5,),
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
@@ -618,6 +632,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-6-rp': (5, 15),
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
+    'wan-2-2-char-video': (5, 5),
     'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
@@ -2573,6 +2588,18 @@ class RunPodProvider(Provider):
         return Result('running')
 
     def payload(self, spec):
+        if spec.get('model') == CHAR_LORA_VIDEO_MODEL:
+            width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
+            args = {'prompt': spec.get('prompt') or build_video_prompt(),
+                    'negative': negative_for(spec), 'width': width, 'height': height,
+                    'frames': video_seconds(CHAR_LORA_VIDEO_MODEL, spec.get('seconds')) * 16 + 1,
+                    'seed': spec.get('seed'),
+                    'loras': [{'high': lora_url(l['high']), 'low': lora_url(l['low']),
+                               'scale': float(l['scale'])}
+                              for l in (spec.get('loras') or [])[:3] if l.get('high') and l.get('low')]}
+            if spec.get('source_url'):
+                args.update(source=spec['source_url'], strength=LOCK_STRENGTH)
+            return {'input': {'video': args}}
         image = spec.get('reference_url') or (
             _data_uri(spec['reference_b64'], spec.get('reference_mime'))
             if spec.get('reference_b64') else '')

@@ -26,7 +26,7 @@ VOLUME_GB = 250
 
 def start_cmd():
     return ['bash', '-c', 'echo "$LORA_HANDLER" | base64 -d > /char_lora.py; '
-            'pip install -q --break-system-packages runpod; exec python3 -u /char_lora.py']
+            'pip install -q --break-system-packages runpod imageio imageio-ffmpeg av; exec python3 -u /char_lora.py']
 
 
 def deploy(dc):

@@ -34978,6 +34978,9 @@ def _gen_spec(slug, body, user):
         spec['source_id'] = source_id
         spec['source_width'] = src['width']
         spec['source_height'] = src['height']
+    elif job == 'text':
+        if not spec['prompt_extra'] and not (body.get('motion') or '').strip():
+            raise imagegen.GenerationError('Write what she does in the clip.')
     elif job == 'reel':
         # The one video path that may run from a prompt alone, and therefore
         # the one that claims to be nobody. It still lands unapproved in
@@ -35128,6 +35131,16 @@ def _gen_spec(slug, body, user):
     elif seconds > CR.VIDEO_MAX_SECONDS:
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
+    # Explicit Photo to Video is redrawn as her afterwards (face and body, from
+    # her LoRA), so whoever the photo showed ends up as her. On unless asked off.
+    if (job == 'animate' and level != 'sfw' and model == 'wan-2-2-gv'
+            and not spec.get('chain') and GEN_HAS_WORKER
+            and body.get('lock') is not False and _char_lora_entry(slug)):
+        spec['lock'] = True
+        spec['addons'].append('lock')
+    if model == imagegen.CHAR_LORA_VIDEO_MODEL and not _char_lora_entry(slug):
+        raise imagegen.GenerationError(
+            'Train her LoRA first — this clip takes her look from it.')
     if model in imagegen.LORA_VIDEO_MODELS:
         # Resolved now and stored on the job, so editing the library later
         # never changes what a past job ran with.
@@ -38808,6 +38821,60 @@ def _gen_audio_urls(job_id, spec, urls):
     return out
 
 
+# A cold char-lora worker loads both 14B experts before the redraw starts.
+GEN_LOCK_POLLS = int(os.getenv('GEN_LOCK_POLLS', '120'))
+GEN_LOCK_POLL_SECONDS = 15
+
+
+def _gen_lock_urls(job_id, slug, spec, workspace, urls):
+    """Redraw each finished clip as her with her LoRA (the face-and-body lock).
+    A failed lock hands back the clip as it was and returns the lock's tokens:
+    the clip itself is paid for and already good."""
+    if not spec.get('lock'):
+        return urls
+    import time as _t
+    out = []
+    for url in urls:
+        locked = ''
+        try:
+            her = _char_lora_entry(slug)
+            if not her:
+                raise imagegen.GenerationError('her LoRA is gone')
+            provider = imagegen.get_provider('runpod')
+            call = {'model': imagegen.CHAR_LORA_VIDEO_MODEL, 'source_url': url,
+                    'prompt': ', '.join(t for t in [her.get('trigger', '')] if t)
+                              + ', ' + (spec.get('prompt_extra') or spec.get('motion') or ''),
+                    'aspect': spec.get('aspect'), 'resolution': spec.get('resolution'),
+                    'seconds': spec.get('seconds'), 'explicit': True, 'loras': [her]}
+            task_id, result = provider.submit_video(call)
+            for _ in range(GEN_LOCK_POLLS):
+                if result.status in ('done', 'failed'):
+                    break
+                _t.sleep(GEN_LOCK_POLL_SECONDS)
+                try:
+                    result = provider.poll(task_id)
+                except imagegen.GenerationError as e:
+                    logger.warning('generation job=%s lock poll: %s', job_id, e)
+            if result.status == 'done' and result.urls:
+                locked = result.urls[0]
+            else:
+                logger.warning('generation job=%s lock gave nothing: %s',
+                               job_id, result.error or result.status)
+        except Exception as e:
+            logger.warning('generation job=%s lock failed: %s', job_id, str(e)[:200])
+        if not locked:
+            from db import SessionLocal, token_refund_part
+            s = SessionLocal()
+            try:
+                token_refund_part(s, workspace, job_id, CR.ADDON_PRICES['lock'],
+                                  note='face and body lock failed')
+                s.commit()
+            finally:
+                s.close()
+        out.append(locked or url)
+    return out
+
+
 def _gen_finish(job_id, slug, spec, workspace, urls):
     """Pull the results off the provider's CDN into our own bucket and put them
     in the vault, unapproved. Their URLs are short lived, so this cannot wait."""
@@ -38815,6 +38882,7 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
     if spec.get('character_view'):
         return _character_finish(job_id, spec, workspace, urls)
     made = []
+    urls = _gen_lock_urls(job_id, slug, spec, workspace, urls)
     urls = _gen_audio_urls(job_id, spec, urls)
     for url in urls:
         try:

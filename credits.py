@@ -62,7 +62,7 @@ DEFAULT_VIDEO_DURATION = 5
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
                 'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv',
-                'h3-gv')
+                'h3-gv', 'wan-2-2-char-video')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -143,6 +143,9 @@ VIDEO_COST_USD_PER_SECOND = {
     # Repriced to public Wan 2.2 A14B rates: fal $0.04/s 480p, $0.08/s 720p;
     # RunPod's public endpoint $0.06/s.
     'wan-2-2-gv': {'480p': 0.04, '720p': 0.06, '1080p': 0.27},
+    # Her LoRA's clips on the char-lora endpoint (both 14B experts, 20 steps).
+    # Unmeasured: set from the first test run's GPU time.
+    'wan-2-2-char-video': {'480p': 0.08, '720p': 0.16, '1080p': 0.16},
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
@@ -163,6 +166,9 @@ ADDON_COST_USD = {
     'audio': 0.10,
     # Unmeasured: a lip-sync pass is a second video task, so priced like one.
     'lipsync': 0.40,
+    # Face-and-body lock: the finished clip redrawn as her with her LoRA on the
+    # char-lora endpoint. Unmeasured; priced like a 5s Her LoRA clip plus margin.
+    'lock': 0.60,
 }
 
 
@@ -245,6 +251,7 @@ LORA_H3_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits
 ADDON_PRICES = {
     'audio': credits_for_cost(ADDON_COST_USD['audio']),
     'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
+    'lock': credits_for_cost(ADDON_COST_USD['lock']),
 }
 
 
@@ -294,6 +301,7 @@ MODEL_LABELS = {
     'wan-2-2-lora': 'Wan 2.2 + LoRA',
     'wan-2-2-gv': 'Explicit Video Realism Pro',
     'h3-gv': 'Explicit Video + Sound (H3)',
+    'wan-2-2-char-video': 'Her LoRA video',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -338,6 +346,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-2-lora': ('sfw',),
     'wan-2-2-gv': ('sfw', 'nsfw'),
     'h3-gv': ('sfw', 'nsfw'),
+    'wan-2-2-char-video': ('sfw', 'nsfw'),
     'p-video-animate': ('sfw',),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a
@@ -364,7 +373,7 @@ VIDEO_MODEL_RATINGS = {
 # Safe-work video offers only these; Extend and Multi-reference run on Wan 2.7
 # alone, so they keep their own list.
 SFW_VIDEO_MODELS = ('seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5',
-                    'kling-3-0-omni', 'kling-3-0-mc')
+                    'kling-3-0-omni', 'kling-3-0-mc', 'wan-2-2-char-video')
 SFW_ANY_MODEL_JOBS = ('extend', 'multiref')
 
 
