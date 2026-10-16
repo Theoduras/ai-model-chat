@@ -1004,7 +1004,7 @@ def test_frame_loras():
     check('nothing named, nothing picked', ids('she smiles at the camera', 'h3') == [])
     check('the words shown are what matched',
           A._content_words('fingering herself, nipples hard') == ['fingering', 'nipples'])
-    check('no endpoint or key, no read', A.imagegen.read_frame(b'') == '')
+    check('no endpoint or key, no read', A.imagegen.read_frame(b'')['caption'] == '')
 
 
 if __name__ == '__main__':

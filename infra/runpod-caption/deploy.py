@@ -14,7 +14,9 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), '..'
 from deploy import KEY, call, find  # noqa: E402  (h3's REST helpers)
 
 IMAGE = 'runpod/pytorch:2.4.0-py3.11-cuda12.4.1-devel-ubuntu22.04'
-GPUS = ['NVIDIA GeForce RTX 4090', 'NVIDIA RTX A5000', 'NVIDIA L4', 'NVIDIA RTX A6000']
+# 24-48 GB cards torch 2.4 / CUDA 12.4 runs: no Blackwell (5090, PRO 6000).
+GPUS = ['NVIDIA GeForce RTX 4090', 'NVIDIA RTX A5000', 'NVIDIA L4', 'NVIDIA RTX A6000',
+        'NVIDIA A40', 'NVIDIA L40S', 'NVIDIA RTX 6000 Ada Generation']
 DC = 'EU-RO-1'
 VOLUME_GB = 30
 
@@ -26,10 +28,10 @@ def deploy(dc):
     with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py'), 'rb') as f:
         handler = base64.b64encode(f.read()).decode()
     body = {'name': 'char-caption-worker', 'imageName': IMAGE, 'isServerless': True,
-            'containerDiskInGb': 20,
+            'containerDiskInGb': 40,
             'env': {'CAPTION_HANDLER': handler, 'HF_HOME': '/runpod-volume/hf'},
             'dockerStartCmd': ['bash', '-c', 'echo "$CAPTION_HANDLER" | base64 -d > /caption.py; '
-                               'pip install -q runpod "transformers>=4.48" accelerate pillow; '
+                               'pip install -q runpod transformers==4.49.0 accelerate==1.4.0 pillow; '
                                'exec python3 -u /caption.py']}
     tpl = find('/templates', 'char-caption-worker')
     if tpl:
@@ -56,7 +58,7 @@ def test(endpoint, image):
     import imagegen
     start = time.time()
     with open(image, 'rb') as f:
-        print(repr(imagegen.read_frame(f.read())), f'in {time.time() - start:.0f}s')
+        print(imagegen.read_frame(f.read(), wait=900), f'in {time.time() - start:.0f}s')
 
 
 if __name__ == '__main__':

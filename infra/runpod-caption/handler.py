@@ -2,11 +2,19 @@
 # Runs JoyCaption (uncensored LLaVA) because nothing explicit may go to Google.
 import base64
 import io
+import os
 
-import runpod
-import torch
-from PIL import Image
-from transformers import AutoProcessor, LlavaForConditionalGeneration
+# The weights are cached on the network volume when there is one; without it
+# they go to the container disk.
+if os.path.isdir('/runpod-volume'):
+    os.environ.setdefault('HF_HOME', '/runpod-volume/hf')
+else:
+    os.environ['HF_HOME'] = '/root/hf'
+
+import runpod  # noqa: E402
+import torch  # noqa: E402
+from PIL import Image  # noqa: E402
+from transformers import AutoProcessor, LlavaForConditionalGeneration  # noqa: E402
 
 MODEL = 'fancyfeast/llama-joycaption-beta-one-hf-llava'
 PROMPT = ('Write a plain, explicit description of this photo in two or three sentences. '
@@ -14,13 +22,25 @@ PROMPT = ('Write a plain, explicit description of this photo in two or three sen
           '(for example dildo, vibrator, pussy, breasts, nipples, fingering, masturbating, '
           'blowjob). Say nothing about what you cannot see.')
 
-proc = AutoProcessor.from_pretrained(MODEL)
-model = LlavaForConditionalGeneration.from_pretrained(
-    MODEL, torch_dtype=torch.bfloat16, device_map=0).eval()
+proc = model = None
+
+
+def load():
+    # On the first job, not at import: a worker that fails to load still
+    # answers, so the error comes back on the job instead of a silent exit.
+    global proc, model
+    if model is None:
+        proc = AutoProcessor.from_pretrained(MODEL)
+        model = LlavaForConditionalGeneration.from_pretrained(
+            MODEL, torch_dtype=torch.bfloat16, device_map=0).eval()
 
 
 def handler(job):
     args = job.get('input') or {}
+    try:
+        load()
+    except Exception as e:
+        return {'error': f'model did not load: {e}'[:500]}
     try:
         img = Image.open(io.BytesIO(base64.b64decode(args['image']))).convert('RGB')
     except Exception as e:

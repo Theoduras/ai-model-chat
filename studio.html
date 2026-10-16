@@ -3967,7 +3967,8 @@ function renderStoryLoras() {
     storyTicks = {};
     read.loras.forEach(id => { const l = mine.find(x => x.id === id); if (l) storyTicks[id] = l.scale; });
   }
-  el('story-seen').textContent = !read ? '' : read.pending ? 'Reading the frame…'
+  el('story-seen').textContent = !read ? '' : read.starting ? 'Reading the frame (the reader is starting up)…'
+    : read.pending ? 'Reading the frame…'
     : read.seen && read.seen.length ? 'Seen in the frame: ' + read.seen.join(', ')
     : read.note || 'Nothing in the frame matched a LoRA.';
   box.innerHTML = mine.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0">
@@ -3983,9 +3984,16 @@ function storyTick(id, on, scale) {
 async function readStoryFrame(media, readKey) {
   story.reads[readKey] = { pending: true };
   try {
-    const d = await storyPost('/api/generate/frame-loras', { persona: story.persona, media: media,
-      model: story.model, rating: story.rating });
-    story.reads[readKey] = d;
+    const ask = { persona: story.persona, media: media, model: story.model, rating: story.rating };
+    let d = await storyPost('/api/generate/frame-loras', ask);
+    // A cold reader takes minutes to start; the read is polled, not dropped.
+    for (let n = 0; d.pending && n < 60; n++) {
+      story.reads[readKey] = { pending: true, starting: true };
+      renderStoryLoras();
+      await new Promise(r => setTimeout(r, 5000));
+      d = await storyPost('/api/generate/frame-loras', Object.assign({}, ask, { job: d.job }));
+    }
+    story.reads[readKey] = d.pending ? { loras: [], seen: [], note: 'The reader did not start in time.' } : d;
   } catch (e) { story.reads[readKey] = { loras: [], seen: [], note: 'The frame could not be read.' }; }
   saveStory();
   renderStoryLoras();

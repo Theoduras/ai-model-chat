@@ -38501,18 +38501,26 @@ def api_generate_frame_loras():
         return user
     if (body.get('rating') or '') == 'sfw':
         return jsonify({'ok': True, 'caption': '', 'seen': [], 'loras': []})
-    row = _media_row(slug, str(body.get('media') or '').strip())
-    if not row:
-        return jsonify({'ok': False, 'error': 'That frame is no longer there.'}), 400
-    data, _mime = _media_bytes(row)
-    frame = imagegen.last_frame(data) if row['kind'] == 'video' else data
-    caption = imagegen.read_frame(frame)
+    job = str(body.get('job') or '').strip()
+    if job:
+        read = imagegen.read_frame(b'', wait=20, job=job)
+    else:
+        row = _media_row(slug, str(body.get('media') or '').strip())
+        if not row:
+            return jsonify({'ok': False, 'error': 'That frame is no longer there.'}), 400
+        data, _mime = _media_bytes(row)
+        read = imagegen.read_frame(imagegen.last_frame(data) if row['kind'] == 'video' else data,
+                                   wait=20)
+    if read['job']:
+        return jsonify({'ok': True, 'pending': True, 'job': read['job']})
+    caption = read['caption']
     family = imagegen.lora_family(str(body.get('model') or 'h3-gv'))
     library = {l['id'] for l in _video_loras()
                if l.get('family', 'wan') == family and l.get('enabled', True) is not False}
     return jsonify({'ok': True, 'caption': caption, 'seen': _content_words(caption),
                     'loras': [i for i in _content_lora_ids(caption, family) if i in library],
-                    'note': '' if caption else 'The frame could not be read.'})
+                    'note': '' if caption else 'The frame could not be read'
+                            + (f" ({read['error']})." if read['error'] else '.')})
 
 
 @app.route('/api/generate/stitch', methods=['POST'])

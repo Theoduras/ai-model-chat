@@ -1937,34 +1937,45 @@ def cut_window(video, start_frame, frames, fps, width, height):
             return b''
 
 
-def read_frame(image, wait=150):
-    """What an explicit frame shows, in plain words, from char-caption; '' on
-    any failure -- a read only pre-ticks LoRAs, it must never stop a clip."""
+def read_frame(image, wait=150, job=''):
+    """What an explicit frame shows, in plain words, from char-caption:
+    {caption, job, error}. Still running after `wait` gives the job id to poll
+    with `job` instead of an image. Never raises: a read only pre-ticks LoRAs."""
     import io
     import requests
     from PIL import Image
     key = (RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
-    if not (CAPTION_ENDPOINT and key and image):
-        return ''
+    if not (CAPTION_ENDPOINT and key and (image or job)):
+        return {'caption': '', 'job': '', 'error': 'reading is off'}
+    headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
     try:
-        img = Image.open(io.BytesIO(image)).convert('RGB')
-        img.thumbnail((768, 768))
-        buf = io.BytesIO()
-        img.save(buf, 'JPEG', quality=88)
-        headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
-        body = requests.post(f'{CAPTION_ENDPOINT}/run', headers=headers, timeout=TIMEOUT, json={
-            'input': {'image': base64.b64encode(buf.getvalue()).decode()}}).json()
+        if job:
+            body = {'id': job, 'status': 'IN_QUEUE'}
+        else:
+            img = Image.open(io.BytesIO(image)).convert('RGB')
+            img.thumbnail((768, 768))
+            buf = io.BytesIO()
+            img.save(buf, 'JPEG', quality=88)
+            body = requests.post(f'{CAPTION_ENDPOINT}/run', headers=headers, timeout=TIMEOUT, json={
+                'input': {'image': base64.b64encode(buf.getvalue()).decode()}}).json()
         end = time.time() + wait
         while (body.get('status') or '').upper() not in ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'):
-            if time.time() > end or not body.get('id'):
-                return ''
+            if not body.get('id'):
+                return {'caption': '', 'job': '', 'error': 'not accepted'}
+            if time.time() > end:
+                return {'caption': '', 'job': body['id'], 'error': ''}
             time.sleep(3)
             body = requests.get(f"{CAPTION_ENDPOINT}/status/{body['id']}", headers=headers,
                                 timeout=TIMEOUT).json() | {'id': body['id']}
-        return str((body.get('output') or {}).get('caption') or '').strip()
+        out = body.get('output') or {}
+        err = str(out.get('error') or body.get('error') or '')[:300] if isinstance(out, dict) else ''
+        if err:
+            logging.getLogger(__name__).warning('frame read failed: %s', err)
+        return {'caption': str(out.get('caption') or '').strip() if isinstance(out, dict) else '',
+                'job': '', 'error': err}
     except Exception as e:
         logging.getLogger(__name__).warning('frame read failed: %s', str(e)[:200])
-        return ''
+        return {'caption': '', 'job': '', 'error': 'unreachable'}
 
 
 def _ffmpeg(video, args, audio=None):
