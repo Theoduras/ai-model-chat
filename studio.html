@@ -879,6 +879,7 @@
       </div>
       </div>
       <button type="button" class="btn btn-ghost btn-sm story-resume" id="story-resume" style="display:none" onclick="openStory()">Open your long video storyboard</button>
+      <div id="story-drafts"></div>
       <div class="gen-staging" id="gen-staging"></div>
       <span class="hint">Nothing here can reach a fan. Keep moves a shot into
         the vault and approves it; the rest delete themselves in three days.</span>
@@ -3778,6 +3779,39 @@ function loadStory() {
   try { story = JSON.parse(localStorage.getItem(storyKey()) || 'null'); } catch (e) {}
   return story;
 }
+// Drafts are storyboards put aside so another can be made; their parts still
+// expire with staging, so a draft left for days comes back with parts gone.
+function storyDrafts() {
+  try { return JSON.parse(localStorage.getItem('story_drafts_' + slug()) || '[]'); } catch (e) { return []; }
+}
+function saveDrafts(list) {
+  try { localStorage.setItem('story_drafts_' + slug(), JSON.stringify(list.slice(0, 20))); } catch (e) {}
+}
+function draftStory() {
+  if (!story) return;
+  story.saved = Date.now();
+  saveDrafts([story].concat(storyDrafts().filter(d => d.id !== story.id)));
+  story = null;
+  saveStory();
+  closeStory();
+}
+function openDraft(id) {
+  const list = storyDrafts();
+  const d = list.find(x => x.id === id);
+  if (!d) return;
+  const rest = list.filter(x => x.id !== id);
+  if (loadStory()) { story.saved = Date.now(); rest.unshift(story); }
+  saveDrafts(rest);
+  story = d;
+  saveStory();
+  openStory();
+}
+function dropDraft(id) {
+  if (!confirm('Delete this draft?')) return;
+  saveDrafts(storyDrafts().filter(x => x.id !== id));
+  renderStoryEntry();
+}
+
 function storyJob(id) { return id ? genJobs.find(j => j.id === id) : null; }
 function storyMedia(step) {
   if (!step) return null;
@@ -3832,7 +3866,10 @@ function startStory(from) {
   const models = storyModels();
   if (!models.length) return setGenStatus('✗ No storyboard engine is set up on this server.', false);
   const old = loadStory();
-  if (old && (old.parts || []).length && !confirm('Start over? The storyboard you have open is discarded.')) return openStory();
+  if (old && (old.parts || []).length) {
+    if (!confirm('Put the open long video in your drafts and start a new one?')) return openStory();
+    draftStory();
+  }
   const base = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^a-z0-9]/gi, '').slice(0, 24).toLowerCase(),
     persona: slug(), from: from, rating: genRating, model: models[0], seconds: 5, parts: [], sel: 'still' };
   if (from === 'swap' || from === 'upload') {
@@ -3872,6 +3909,12 @@ function renderStoryEntry() {
   if (row) row.style.display = genJob === 'animate' && !genDrive && storyModels().length ? '' : 'none';
   const resume = el('story-resume');
   if (resume) resume.style.display = loadStory() && el('story').hidden ? '' : 'none';
+  const box = el('story-drafts');
+  if (!box) return;
+  const drafts = storyDrafts();
+  box.innerHTML = drafts.map((d, i) => `<div style="display:flex;gap:6px;align-items:center;margin-bottom:6px">
+    <button type="button" class="btn btn-ghost btn-sm" style="flex:1" onclick="openDraft('${esc(d.id)}')">Draft ${i + 1}: ${(d.parts || []).length} part${(d.parts || []).length === 1 ? '' : 's'} · ${new Date(d.saved || 0).toLocaleDateString()}</button>
+    <button type="button" class="btn btn-ghost btn-sm" onclick="dropDraft('${esc(d.id)}')" aria-label="Delete draft">✕</button></div>`).join('');
 }
 
 function storyTile(key, label, step, kind) {
@@ -5409,6 +5452,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
       <button type="button" class="btn btn-ghost btn-sm" id="story-play" onclick="playStory()">&#9654; Preview all</button>
       <label class="hint" id="story-with-upload-row" hidden><input type="checkbox" id="story-with-upload" checked onchange="renderStory()"> Include your clip</label>
       <button type="button" class="btn btn-primary" id="story-stitch" onclick="stitchStory()">Stitch into one clip</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="draftStory()">Save as draft</button>
       <button type="button" class="btn btn-ghost btn-sm" onclick="discardStory()">Discard</button>
       <span class="hint" id="story-status"></span>
     </footer>
