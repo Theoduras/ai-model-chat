@@ -466,7 +466,7 @@
         <div id="gen-swapin-photo"></div>
         <button type="button" class="btn" onclick="pickSwapInPhoto()">Choose or upload photo</button>
       </div>
-      <div class="gen-f"><span>Resolution</span><div class="gen-chips" id="gen-swapin-res"></div></div>
+      <div class="gen-f"><span>Photo ratio</span><div class="gen-chips" id="gen-swapin-res"></div></div>
       <div class="gen-f"><span>How many</span><div class="gen-chips" id="gen-swapin-n"></div></div>
       <label class="gen-f"><span>Extra instructions (optional)</span>
         <textarea id="gen-swapin-extra" rows="2" maxlength="500" placeholder="e.g. keep her hair tied up"></textarea></label>
@@ -1520,13 +1520,13 @@ function renderJobTiles() {
   if (window.StudioNSFW) StudioNSFW.sync();
 }
 
-let genSwapIn = false, genSwapInPhoto = '', genSwapInRes = '2k', genSwapInN = 1;
+let genSwapIn = false, genSwapInPhoto = '', genSwapInRes = '', genSwapInN = 1;
 function renderSwapInOpts() {
   const chips = (id, vals, cur, fn, lbl) => {
     el(id).innerHTML = vals.map(v => `<button type="button" class="gen-chip" aria-pressed="${v === cur}" onclick="${fn}('${v}')">${lbl(v)}</button>`).join('');
   };
-  chips('gen-swapin-res', Object.keys((genPrices.images || {})['seedream-4-5'] || { '2k': 0 }).filter(r => r !== '1k'),
-    genSwapInRes, 'setSwapInRes', v => v.toUpperCase());
+  chips('gen-swapin-res', ['', '1:1', '4:5', '5:4', '3:4', '4:3', '2:3', '3:2', '9:16', '16:9', '21:9'],
+    genSwapInRes, 'setSwapInRes', v => v || 'Same as photo');
   chips('gen-swapin-n', ['1', '2', '3', '4'], String(genSwapInN), 'setSwapInN', v => v);
 }
 function setSwapInRes(v) { genSwapInRes = v; genQuote(); }
@@ -1548,7 +1548,7 @@ function pickSwapInPhoto() {
 }
 
 function swapInPrice() {
-  const base = ((genPrices.images || {})['seedream-4-5'] || {})[genSwapInRes];
+  const base = ((genPrices.images || {})['seedream-4-5'] || {})['2k'];
   return base === undefined ? undefined : (base + ((genPrices.addons || {})['face-lock'] || 0)) * genSwapInN;
 }
 
@@ -1558,7 +1558,7 @@ async function runSwapIn() {
   try {
     const res = await fetch('/api/generate/swap-in', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ persona: slug(), reference_media: genSwapInPhoto, rating: genRating, resolution: genSwapInRes, batch: genSwapInN,
+      body: JSON.stringify({ persona: slug(), reference_media: genSwapInPhoto, rating: genRating, aspect: genSwapInRes, batch: genSwapInN,
         prompt_extra: el('gen-swapin-extra').value }),
     });
     const d = await res.json();
@@ -3359,7 +3359,7 @@ function genQuote() {
   if (genMake === 'image' && genSwapIn) {
     renderSwapInOpts();
     const btn = el('gen-run-btn'), total = swapInPrice();
-    if (what) what.textContent = `${genSwapInN} × her swapped into your photo, ${genSwapInRes.toUpperCase()}`;
+    if (what) what.textContent = `${genSwapInN} × her swapped into your photo, ${genSwapInRes || 'same ratio'}`;
     if (cost) cost.textContent = total === undefined ? '' : `${total} tokens`;
     setMoney(total || 0);
     const cash = cashFor(total);

@@ -38320,7 +38320,9 @@ def api_generate_swap_in():
         s.close()
     if not ok:
         return jsonify({'ok': False, 'error': 'Pick a photo to swap her into.'}), 400
-    res = body.get('resolution') if body.get('resolution') in CR.IMAGE_PRICES['seedream-4-5'] else '2k'
+    res = '2k'
+    if body.get('aspect') in imagegen.IMAGE_ASPECTS:
+        size = body['aspect']
     try:
         batch = min(4, max(1, int(body.get('batch') or 1)))
     except (TypeError, ValueError):
@@ -38802,7 +38804,8 @@ FACE_LOCK_PROMPT = (
     'Edit the second image. Replace only the face with the exact face from the first image: '
     'same facial features, eyes, nose, lips, jawline, skin tone and hairline. Keep the '
     'expression direction, head angle, hair, body, clothing, lighting, background and framing '
-    'of the second image exactly. Seamless, photorealistic, adult woman.')
+    'of the second image exactly. Amateur phone photo quality: natural, unretouched, slightly '
+    'imperfect, realistic skin texture, adult woman.')
 
 
 def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
