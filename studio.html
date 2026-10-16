@@ -2769,13 +2769,27 @@ function audioTokens() {
   return audioAddon() ? (((genPrices && genPrices.addons) || {})[audioAddon()] || 0) : 0;
 }
 
+// The face-and-body lock costs one add-on per 81-frame window it is redrawn
+// in, at the clip's own rate (imagegen.lock_windows; H3 is 24 fps).
+function lockTokens(model, secs) {
+  const frames = secs * (model === 'h3-gv' ? 24 : 16);
+  return Math.max(1, Math.ceil(frames / 80)) * (((genPrices && genPrices.addons) || {}).lock || 0);
+}
+
+function lockOn() {
+  if (genJob === 'swap') return genRating === 'nsfw' && swapModel() === 'h3-gv';
+  return genJob === 'animate' && !chainPlan() && el('gen-lock-row').style.display !== 'none'
+    && el('gen-lock').checked;
+}
+
 function swapPrice() {
   if (!genSwap) return undefined;
   const rates = ((genPrices && genPrices.video_rates) || {})[swapModel()] || {};
   const rate = rates[swapResolution()];
   // One ceil for the whole clip, exactly as credits.video_price does --
   // rounding per second here would quote more than the server charges.
-  return rate ? Math.ceil(rate * swapSeconds()) + audioTokens() : undefined;
+  return rate ? Math.ceil(rate * swapSeconds()) + audioTokens()
+    + (lockOn() ? lockTokens(swapModel(), swapSeconds()) : 0) : undefined;
 }
 
 // Every whole second the model takes, since a swap is priced per second.
@@ -3435,7 +3449,8 @@ function genQuote() {
     const resv = (el('gen-vres') || {}).value || genPrices.defaults.video_resolution;
     const secs = videoSecondsNow();
     const rates = (genPrices.video_rates || {})[videoModelNow()] || {};
-    const per = rates[resv] ? Math.ceil(rates[resv] * secs) + audioTokens() : undefined;
+    const per = rates[resv] ? Math.ceil(rates[resv] * secs) + audioTokens()
+      + (lockOn() ? lockTokens(videoModelNow(), secs) : 0) : undefined;
     const btn = el('gen-run-btn');
     const shape = aspectOffered() ? `, ${currentAspect()}` : '';
     if (what) {
