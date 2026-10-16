@@ -34782,6 +34782,39 @@ def _gen_own_video_prompt(spec):
     return text
 
 
+def _story_id(body):
+    """A storyboard's id, made by the studio when it opens one; '' if absent."""
+    sid = str(body.get('story') or '').strip().lower()
+    return sid if re.match(r'^[a-z0-9]{8,32}$', sid) else ''
+
+
+def _story_spec(workspace, slug, story_id, media_id):
+    """The spec of the finished job of this storyboard that made `media_id`,
+    or None: a part only carries on from a clip of its own storyboard."""
+    from db import GenerationJob
+    if not story_id or not re.match(r'^[A-Za-z0-9]{1,32}$', media_id or ''):
+        return None
+    s = _db_session()
+    try:
+        rows = (s.query(GenerationJob)
+                .filter(GenerationJob.workspace_id == workspace,
+                        GenerationJob.slug == slug, GenerationJob.status == 'done',
+                        GenerationJob.result_media_ids.like(f'%{media_id}%'))
+                .all())
+        for row in rows:
+            if media_id not in (row.result_media_ids or '').split(','):
+                continue
+            try:
+                spec = json.loads(row.spec_json or '{}') or {}
+            except ValueError:
+                continue
+            if spec.get('story_id') == story_id:
+                return spec
+    finally:
+        s.close()
+    return None
+
+
 def _gen_spec(slug, body, user):
     """Validate a generation request into a spec the provider and the price
     table both understand. Anything unpriced or above the persona's own NSFW
@@ -34810,6 +34843,7 @@ def _gen_spec(slug, body, user):
     if job and level != 'sfw' and 'nsfw' not in imagegen.job_ratings(job):
         raise imagegen.GenerationError('That video job is not offered for explicit work.')
     spec = {'kind': kind, 'slug': slug, 'job': job,
+            'story_id': _story_id(body) if job == 'animate' else '',
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[
                 :GEN_PROMPT_MAX if kind == 'image' else GEN_VIDEO_PROMPT_MAX],
@@ -35061,6 +35095,18 @@ def _gen_spec(slug, body, user):
                 'Pick at least one scene or outfit photo to place her in.')
         spec['scene_media'] = kept
         _gen_identity_source(slug, body, spec)
+    elif job == 'animate' and spec.get('story_id') and body.get('continue_from'):
+        parent_id = str(body['continue_from']).strip()
+        before = _story_spec(_workspace_id(user), slug, spec['story_id'], parent_id)
+        if not before or (_media_row(slug, parent_id) or {}).get('kind') != 'video':
+            raise imagegen.GenerationError(
+                'That part is no longer in this storyboard. Open it again.')
+        # Seed and anchor come from the part before, never from the request,
+        # so every part of one storyboard runs on the same two.
+        spec.update({'continue_from': parent_id, 'parent_media': parent_id,
+                     'reference_media': '', 'seed': before.get('seed'),
+                     'story_anchor': before.get('story_anchor') or '',
+                     'story_before': before.get('motion') or ''})
     elif not spec['reference_media']:
         raise imagegen.GenerationError(
             'Pick an approved photo to animate — a clip starts from one.')
@@ -35097,6 +35143,17 @@ def _gen_spec(slug, body, user):
                     f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
                     + ', '.join(f'{n}s' for n in allowed) + '.')
 
+    if spec.get('story_id'):
+        if model not in imagegen.STORY_MODELS:
+            raise imagegen.GenerationError(
+                'A storyboard runs on ' + ' or '.join(
+                    CR.MODEL_LABELS.get(m, m) for m in imagegen.STORY_MODELS) + '.')
+        if spec.get('source_path'):
+            raise imagegen.GenerationError('A storyboard part does not take a motion clip.')
+        if not spec.get('continue_from'):
+            spec['story_anchor'] = spec['reference_media']
+            spec['seed'] = random.randint(0, 2**31 - 1)
+
     if job != 'swap':
         allowed = imagegen.model_durations(model)
         if allowed and seconds not in allowed:
@@ -35120,7 +35177,8 @@ def _gen_spec(slug, body, user):
     if (level == 'sfw' and job not in CR.SFW_ANY_MODEL_JOBS
             and model not in CR.SFW_VIDEO_MODELS):
         raise imagegen.GenerationError('That model is not offered for safe-for-work video.')
-    plan = imagegen.chain_plan(model, seconds) if job == 'animate' else None
+    plan = (imagegen.chain_plan(model, seconds)
+            if job == 'animate' and not spec.get('story_id') else None)
     if plan:
         # Parts after the first carry on from the last frame of the one before,
         # each with its own action; an empty one keeps the previous action.
@@ -35139,12 +35197,14 @@ def _gen_spec(slug, body, user):
     # Explicit Photo to Video is redrawn as her afterwards (face and body, from
     # her LoRA), so whoever the photo showed ends up as her. On unless asked off.
     if (job == 'animate' and level != 'sfw' and model in ('wan-2-2-gv', 'h3-gv')
-            and not spec.get('chain') and GEN_HAS_WORKER
+            and not spec.get('chain') and not spec.get('story_id') and GEN_HAS_WORKER
             and body.get('lock') is not False and _char_lora_entry(slug)):
         spec['lock'] = True
         spec['addons'].append('lock')
     # Her character replaces whoever the photo shows before it is animated.
+    # A storyboard's still is already her: it was made, and accepted, as step one.
     if (job == 'animate' and spec.get('reference_media') and not spec.get('source_path')
+            and not spec.get('story_id')
             and (body.get('identity') or '').strip().lower() != 'vault'):
         char = _character_snapshot(slug)
         if char:
@@ -38106,6 +38166,10 @@ def api_generate_video_prompt():
         if part >= 2 and part - 2 < len(chain.get('motions') or []):
             motion = chain['motions'][part - 2]
             prompt = imagegen.build_chain_prompt(motion)
+        elif spec.get('continue_from'):
+            motion = spec.get('motion', '')
+            prompt = imagegen.build_chain_prompt(motion)
+            part = 2
         else:
             motion = spec.get('prompt_extra') or spec.get('motion', '')
             prompt = _gen_video_prompt(slug, spec)
@@ -38331,6 +38395,7 @@ def api_generate_swap_in():
             'model': imagegen.EXPLICIT_MODEL if explicit else 'seedream-4-5',
             'resolution': res, 'aspect': size, 'batch': batch, 'explicit': explicit,
             'reference_media': media_id, 'parent_media': media_id,
+            'story_id': _story_id(body),
             'prompt_extra': (body.get('prompt_extra') or '').strip()[:500],
             'character': char, 'character_id': char['id'],
             'character_version': char['version'], 'addons': ['face-lock']}
@@ -38339,6 +38404,112 @@ def api_generate_swap_in():
     except CR.PricingError as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
     return _gen_submit(user, slug, spec, price)
+
+
+def _gen_store_staged(slug, data, mime, rating, parent=''):
+    """Bytes we made ourselves, into the vault unapproved, like any generation."""
+    from db import PersonaMedia
+    path = storage.put(slug, data, mime)
+    s = _db_session()
+    try:
+        row = PersonaMedia(slug=slug, kind='video' if mime.startswith('video/') else 'image',
+                           mime=mime, image_data='', gcs_path=path,
+                           expires_at=storage.staging_expiry(), approved=False,
+                           source='generated', approved_for_training=False,
+                           rating=rating, parent_media=parent)
+        s.add(row)
+        s.commit()
+        return row.id
+    finally:
+        s.close()
+
+
+def _story_request():
+    """(user, slug, body) for a storyboard call, or (error response, None, None)."""
+    blocked = _require_active()
+    if blocked:
+        return blocked, None, None
+    body = request.get_json(silent=True) or {}
+    slug = (body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return (jsonify({'ok': False, 'error': 'Invalid persona'}), 400), None, None
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return (jsonify({'ok': False, 'error': 'Not your persona'}), 403), None, None
+    if not imagegen.HAS_FFMPEG:
+        return (jsonify({'ok': False, 'error': 'Storyboards need the always-on host.'}), 400), None, None
+    return _current_user(), slug, body
+
+
+@app.route('/api/generate/first-frame', methods=['POST'])
+def api_generate_first_frame():
+    """A storyboard's step one for a swap: the uploaded clip's opening frame as
+    a photo, for Swap her in to put her into."""
+    user, slug, body = _story_request()
+    if slug is None:
+        return user
+    src = _video_source_row(slug, str(body.get('source') or '').strip())
+    frame = imagegen.first_frame(storage.get(src['path']) or b'') if src else b''
+    if not frame:
+        return jsonify({'ok': False, 'error': "That clip's first frame could not be read. Upload it again."}), 400
+    rating = 'sfw' if (body.get('rating') or '') == 'sfw' else 'nsfw'
+    return jsonify({'ok': True, 'media': _gen_store_staged(slug, frame, 'image/jpeg', rating)})
+
+
+def _story_parts(workspace, slug, story, last):
+    """[(path, spec)] from part 1 to `last`, walked back through each part's
+    parent; None when a part on the way is gone or not this storyboard's."""
+    parts, mid = [], last
+    while mid and len(parts) < 64:
+        spec = _story_spec(workspace, slug, story, mid)
+        row = _media_row(slug, mid)
+        if not spec or not row or row['kind'] != 'video' or not row['gcs_path']:
+            return None
+        parts.append((row['gcs_path'], spec))
+        mid = spec.get('continue_from') or ''
+    if not parts or mid:
+        return None
+    return parts[::-1]
+
+
+@app.route('/api/generate/stitch', methods=['POST'])
+def api_generate_stitch():
+    """A storyboard's parts joined into one clip, colour matched at every seam.
+    Free: every part was paid for when it was made."""
+    user, slug, body = _story_request()
+    if slug is None:
+        return user
+    story = _story_id(body)
+    workspace = _workspace_id(user)
+    parts = _story_parts(workspace, slug, story, str(body.get('last') or '').strip())
+    if parts is None:
+        return jsonify({'ok': False, 'error': 'A part of this storyboard is gone. Make it again first.'}), 400
+    if len(parts) < 2:
+        return jsonify({'ok': False, 'error': 'Extend it at least once first.'}), 400
+    try:
+        clips = [storage.get(p) for p, _spec in parts]
+        joined = imagegen.join_clips(clips, imagegen.colour_grades(clips))
+    except Exception:
+        logger.exception('stitch failed story=%s', story)
+        joined = b''
+    if not joined:
+        return jsonify({'ok': False, 'error': 'The parts could not be joined.'}), 500
+    rating = 'nsfw' if any(sp.get('explicit') for _p, sp in parts) else 'sfw'
+    last = parts[-1][1]
+    media_id = _gen_store_staged(slug, joined, 'video/mp4', rating, parent=body['last'])
+    from db import queue_generation, update_generation
+    s = _db_session()
+    try:
+        job = queue_generation(s, workspace, slug, 'video', json.dumps({
+            'kind': 'video', 'slug': slug, 'job': 'stitch', 'story_id': story,
+            'model': last.get('model') or '', 'explicit': rating == 'nsfw',
+            'parent_media': body['last'],
+            'seconds': sum(int(sp.get('seconds') or 0) for _p, sp in parts)}), 0)
+        update_generation(s, job.id, status='done', result_media_ids=media_id)
+        payload = _job_json(job, s)
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'job': payload})
 
 
 def _undress_slug(user):
@@ -38714,7 +38885,19 @@ def _gen_start(job_id, slug, spec, workspace):
                         and os.getenv('RUNPOD_FETCH_LINKS') == '1'):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
                                              f"{_wish_file_token(_row['id'], ttl=900 + (imagegen.VAST_ROUTE_WAIT if spec.get('model') in imagegen.VAST_MODELS else 0))}")
-                if spec.get('model') == 'h3-gv' and not spec.get('video_prompt'):
+                if spec.get('continue_from'):
+                    parent = _media_row(slug, spec['continue_from']) or {}
+                    frame = (imagegen.last_frame(storage.get(parent['gcs_path']) or b'')
+                             if parent.get('gcs_path') else b'')
+                    if not frame:
+                        raise imagegen.GenerationError(
+                            'The end of the part before could not be read.')
+                    _continuation_call(
+                        slug, spec, call, frame, spec.get('motion', ''),
+                        _changed_action(spec.get('story_before'), spec.get('motion')),
+                        spec.get('story_anchor'),
+                        call['prompt'] if spec.get('video_prompt') else '')
+                elif spec.get('model') == 'h3-gv' and not spec.get('video_prompt'):
                     call['prompt'] = imagegen.write_h3_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), spec)
                     logger.info('h3 prompt job=%s: %s', job_id, call['prompt'])
@@ -38725,8 +38908,12 @@ def _gen_start(job_id, slug, spec, workspace):
                     if written:
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
+                if spec.get('story_id'):
+                    call['prompt'] = (call.get('prompt') or '') + ' ' + imagegen.CONTINUITY_CLAUSE
                 spec['sent'] = [dict(_video_sent(call, provider.name),
-                                     start='ref' if spec.get('reference_media') else '',
+                                     start='frame' if spec.get('continue_from')
+                                     else 'ref' if spec.get('reference_media') else '',
+                                     identity='ref' if call.get('identity_b64') else '',
                                      ref_paths=_ref_paths(slug, call))]
                 provider_job, result = provider.submit_video(call)
         except imagegen.GenerationError as e:
@@ -39311,44 +39498,55 @@ def _gen_chain_retry_plain(job_id, slug, spec, provider_name):
     return True
 
 
+def _changed_action(before, now):
+    before = (before or '').strip()
+    return '' if before.lower() == (now or '').strip().lower() else before[:200]
+
+
 def _previous_action(spec, done):
     chain = spec['chain']
     before = spec.get('motion', '') if done == 1 else chain['motions'][done - 2]
-    now = chain['motions'][done - 1]
-    return '' if before.strip().lower() == now.strip().lower() else before.strip()[:200]
+    return _changed_action(before, chain['motions'][done - 1])
 
 
-def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
-    """Start part done+1 from the last frame of part done."""
+def _continuation_call(slug, spec, call, frame, motion, before, anchor, prompt=''):
+    """Make `call` a part that starts on the frame the part before ended on:
+    a chained clip's next part, or a storyboard's next part."""
     import base64
-    chain = spec['chain']
-    motion = chain['motions'][done - 1]
-    call = dict(spec)
-    call.update({'seconds': chain['plan'][done], 'motion': motion,
-                 'prompt_extra': '', 'reference_url': '',
+    call.update({'motion': motion, 'prompt_extra': '', 'reference_url': '',
                  'reference_b64': base64.b64encode(frame).decode(),
                  'reference_mime': 'image/jpeg',
                  # The previous part's action is negated when this part's
                  # differs: its first frame already shows that action, and
                  # the model otherwise just carries it on.
                  'negative': imagegen.merge_negative(
-                     ', '.join(x for x in (spec.get('negative_extra'),
-                                           _previous_action(spec, done)) if x),
+                     ', '.join(x for x in (spec.get('negative_extra'), before) if x),
                      video=True)})
-    if spec.get('model') == 'h3-gv' and not chain.get('plain'):
+    if spec.get('model') == 'h3-gv' and anchor:
         # Her original photo rides along as an identity image, so a
         # long clip does not drift from part to part.
-        ref_b64, ref_mime, _row = _gen_reference(slug, spec.get('reference_media'))
+        ref_b64, ref_mime, _row = _gen_reference(slug, anchor)
         if ref_b64:
             call.update({'identity_b64': ref_b64, 'identity_mime': ref_mime})
     template = imagegen.build_chain_prompt(motion)
-    # A part prompt the creator wrote or edited runs as written.
-    stored = chain.get('prompts') or []
-    call['prompt'] = (stored[done - 1] if done - 1 < len(stored) else '') or (
+    call['prompt'] = prompt or (
         imagegen.write_h3_prompt(motion, spec, chained=bool(call.get('identity_b64')))
         if spec.get('model') == 'h3-gv' else
         imagegen.write_motion_prompt(motion, template, spec.get('explicit'),
                                      style=imagegen.lora_style(spec)) or template)
+
+
+def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
+    """Start part done+1 from the last frame of part done."""
+    chain = spec['chain']
+    motion = chain['motions'][done - 1]
+    call = dict(spec)
+    call['seconds'] = chain['plan'][done]
+    # A part prompt the creator wrote or edited runs as written.
+    stored = chain.get('prompts') or []
+    _continuation_call(slug, spec, call, frame, motion, _previous_action(spec, done),
+                       None if chain.get('plain') else spec.get('reference_media'),
+                       stored[done - 1] if done - 1 < len(stored) else '')
     logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
                 len(chain['plan']), call['prompt'])
     spec.setdefault('sent', []).append(dict(
@@ -40115,6 +40313,8 @@ def _job_json(job, session_db):
             'model': model, 'engine': CR.MODEL_LABELS.get(model, model),
             'tokens': job.tokens, 'error': job.error or '',
             'persona': job.slug, 'media': media,
+            'story': spec.get('story_id') or '', 'motion': spec.get('motion') or '',
+            'parent': spec.get('parent_media') or '', 'seconds': spec.get('seconds') or 0,
             'created_at': job.created_at.isoformat() if job.created_at else ''}
 
 

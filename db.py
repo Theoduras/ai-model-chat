@@ -198,9 +198,8 @@ class PersonaMedia(Base):
     no_posts = Column(Boolean, default=False)
     no_dms = Column(Boolean, default=False)
     source = Column(String(12), default='upload')   # upload | generated
-    # The clip an extension continues. There is no ffmpeg in the image, so an
-    # extension cannot be joined onto its source: it is delivered as its own
-    # vault clip and this is what says which clip it carries on from.
+    # The clip an extension or a storyboard part continues: each is delivered
+    # as its own clip, and this is what says which one it carries on from.
     parent_media = Column(String(32), default='')
     # The other version of a filtered generation (phone look on or off), so
     # the creator can switch it back without generating again.

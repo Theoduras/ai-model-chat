@@ -361,6 +361,36 @@
 .st-src .gen-chip { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; height: auto; padding: 10px 12px; text-align: left; white-space: normal; border-radius: 10px; }
 .st-src .gen-chip small { font-weight: 400; color: var(--text-2); line-height: 1.35; }
 @media (max-width: 520px) { .st-side { padding: 14px; } .st-who-pic { flex-basis: 72px; height: 90px; } }
+
+/* Long video storyboard */
+.story { position: fixed; inset: 0; z-index: 60; background: rgba(0,0,0,.6); display: flex; align-items: flex-end; justify-content: center; }
+.story[hidden] { display: none; }
+.story-sheet { width: min(1100px, 100%); max-height: 94vh; overflow: auto; background: var(--surface); border: 1px solid var(--border-soft);
+  border-radius: var(--r-md) var(--r-md) 0 0; padding: 16px; display: grid; gap: 14px; box-sizing: border-box; }
+.story-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; }
+.story-head h2 { margin: 0; font-size: 1.05rem; }
+.story-head-acts { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.story-strip { display: flex; gap: 10px; overflow-x: auto; padding-bottom: 6px; scroll-snap-type: x proximity; }
+.story-tile { flex: 0 0 120px; scroll-snap-align: start; position: relative; aspect-ratio: 3/4; border-radius: var(--r-sm); overflow: hidden;
+  border: 2px solid var(--border-soft); background: var(--surface-2, #111); cursor: pointer; padding: 0; color: var(--text); font-family: var(--font); }
+.story-tile img, .story-tile video { width: 100%; height: 100%; object-fit: cover; display: block; }
+.story-tile[aria-pressed="true"] { border-color: var(--accent); box-shadow: var(--ring); }
+.story-tile .story-lbl { position: absolute; inset: 0 0 auto 0; padding: 4px 6px; font-size: .62rem; font-weight: 700; letter-spacing: .06em;
+  text-transform: uppercase; color: #fff; background: linear-gradient(rgba(0,0,0,.7), transparent); text-align: left; }
+.story-tile .story-state { position: absolute; inset: auto 0 0 0; padding: 4px 6px; font-size: .66rem; color: #fff; background: rgba(0,0,0,.62); text-align: left; }
+.story-tile.is-wait, .story-tile.is-ghost { display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: .72rem; color: var(--text-muted); }
+.story-tile.is-ghost { border-style: dashed; }
+.story-tile.is-failed { border-color: var(--err); }
+.story-arrow { flex: 0 0 auto; align-self: center; color: var(--text-muted); }
+.story-review { display: grid; gap: 10px; }
+.story-pair { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(260px, 100%), 1fr)); gap: 10px; }
+.story-pair figure { margin: 0; display: grid; gap: 4px; }
+.story-pair figcaption { font-size: .72rem; color: var(--text-muted); }
+.story-pair img, .story-pair video { width: 100%; max-height: 46vh; object-fit: contain; background: #000; border-radius: var(--r-sm); }
+.story-fields { display: grid; gap: 8px; }
+.story-acts, .story-foot { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.story-foot { border-top: 1px solid var(--border-soft); padding-top: 12px; }
+.story-resume { width: 100%; margin-bottom: 8px; }
 </style>
 </head>
 <body class="page-dashboard">
@@ -597,6 +627,10 @@
                  placeholder="she turns towards the camera and smiles"></label>
         <div class="gen-f" id="gen-presets" style="display:none"><span>Presets</span><div></div></div>
         <div id="gen-chain-motions"></div>
+        <div class="gen-f" id="gen-anim-story-row" style="display:none"><span>Longer than one clip?</span>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('photo')">Make a long video from this photo</button>
+          <span class="hint">Step by step: 5s parts you accept one at a time, each carrying on
+            from the last frame of the one before, then stitched into one clip.</span></div>
         <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
           <div class="motion-ideas"></div></div>
         <div class="gen-f" id="gen-lora-row" style="display:none"><span>LoRAs</span>
@@ -662,6 +696,10 @@
             The clip decides the length and the movement.</span>
         </div>
         <span class="hint" id="gen-swap-limits"></span>
+        <div class="gen-f"><span>Longer than one clip?</span>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('swap')">Make a long video from this clip</button>
+          <span class="hint">Step by step: her in the clip's first frame, then 5s parts you
+            accept one at a time, then stitched into one clip.</span></div>
       </div>
 
       <div id="gen-reel-form" class="gen-stackform" style="display:none">
@@ -838,6 +876,7 @@
         <span class="hint" id="gen-status"></span>
       </div>
       </div>
+      <button type="button" class="btn btn-ghost btn-sm story-resume" id="story-resume" style="display:none" onclick="openStory()">Open your long video storyboard</button>
       <div class="gen-staging" id="gen-staging"></div>
       <span class="hint">Nothing here can reach a fan. Keep moves a shot into
         the vault and approves it; the rest delete themselves in three days.</span>
@@ -3353,6 +3392,7 @@ const JOB_VERBS = {
 
 function genQuote() {
   if (!genPrices) return;
+  renderStoryEntry();
   const what = el('gen-quote-what');
   const cost = el('gen-cost');
 
@@ -3638,6 +3678,7 @@ async function pollGenJobs() {
     genJobs = (await res.json()).jobs || [];
   } catch (e) { return; }
   renderGenStaging();
+  renderStory();
 
   // Poll only while something is in flight, so an idle tab is not hitting the
   // server every three seconds forever.
@@ -3660,6 +3701,8 @@ function renderGenStaging() {
   if (!box) return;
   const cards = [];
   genJobs.forEach(job => {
+    // A storyboard's steps are reviewed on the board; only its stitched clip lands here.
+    if (job.story && job.job !== 'stitch') return;
     const engine = job.engine ? `<span class="gen-engine" title="Made with ${esc(job.engine)}">${esc(job.engine)}</span>` : '';
     if (job.status === 'queued' || job.status === 'running') {
       cards.push(['p:' + job.id, `<div class="gen-card gen-pending"><span class="loader-dots" aria-hidden="true"><i></i><i></i><i></i></span>Generating
@@ -3695,6 +3738,388 @@ function renderGenStaging() {
   const { items, more } = capItems('staging', cards, 12, null, renderGenStaging);
   keyedRender(box, items.concat(more ? [['more', more]] : []), '<p class="hint gen-empty">Your generations land here. Nothing here reaches a fan until you keep it.</p>');
   if (window.StudioWizard) StudioWizard.refresh();
+}
+
+// ── Long video storyboard ────────────────────────────────────────────────────
+// Each step is its own job, so a finished job is the review gate. The server
+// holds what matters (seed, anchor, which clip a part carries on from); this
+// only remembers which jobs belong to the board and which were accepted.
+const STORY_MODELS = ['h3-gv', 'wan-2-2-gv'];
+const STORY_SECONDS = { 'h3-gv': [5, 10, 15], 'wan-2-2-gv': [5, 8] };
+let story = null;
+
+function storyKey() { return 'story_' + slug(); }
+function saveStory() {
+  try {
+    if (story) localStorage.setItem(storyKey(), JSON.stringify(story));
+    else localStorage.removeItem(storyKey());
+  } catch (e) {}
+}
+function loadStory() {
+  if (story && story.persona === slug()) return story;
+  story = null;
+  try { story = JSON.parse(localStorage.getItem(storyKey()) || 'null'); } catch (e) {}
+  return story;
+}
+function storyJob(id) { return id ? genJobs.find(j => j.id === id) : null; }
+function storyMedia(step) {
+  if (!step) return null;
+  if (step.media && !step.job) return { id: step.media, url: step.url, kind: step.kind || 'image' };
+  const j = storyJob(step.job);
+  return j && j.status === 'done' ? (j.media || [])[0] || null : null;
+}
+function storyState(step) {
+  if (!step || (!step.job && !step.media)) return 'empty';
+  if (step.media && !step.job) return step.accepted ? 'accepted' : 'review';
+  const j = storyJob(step.job);
+  if (!j) return 'gone';
+  if (j.status === 'failed') return 'failed';
+  if (j.status !== 'done') return 'wait';
+  if (!storyMedia(step)) return 'gone';
+  return step.accepted ? 'accepted' : 'review';
+}
+function storyModels() {
+  const rates = (genPrices && genPrices.video_rates) || {};
+  return STORY_MODELS.filter(m => rates[m]);
+}
+function storyRes() {
+  const rates = ((genPrices && genPrices.video_rates) || {})[story.model] || {};
+  return rates['720p'] ? '720p' : Object.keys(rates)[0] || '720p';
+}
+function storyPartPrice(secs) {
+  const rate = (((genPrices && genPrices.video_rates) || {})[story.model] || {})[storyRes()];
+  return rate ? Math.ceil(rate * secs) : undefined;
+}
+function storyStillPrice() {
+  const base = ((genPrices.images || {})['seedream-4-5'] || {})['2k'];
+  return base === undefined ? undefined : base + ((genPrices.addons || {})['face-lock'] || 0);
+}
+function tokensLabel(n) { return n === undefined ? '' : ` · ${n} token${n === 1 ? '' : 's'}`; }
+function storyAspect(w, h) {
+  if (!w || !h) return currentAspect();
+  const want = w / h;
+  const list = ((genPrices && genPrices.aspects) || ['9:16', '4:5', '1:1', '16:9']);
+  return list.reduce((best, a) => {
+    const [x, y] = a.split(':').map(Number);
+    return Math.abs(x / y - want) < Math.abs(best[1] - want) ? [a, x / y] : best;
+  }, [list[0], 99])[0];
+}
+function setStoryStatus(text, ok) {
+  const s = el('story-status');
+  s.textContent = text || '';
+  s.className = 'hint' + (ok === false ? ' gen-err' : ok ? ' gen-ok' : '');
+}
+
+function startStory(from) {
+  if (!slug()) return setGenStatus('✗ Pick a persona first', false);
+  const models = storyModels();
+  if (!models.length) return setGenStatus('✗ No storyboard engine is set up on this server.', false);
+  const old = loadStory();
+  if (old && (old.parts || []).length && !confirm('Start over? The storyboard you have open is discarded.')) return openStory();
+  const base = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^a-z0-9]/gi, '').slice(0, 24).toLowerCase(),
+    persona: slug(), from: from, rating: genRating, model: models[0], seconds: 5, parts: [], sel: 'still' };
+  if (from === 'swap') {
+    if (!genSwap) return setGenStatus('✗ Upload or pick the clip first', false);
+    story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still: {} });
+  } else {
+    const photo = animPhoto();
+    const row = (mediaVault || []).find(v => v.id === photo);
+    if (!photo || !row) return setGenStatus('✗ Choose a photo first', false);
+    story = Object.assign(base, { photo: photo, aspect: currentAspect(), still:
+      genIdentity === 'vault' ? { media: photo, url: row.thumb || row.url, accepted: true } : {} });
+    if (story.still.accepted) story.sel = 'next';
+  }
+  saveStory();
+  openStory();
+}
+
+function openStory() {
+  if (!loadStory()) return;
+  el('story').hidden = false;
+  renderStory();
+}
+function closeStory() { el('story').hidden = true; renderStoryEntry(); }
+
+function storySetModel(m) {
+  if (!story || !STORY_MODELS.includes(m)) return;
+  story.model = m;
+  if (!(STORY_SECONDS[m] || [5]).includes(story.seconds)) story.seconds = 5;
+  saveStory();
+  renderStory();
+}
+
+function renderStoryEntry() {
+  const row = el('gen-anim-story-row');
+  if (row) row.style.display = genJob === 'animate' && !genDrive && storyModels().length ? '' : 'none';
+  const resume = el('story-resume');
+  if (resume) resume.style.display = loadStory() && el('story').hidden ? '' : 'none';
+}
+
+function storyTile(key, label, step, kind) {
+  const state = storyState(step);
+  const m = storyMedia(step);
+  const pressed = String(story.sel) === String(key);
+  const ttl = m && m.expires_at && state !== 'accepted' ? ' · ' + genTtl(m.expires_at) : '';
+  const words = { wait: 'Generating…', review: 'Review' + ttl, accepted: '✓ Accepted', failed: 'Failed', gone: 'Gone', empty: 'Not made yet' }[state];
+  const sel = typeof key === 'number' ? key : `'${key}'`;
+  if (state === 'wait' || state === 'empty' || state === 'gone') {
+    return `<button type="button" class="story-tile is-wait" aria-pressed="${pressed}" onclick="storySelect(${sel})">
+      <span class="story-lbl">${esc(label)}</span>${state === 'wait' ? '<span class="loader-dots" aria-hidden="true"><i></i><i></i><i></i></span>' : ''}<span>${words}</span></button>`;
+  }
+  const media = state === 'failed' ? '' : (kind === 'video'
+    ? `<video src="${m.url}" muted playsinline preload="metadata"></video>`
+    : `<img src="${m.url}" alt="">`);
+  return `<button type="button" class="story-tile${state === 'failed' ? ' is-failed is-wait' : ''}" aria-pressed="${pressed}" onclick="storySelect(${sel})">
+    ${media}<span class="story-lbl">${esc(label)}</span><span class="story-state">${words}</span></button>`;
+}
+
+function storySelect(key) { story.sel = key; saveStory(); renderStory(); }
+
+function storySeconds() {
+  return story.parts.reduce((n, p) => n + (storyState(p) === 'accepted' ? (p.seconds || 0) : 0), 0);
+}
+
+function renderStory() {
+  if (!story || el('story').hidden) { renderStoryEntry(); return; }
+  const sel = el('story-model');
+  sel.innerHTML = storyModels().map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
+  sel.disabled = story.parts.length > 0;
+  el('story-sub').textContent = `${story.from === 'swap' ? 'From your clip' : 'From your photo'} · ${storySeconds()}s accepted so far`;
+  const tiles = [storyTile('still', 'Still', story.still, 'image')];
+  story.parts.forEach((p, i) => tiles.push(storyTile(i, 'Part ' + (i + 1), p, 'video')));
+  const last = story.parts[story.parts.length - 1];
+  const canExtend = storyState(story.still) === 'accepted' && (!last || storyState(last) === 'accepted');
+  if (canExtend) {
+    tiles.push(`<button type="button" class="story-tile is-ghost" aria-pressed="${story.sel === 'next'}" onclick="storySelect('next')">
+      <span style="font-size:1.4rem">+</span><span>${story.parts.length ? 'Extend' : 'Make part 1'}</span></button>`);
+  }
+  el('story-strip').innerHTML = tiles.join('<span class="story-arrow" aria-hidden="true">&rarr;</span>');
+  const accepted = story.parts.filter(p => storyState(p) === 'accepted').length;
+  const stitch = el('story-stitch');
+  stitch.disabled = !(accepted >= 2 && canExtend);
+  stitch.textContent = accepted >= 2 ? `Stitch ${accepted} parts into one clip · free` : 'Stitch (extend at least once)';
+  el('story-play').disabled = !accepted;
+  renderStoryReview();
+}
+
+function storyPrev(i) {
+  return i === 0 ? storyMedia(story.still) : storyMedia(story.parts[i - 1]);
+}
+function storyFigure(m, caption) {
+  if (!m) return '';
+  const body = isClip(m.kind) ? `<video src="${m.url}" controls playsinline preload="metadata"></video>` : `<img src="${m.url}" alt="">`;
+  return `<figure>${body}<figcaption>${esc(caption)}</figcaption></figure>`;
+}
+function storyFields(motion, prompt, secs) {
+  const options = (STORY_SECONDS[story.model] || [5]).map(n => `<option value="${n}"${n === secs ? ' selected' : ''}>${n}s</option>`).join('');
+  return `<div class="story-fields">
+    <label class="gen-f"><span>What she does in this part</span>
+      <input type="text" id="story-motion" maxlength="300" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body"></label>
+    <label class="gen-f"><span>Length</span><select id="story-secs" onchange="renderStoryButtons()">${options}</select></label>
+    <details${prompt ? ' open' : ''}><summary class="hint">Prompt (optional — written for you when empty)</summary>
+      <textarea id="story-prompt" rows="4" maxlength="2000" style="width:100%">${esc(prompt || '')}</textarea>
+      <button type="button" class="btn-ai btn-ai-secondary" onclick="writeStoryPrompt()">Write it from the motion</button></details>
+    <span class="hint">Every part keeps the same room, light, colours, outfit and framing, and
+      starts on the last frame of the part before.</span></div>`;
+}
+
+function renderStoryReview() {
+  const box = el('story-review');
+  const key = story.sel;
+  if (key === 'still') {
+    const st = storyState(story.still);
+    const m = storyMedia(story.still);
+    if (st === 'empty' || st === 'gone' || st === 'failed') {
+      const j = storyJob(story.still.job);
+      box.innerHTML = `${st === 'failed' ? `<p class="gen-err">${esc((j && j.error) || 'That failed.')} The tokens were refunded.</p>` : ''}
+        <p class="hint">Step 1: her character put into ${story.from === 'swap' ? "the clip's first frame" : 'your photo'}, scene, light and outfit kept.</p>
+        <div class="story-acts"><button type="button" class="btn btn-primary" onclick="makeStoryStill()">Make the still${tokensLabel(storyStillPrice())}</button></div>`;
+    } else if (st === 'wait') {
+      box.innerHTML = '<p class="hint">Putting her into the frame… this takes a minute.</p>';
+    } else {
+      box.innerHTML = `<div class="story-pair">${storyFigure(m, 'The starting point of every part')}</div>
+        <div class="story-acts">${st === 'review' ? `<button type="button" class="btn btn-primary" onclick="acceptStory('still')">Accept as the starting point</button>` : ''}
+        ${story.still.job ? `<button type="button" class="btn btn-ghost btn-sm" onclick="makeStoryStill()">Redo${tokensLabel(storyStillPrice())}</button>` : ''}</div>`;
+    }
+    return;
+  }
+  if (key === 'next') {
+    const i = story.parts.length;
+    box.innerHTML = `<div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i} — part ${i + 1} starts on its last frame` : 'Part 1 starts on this')}</div>
+      ${storyFields('', '', story.seconds)}
+      <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
+    renderStoryButtons();
+    return;
+  }
+  const i = Number(key);
+  const p = story.parts[i];
+  if (!p) { story.sel = 'next'; return renderStoryReview(); }
+  const st = storyState(p);
+  const j = storyJob(p.job);
+  const later = story.parts.length - 1 - i;
+  if (st === 'wait') {
+    box.innerHTML = `<p class="hint">Generating part ${i + 1}… a few minutes. You can close this; it keeps going.</p>`;
+    return;
+  }
+  box.innerHTML = `${st === 'failed' ? `<p class="gen-err">${esc((j && j.error) || 'That failed.')} The tokens were refunded.</p>` : ''}
+    ${st === 'gone' ? '<p class="gen-err">This part is gone (dropped or expired). Make it again.</p>' : ''}
+    <div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i}` : 'Still')}${storyFigure(storyMedia(p), `Part ${i + 1}`)}</div>
+    ${storyFields(p.motion, p.prompt, p.seconds)}
+    <div class="story-acts">
+      ${st === 'review' ? `<button type="button" class="btn btn-primary" onclick="acceptStory(${i})">Accept part ${i + 1}</button>` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" id="story-go" onclick="redoStoryPart(${i})"></button>
+      ${later ? `<span class="hint">Redoing this drops the ${later} part${later === 1 ? '' : 's'} after it.</span>` : ''}</div>`;
+  renderStoryButtons();
+}
+
+function renderStoryButtons() {
+  const btn = el('story-go');
+  if (!btn) return;
+  const secs = Number((el('story-secs') || {}).value) || story.seconds;
+  const price = storyPartPrice(secs);
+  const cash = cashFor(price);
+  const verb = story.sel === 'next' ? `Make part ${story.parts.length + 1}` : 'Redo with these changes';
+  btn.textContent = verb + tokensLabel(price) + (cash ? ` · ${cash}` : '');
+}
+
+async function storyPost(url, body) {
+  const res = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const d = await res.json().catch(() => ({}));
+  if (!d.ok) throw new Error(d.error || 'That did not work');
+  return d;
+}
+
+async function dropStoryMedia(ids) {
+  ids = ids.filter(Boolean);
+  if (ids.length) {
+    try { await storyPost('/api/generate/keep', { keep: false, media_ids: ids }); } catch (e) {}
+  }
+}
+
+async function makeStoryStill() {
+  setStoryStatus('Sending…');
+  try {
+    const old = storyMedia(story.still);
+    let photo = story.photo;
+    if (story.from === 'swap') {
+      photo = story.frame;
+      if (!photo) {
+        photo = (await storyPost('/api/generate/first-frame', { persona: story.persona, source: story.source, rating: story.rating })).media;
+        story.frame = photo;
+      }
+    }
+    const d = await storyPost('/api/generate/swap-in', { persona: story.persona, reference_media: photo, rating: story.rating,
+      batch: 1, story: story.id });
+    if (old && old.id !== story.photo) dropStoryMedia([old.id]);
+    story.still = { job: d.job };
+    story.sel = 'still';
+    saveStory();
+    setStoryStatus(`Running${tokensLabel(d.tokens)}`);
+    loadCredits();
+    await pollGenJobs();
+  } catch (e) { setStoryStatus('✗ ' + e.message, false); }
+}
+
+function storyPartBody(i) {
+  const secs = Number((el('story-secs') || {}).value) || story.seconds;
+  const prompt = ((el('story-prompt') || {}).value || '').trim();
+  const body = { persona: story.persona, job: 'animate', rating: story.rating, model: story.model,
+    seconds: secs, resolution: storyRes(), aspect: story.aspect, story: story.id, identity: 'vault', lock: false,
+    motion: ((el('story-motion') || {}).value || '').trim(), video_prompt: prompt,
+    her_lora: genHerLora, loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })) };
+  if (i === 0) body.reference_media = storyMedia(story.still).id;
+  else body.continue_from = storyMedia(story.parts[i - 1]).id;
+  return body;
+}
+
+async function makeStoryPart(i) {
+  const btn = el('story-go');
+  if (btn) btn.disabled = true;
+  setStoryStatus('Sending…');
+  try {
+    const body = storyPartBody(i);
+    if (!body.motion && !body.video_prompt) throw new Error('Say what she does in this part');
+    const d = await storyPost('/api/generate/job', body);
+    story.parts[i] = { job: d.job, motion: body.motion, prompt: body.video_prompt, seconds: body.seconds };
+    story.parts = story.parts.slice(0, i + 1);
+    story.seconds = body.seconds;
+    story.sel = i;
+    saveStory();
+    setStoryStatus(`Running${tokensLabel(d.tokens)}. It takes a few minutes.`);
+    loadCredits();
+    await pollGenJobs();
+    return true;
+  } catch (e) { setStoryStatus('✗ ' + e.message, false); if (btn) btn.disabled = false; return false; }
+}
+
+async function redoStoryPart(i) {
+  const later = story.parts.slice(i);
+  if (later.length > 1 && !confirm(`Redo part ${i + 1}? The ${later.length - 1} part(s) after it are dropped.`)) return;
+  const ids = later.map(p => (storyMedia(p) || {}).id);
+  // Dropped only once the new part is taken, so a refused redo leaves the old one.
+  if (await makeStoryPart(i)) dropStoryMedia(ids);
+}
+
+function acceptStory(key) {
+  if (key === 'still') story.still.accepted = true;
+  else story.parts[key].accepted = true;
+  story.sel = 'next';
+  saveStory();
+  renderStory();
+}
+
+async function writeStoryPrompt() {
+  const i = story.sel === 'next' ? story.parts.length : Number(story.sel);
+  setStoryStatus('Writing the prompt…');
+  try {
+    const body = Object.assign(storyPartBody(i), { write: true });
+    body.video_prompt = '';
+    const d = await storyPost('/api/generate/video-prompt', body);
+    el('story-prompt').value = d.prompt || '';
+    el('story-prompt').closest('details').open = true;
+    setStoryStatus(d.note || '');
+  } catch (e) { setStoryStatus('✗ ' + e.message, false); }
+}
+
+function playStory() {
+  const clips = story.parts.filter(p => storyState(p) === 'accepted').map(storyMedia);
+  if (!clips.length) return;
+  const box = el('story-review');
+  box.innerHTML = '<div class="story-pair"><figure><video id="story-player" controls playsinline autoplay></video><figcaption id="story-player-cap"></figcaption></figure></div>';
+  const v = el('story-player');
+  let n = 0;
+  const next = () => {
+    if (n >= clips.length) return;
+    el('story-player-cap').textContent = `Part ${n + 1} of ${clips.length} (parts are joined without the seam frame when stitched)`;
+    v.src = clips[n++].url;
+    v.play().catch(() => {});
+  };
+  v.addEventListener('ended', next);
+  next();
+}
+
+async function stitchStory() {
+  const accepted = story.parts.filter(p => storyState(p) === 'accepted');
+  const btn = el('story-stitch');
+  btn.disabled = true;
+  setStoryStatus('Stitching and matching the colours at every seam…');
+  try {
+    await storyPost('/api/generate/stitch', { persona: story.persona, story: story.id, last: storyMedia(accepted[accepted.length - 1]).id });
+    setStoryStatus('✓ Stitched. It is in your generations: Keep it to put it in the vault.', true);
+    await pollGenJobs();
+  } catch (e) { setStoryStatus('✗ ' + e.message, false); btn.disabled = false; }
+}
+
+async function discardStory() {
+  if (!story || !confirm('Discard this storyboard and drop its parts?')) return;
+  const ids = story.parts.map(p => (storyMedia(p) || {}).id);
+  if (story.still && story.still.job) ids.push((storyMedia(story.still) || {}).id);
+  if (story.frame) ids.push(story.frame);
+  await dropStoryMedia(ids);
+  story = null;
+  saveStory();
+  closeStory();
+  pollGenJobs();
 }
 
 async function deleteGenJob(id) {
@@ -4853,5 +5278,24 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   tick();
 })();
 </script>
+<div id="story" class="story" hidden role="dialog" aria-modal="true" aria-labelledby="story-title">
+  <div class="story-sheet">
+    <header class="story-head">
+      <div><h2 id="story-title">Long video</h2><span class="hint" id="story-sub"></span></div>
+      <div class="story-head-acts">
+        <label class="hint">Engine <select id="story-model" onchange="storySetModel(this.value)"></select></label>
+        <button type="button" class="btn btn-ghost btn-sm" onclick="closeStory()">Close</button>
+      </div>
+    </header>
+    <div class="story-strip" id="story-strip"></div>
+    <div class="story-review" id="story-review"></div>
+    <footer class="story-foot">
+      <button type="button" class="btn btn-ghost btn-sm" id="story-play" onclick="playStory()">&#9654; Preview all</button>
+      <button type="button" class="btn btn-primary" id="story-stitch" onclick="stitchStory()">Stitch into one clip</button>
+      <button type="button" class="btn btn-ghost btn-sm" onclick="discardStory()">Discard</button>
+      <span class="hint" id="story-status"></span>
+    </footer>
+  </div>
+</div>
 </body>
 </html>

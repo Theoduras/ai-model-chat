@@ -342,6 +342,19 @@ PRESERVE_CLAUSE = (
     'change.')
 
 
+# The engines a storyboard runs on: both take a start frame and a seed, and
+# H3 also takes her still as an identity image.
+STORY_MODELS = ('h3-gv', 'wan-2-2-gv')
+
+# A storyboard part carries on from the frame the last one ended on. Every
+# part is a fresh generation, so without this it re-imagines the room.
+CONTINUITY_CLAUSE = (
+    'This continues the same shot: the same room, background, objects, '
+    'lighting and colour grade, the same outfit and framing as the first '
+    'frame. Nothing new appears and nothing in the scene changes except what '
+    'she does.')
+
+
 def preserves_source(job, model_key):
     """Whether this job's prompt carries the locked preservation clause.
 
@@ -1786,12 +1799,58 @@ def first_frame(video):
             return b''
 
 
-def join_clips(videos):
+def _frame_stats(jpeg, grade=None):
+    """Per-channel (mean, stddev) of a frame, after a grade when given."""
+    import io
+    from PIL import Image, ImageStat
+    img = Image.open(io.BytesIO(jpeg)).convert('RGB')
+    img.thumbnail((256, 256))
+    if grade:
+        bands = [b.point(lambda v, g=g, o=o: max(0, min(255, round(v * g + o))))
+                 for b, (g, o) in zip(img.split(), grade)]
+        img = Image.merge('RGB', bands)
+    st = ImageStat.Stat(img)
+    return list(zip(st.mean, st.stddev))
+
+
+def colour_grades(videos):
+    """A per-channel (gain, offset) for each part that pulls its opening frame
+    onto the graded closing frame of the part before, so a long clip built
+    from parts does not shift colour at every seam. Part 1 is the reference;
+    a part whose frames cannot be read is left as it came."""
+    grades = [None]
+    for prev, cur in zip(videos, videos[1:]):
+        try:
+            ref = _frame_stats(last_frame(prev), grades[-1])
+            src = _frame_stats(first_frame(cur))
+        except Exception:
+            grades.append(None)
+            continue
+        grade = []
+        for (rm, rs), (sm, ss) in zip(ref, src):
+            g = max(0.8, min(1.25, rs / ss)) if ss > 1 else 1.0
+            grade.append((g, max(-40.0, min(40.0, rm - g * sm))))
+        grades.append(None if all(abs(g - 1) < 0.01 and abs(o) < 1 for g, o in grade)
+                      else grade)
+    return grades
+
+
+def grade_filter(grade):
+    # lutrgb clips its output to the pixel range itself, so the expression
+    # needs no clip() -- whose commas a filtergraph would read as separators.
+    if not grade:
+        return ''
+    return 'lutrgb=' + ':'.join(f'{c}=val*{g:.4f}{o:+.2f}' for c, (g, o) in zip('rgb', grade)) + ','
+
+
+def join_clips(videos, grades=None):
     """Parts back to back as one clip. Each later part starts on the frame
     the one before ended on, so that frame is dropped once to avoid a stutter.
+    `grades`, from colour_grades, are applied part by part in the same pass.
     b'' when the join fails."""
     if not HAS_FFMPEG or not videos:
         return b''
+    grades = list(grades or []) + [None] * len(videos)
     with tempfile.TemporaryDirectory(dir='/tmp') as d:
         cmd = ['ffmpeg', '-y', '-loglevel', 'error']
         for i, v in enumerate(videos):
@@ -1801,6 +1860,7 @@ def join_clips(videos):
             cmd += ['-i', p]
         n = len(videos)
         chains = [f'[{i}:v]' + ('trim=start_frame=1,setpts=PTS-STARTPTS,' if i else '')
+                  + grade_filter(grades[i])
                   + f'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[v{i}]'
                   for i in range(n)]
         # Parts with sound (H3) keep it, trimmed by the same dropped frame;
