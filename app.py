@@ -35107,6 +35107,15 @@ def _gen_spec(slug, body, user):
                      'reference_media': '', 'seed': before.get('seed'),
                      'story_anchor': before.get('story_anchor') or '',
                      'story_before': before.get('motion') or ''})
+    elif job == 'animate' and spec.get('story_id') and body.get('extend_upload'):
+        # Part one continues an uploaded clip of her: it starts on that clip's
+        # last frame, and a still picked alongside is only the identity image.
+        upload_id = str(body['extend_upload']).strip()
+        src = _video_source_row(slug, upload_id)
+        if not src:
+            raise imagegen.GenerationError('That clip is no longer there. Upload it again.')
+        spec.update({'story_upload': src['path'], 'story_upload_id': upload_id,
+                     'story_anchor': spec['reference_media'], 'reference_media': ''})
     elif not spec['reference_media']:
         raise imagegen.GenerationError(
             'Pick an approved photo to animate — a clip starts from one.')
@@ -35151,7 +35160,8 @@ def _gen_spec(slug, body, user):
         if spec.get('source_path'):
             raise imagegen.GenerationError('A storyboard part does not take a motion clip.')
         if not spec.get('continue_from'):
-            spec['story_anchor'] = spec['reference_media']
+            if not spec.get('story_upload'):
+                spec['story_anchor'] = spec['reference_media']
             spec['seed'] = random.randint(0, 2**31 - 1)
 
     if job != 'swap':
@@ -38185,7 +38195,7 @@ def api_generate_video_prompt():
         if part >= 2 and part - 2 < len(chain.get('motions') or []):
             motion = chain['motions'][part - 2]
             prompt = imagegen.build_chain_prompt(motion)
-        elif spec.get('continue_from'):
+        elif spec.get('continue_from') or spec.get('story_upload'):
             motion = spec.get('motion', '')
             prompt = imagegen.build_chain_prompt(motion)
             part = 2
@@ -38504,6 +38514,11 @@ def api_generate_frame_loras():
     job = str(body.get('job') or '').strip()
     if job:
         read = imagegen.read_frame(b'', wait=20, job=job)
+    elif body.get('source'):
+        src = _video_source_row(slug, str(body['source']).strip())
+        if not src:
+            return jsonify({'ok': False, 'error': 'That clip is no longer there.'}), 400
+        read = imagegen.read_frame(imagegen.last_frame(storage.get(src['path']) or b''), wait=20)
     else:
         row = _media_row(slug, str(body.get('media') or '').strip())
         if not row:
@@ -38535,10 +38550,11 @@ def api_generate_stitch():
     parts = _story_parts(workspace, slug, story, str(body.get('last') or '').strip())
     if parts is None:
         return jsonify({'ok': False, 'error': 'A part of this storyboard is gone. Make it again first.'}), 400
-    if len(parts) < 2:
+    upload = parts[0][1].get('story_upload') if body.get('include_upload') else ''
+    if len(parts) + bool(upload) < 2:
         return jsonify({'ok': False, 'error': 'Extend it at least once first.'}), 400
     try:
-        clips = [storage.get(p) for p, _spec in parts]
+        clips = ([storage.get(upload)] if upload else []) + [storage.get(p) for p, _spec in parts]
         joined = imagegen.join_clips(clips, imagegen.colour_grades(clips))
     except Exception:
         logger.exception('stitch failed story=%s', story)
@@ -38936,10 +38952,10 @@ def _gen_start(job_id, slug, spec, workspace):
                         and os.getenv('RUNPOD_FETCH_LINKS') == '1'):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
                                              f"{_wish_file_token(_row['id'], ttl=900 + (imagegen.VAST_ROUTE_WAIT if spec.get('model') in imagegen.VAST_MODELS else 0))}")
-                if spec.get('continue_from'):
-                    parent = _media_row(slug, spec['continue_from']) or {}
-                    frame = (imagegen.last_frame(storage.get(parent['gcs_path']) or b'')
-                             if parent.get('gcs_path') else b'')
+                if spec.get('continue_from') or spec.get('story_upload'):
+                    path = spec.get('story_upload') or (
+                        _media_row(slug, spec['continue_from']) or {}).get('gcs_path')
+                    frame = imagegen.last_frame(storage.get(path) or b'') if path else b''
                     if not frame:
                         raise imagegen.GenerationError(
                             'The end of the part before could not be read.')
@@ -38962,7 +38978,7 @@ def _gen_start(job_id, slug, spec, workspace):
                 if spec.get('story_id'):
                     call['prompt'] = (call.get('prompt') or '') + ' ' + imagegen.CONTINUITY_CLAUSE
                 spec['sent'] = [dict(_video_sent(call, provider.name),
-                                     start='frame' if spec.get('continue_from')
+                                     start='frame' if spec.get('continue_from') or spec.get('story_upload')
                                      else 'ref' if spec.get('reference_media') else '',
                                      identity='ref' if call.get('identity_b64') else '',
                                      ref_paths=_ref_paths(slug, call))]

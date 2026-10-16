@@ -698,6 +698,7 @@
         <span class="hint" id="gen-swap-limits"></span>
         <div class="gen-f"><span>Longer than one clip?</span>
           <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('swap')">Make a long video from this clip</button>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('upload')">It's already her: carry this clip on</button>
           <span class="hint">Step by step: her in the clip's first frame, then 5s parts you
             accept one at a time, then stitched into one clip.</span></div>
       </div>
@@ -3834,9 +3835,11 @@ function startStory(from) {
   if (old && (old.parts || []).length && !confirm('Start over? The storyboard you have open is discarded.')) return openStory();
   const base = { id: (crypto.randomUUID ? crypto.randomUUID() : String(Date.now()) + Math.random()).replace(/[^a-z0-9]/gi, '').slice(0, 24).toLowerCase(),
     persona: slug(), from: from, rating: genRating, model: models[0], seconds: 5, parts: [], sel: 'still' };
-  if (from === 'swap') {
+  if (from === 'swap' || from === 'upload') {
     if (!genSwap) return setGenStatus('✗ Upload or pick the clip first', false);
-    story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still: {} });
+    story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still:
+      from === 'upload' ? { media: genSwap.id, url: genSwap.url, kind: 'video', accepted: true } : {} });
+    if (from === 'upload') story.sel = 'next';
   } else {
     const photo = animPhoto();
     const row = (mediaVault || []).find(v => v.id === photo);
@@ -3900,8 +3903,9 @@ function renderStory() {
   const sel = el('story-model');
   sel.innerHTML = storyModels().map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
   sel.disabled = story.parts.length > 0;
-  el('story-sub').textContent = `${story.from === 'swap' ? 'From your clip' : 'From your photo'} · ${storySeconds()}s accepted so far`;
-  const tiles = [storyTile('still', 'Still', story.still, 'image')];
+  const upload = story.from === 'upload';
+  el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : 'From your photo'} · ${storySeconds()}s accepted so far`;
+  const tiles = [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
   story.parts.forEach((p, i) => tiles.push(storyTile(i, 'Part ' + (i + 1), p, 'video')));
   const last = story.parts[story.parts.length - 1];
   const canExtend = storyState(story.still) === 'accepted' && (!last || storyState(last) === 'accepted');
@@ -3912,8 +3916,11 @@ function renderStory() {
   el('story-strip').innerHTML = tiles.join('<span class="story-arrow" aria-hidden="true">&rarr;</span>');
   const accepted = story.parts.filter(p => storyState(p) === 'accepted').length;
   const stitch = el('story-stitch');
-  stitch.disabled = !(accepted >= 2 && canExtend);
-  stitch.textContent = accepted >= 2 ? `Stitch ${accepted} parts into one clip · free` : 'Stitch (extend at least once)';
+  const withUpload = upload && el('story-with-upload').checked;
+  el('story-with-upload-row').hidden = !upload;
+  const pieces = accepted + (withUpload ? 1 : 0);
+  stitch.disabled = !(pieces >= 2 && canExtend);
+  stitch.textContent = pieces >= 2 ? `Stitch ${pieces} parts into one clip · free` : 'Stitch (extend at least once)';
   el('story-play').disabled = !accepted;
   if (!el('story-review').contains(document.activeElement)) renderStoryReview();
 }
@@ -3990,7 +3997,8 @@ function storyTick(id, on, scale) {
 async function readStoryFrame(media, readKey) {
   story.reads[readKey] = { pending: true };
   try {
-    const ask = { persona: story.persona, media: media, model: story.model, rating: story.rating };
+    const ask = { persona: story.persona, model: story.model, rating: story.rating };
+    if (story.from === 'upload' && media === story.source) ask.source = media; else ask.media = media;
     let d = await storyPost('/api/generate/frame-loras', ask);
     // A cold reader takes minutes to start; the read is polled, not dropped.
     for (let n = 0; d.pending && n < 60; n++) {
@@ -4046,7 +4054,7 @@ function renderStoryReview() {
   }
   box.innerHTML = `${st === 'failed' ? `<p class="gen-err">${esc((j && j.error) || 'That failed.')} The tokens were refunded.</p>` : ''}
     ${st === 'gone' ? '<p class="gen-err">This part is gone (dropped or expired). Make it again.</p>' : ''}
-    <div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i}` : 'Still')}${storyFigure(storyMedia(p), `Part ${i + 1}`)}</div>
+    <div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i}` : story.from === 'upload' ? 'Your clip' : 'Still')}${storyFigure(storyMedia(p), `Part ${i + 1}`)}</div>
     ${storyFields(p.motion, p.prompt, p.seconds)}
     <div class="story-acts">
       ${st === 'review' ? `<button type="button" class="btn btn-primary" onclick="acceptStory(${i})">Accept part ${i + 1}</button>` : ''}
@@ -4111,7 +4119,8 @@ function storyPartBody(i) {
     seconds: secs, resolution: storyRes(), aspect: story.aspect, story: story.id, identity: 'vault', lock: false,
     motion: ((el('story-motion') || {}).value || '').trim(), video_prompt: prompt,
     her_lora: genHerLora, loras: Object.entries(storyTicks).map(([id, scale]) => ({ id, scale })) };
-  if (i === 0) body.reference_media = storyMedia(story.still).id;
+  if (i === 0 && story.from === 'upload') body.extend_upload = story.source;
+  else if (i === 0) body.reference_media = storyMedia(story.still).id;
   else body.continue_from = storyMedia(story.parts[i - 1]).id;
   return body;
 }
@@ -4189,7 +4198,8 @@ async function stitchStory() {
   btn.disabled = true;
   setStoryStatus('Stitching and matching the colours at every seam…');
   try {
-    await storyPost('/api/generate/stitch', { persona: story.persona, story: story.id, last: storyMedia(accepted[accepted.length - 1]).id });
+    await storyPost('/api/generate/stitch', { persona: story.persona, story: story.id, last: storyMedia(accepted[accepted.length - 1]).id,
+      include_upload: story.from === 'upload' && el('story-with-upload').checked });
     setStoryStatus('✓ Stitched. It is in your generations: Keep it to put it in the vault.', true);
     await pollGenJobs();
   } catch (e) { setStoryStatus('✗ ' + e.message, false); btn.disabled = false; }
@@ -5376,6 +5386,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     <div class="story-review" id="story-review"></div>
     <footer class="story-foot">
       <button type="button" class="btn btn-ghost btn-sm" id="story-play" onclick="playStory()">&#9654; Preview all</button>
+      <label class="hint" id="story-with-upload-row" hidden><input type="checkbox" id="story-with-upload" checked onchange="renderStory()"> Include your clip</label>
       <button type="button" class="btn btn-primary" id="story-stitch" onclick="stitchStory()">Stitch into one clip</button>
       <button type="button" class="btn btn-ghost btn-sm" onclick="discardStory()">Discard</button>
       <span class="hint" id="story-status"></span>

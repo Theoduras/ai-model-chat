@@ -960,6 +960,21 @@ def test_storyboard():
             ok = True
         check('a storyboard runs only on its own engines', ok)
         check('a bad story id is ignored', A._story_id({'story': '../x'}) == '')
+        real_src = A._video_source_row
+        A._video_source_row = lambda slug, sid: {'path': 'sources/up'} if sid == 'up' else None
+        try:
+            up = A._gen_spec('lilith', dict(base, extend_upload='up'), None)
+            check('part one can carry on an uploaded clip of her',
+                  up['story_upload'] == 'sources/up' and not up['reference_media']
+                  and up['story_anchor'] == '' and isinstance(up.get('seed'), int))
+            try:
+                A._gen_spec('lilith', dict(base, extend_upload='gone'), None)
+                ok = False
+            except IG.GenerationError:
+                ok = True
+            check('a missing upload is refused', ok)
+        finally:
+            A._video_source_row = real_src
         check('parts walk back to part one, in order',
               [p for p, _s in A._story_parts('ws', 'lilith', 'abcd1234', 'p2')]
               == ['staging/p1', 'staging/p2'])
