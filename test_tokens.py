@@ -973,6 +973,9 @@ def test_storyboard():
             except IG.GenerationError:
                 ok = True
             check('a missing upload is refused', ok)
+            pinned = A._gen_spec('lilith', dict(base, extend_upload='up', reference_media='still'), None)
+            check('a photo picked with an upload is only the identity image',
+                  pinned['story_anchor'] == 'still' and not pinned['reference_media'])
         finally:
             A._video_source_row = real_src
         check('parts walk back to part one, in order',

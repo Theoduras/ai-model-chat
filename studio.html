@@ -3933,9 +3933,27 @@ function storyFigure(m, caption) {
   const body = isClip(m.kind) ? `<video src="${m.url}" controls playsinline preload="metadata"></video>` : `<img src="${m.url}" alt="">`;
   return `<figure>${body}<figcaption>${esc(caption)}</figcaption></figure>`;
 }
+// A carried-on upload has no still of her; an approved photo picked here rides
+// along on H3 as the identity image so later parts do not drift from her face.
+function storyAnchorField() {
+  const row = story.anchor && (mediaVault || []).find(v => v.id === story.anchor);
+  return `<div class="gen-f"><span>Her photo (optional, keeps her face steady)</span>
+    <div style="display:flex;align-items:center;gap:8px">
+      ${row ? `<img src="${row.thumb || row.url}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:6px">` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pickStoryAnchor()">${row ? 'Change' : 'Pick a photo'}</button>
+      ${row ? `<button type="button" class="btn btn-ghost btn-sm" onclick="setStoryAnchor('')">Remove</button>` : ''}</div></div>`;
+}
+function pickStoryAnchor() {
+  VaultPicker.open({ persona: story.persona, kind: 'image', max: 1, title: 'Her photo for the identity',
+    picked: story.anchor ? [story.anchor] : [], onUpload: syncVault,
+    onDone: ids => { syncVault(); setStoryAnchor(ids[0] || ''); } });
+}
+function setStoryAnchor(id) { story.anchor = id; saveStory(); renderStoryReview(); }
+
 function storyFields(motion, prompt, secs) {
   const options = (STORY_SECONDS[story.model] || [5]).map(n => `<option value="${n}"${n === secs ? ' selected' : ''}>${n}s</option>`).join('');
-  return `<div class="story-fields">
+  const anchor = story.from === 'upload' && storyPartIndex() === 0 ? storyAnchorField() : '';
+  return `<div class="story-fields">${anchor}
     <label class="gen-f"><span>What she does in this part</span>
       <input type="text" id="story-motion" maxlength="300" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body"></label>
     <label class="gen-f"><span>Length</span><select id="story-secs" onchange="renderStoryButtons()">${options}</select></label>
@@ -4119,7 +4137,10 @@ function storyPartBody(i) {
     seconds: secs, resolution: storyRes(), aspect: story.aspect, story: story.id, identity: 'vault', lock: false,
     motion: ((el('story-motion') || {}).value || '').trim(), video_prompt: prompt,
     her_lora: genHerLora, loras: Object.entries(storyTicks).map(([id, scale]) => ({ id, scale })) };
-  if (i === 0 && story.from === 'upload') body.extend_upload = story.source;
+  if (i === 0 && story.from === 'upload') {
+    body.extend_upload = story.source;
+    if (story.anchor) body.reference_media = story.anchor;
+  }
   else if (i === 0) body.reference_media = storyMedia(story.still).id;
   else body.continue_from = storyMedia(story.parts[i - 1]).id;
   return body;
