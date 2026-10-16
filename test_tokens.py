@@ -1009,6 +1009,31 @@ def test_storyboard():
     check('the graded parts join', len(IG.join_clips(clips, grades)) > 0)
 
 
+def test_story_drafts():
+    print('story drafts')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    store = {}
+    real = (A._require_active, A.owned_slugs, A._current_user, A._workspace_id,
+            A._get_setting, A._set_setting)
+    A._require_active = lambda: None
+    A.owned_slugs = lambda: None
+    A._current_user = lambda: {}
+    A._workspace_id = lambda u: 'ws'
+    A._get_setting = lambda k, d=None: store.get(k, d)
+    A._set_setting = lambda k, v: store.__setitem__(k, v)
+    try:
+        with A.app.test_request_context('/api/generate/story-drafts', method='POST',
+                                        json={'persona': 'lilith', 'drafts': [{'id': 'a1'}]}):
+            A.api_generate_story_drafts()
+        with A.app.test_request_context('/api/generate/story-drafts?persona=lilith'):
+            got = A.api_generate_story_drafts().get_json()['drafts']
+        check('long video drafts live on the account', got == [{'id': 'a1'}], got)
+    finally:
+        (A._require_active, A.owned_slugs, A._current_user, A._workspace_id,
+         A._get_setting, A._set_setting) = real
+
+
 def test_frame_loras():
     print('frame loras')
     os.environ.setdefault('GEMINI_API_KEY', 'test')
@@ -1036,7 +1061,7 @@ if __name__ == '__main__':
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
                test_character_plus_vault_photos, test_wan22_on_runpod,
-               test_lock_windows, test_plus_tiers, test_storyboard, test_frame_loras):
+               test_lock_windows, test_plus_tiers, test_storyboard, test_frame_loras, test_story_drafts):
         fn()
     print()
     if FAILURES:

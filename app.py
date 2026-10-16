@@ -38481,6 +38481,34 @@ def _story_request():
     return _current_user(), slug, body
 
 
+@app.route('/api/generate/story-drafts', methods=['GET', 'POST'])
+def api_generate_story_drafts():
+    """Long videos put aside, kept on the account so any device can reopen them."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    body = request.get_json(silent=True) or {}
+    slug = str(body.get('persona') or request.args.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    key = f'story_drafts:{_workspace_id(_current_user())}:{slug}'
+    if request.method == 'POST':
+        drafts = body.get('drafts') if isinstance(body.get('drafts'), list) else []
+        raw = json.dumps(drafts[:20])
+        if len(raw) > 200_000:
+            return jsonify({'ok': False, 'error': 'Too many drafts. Delete some first.'}), 400
+        _set_setting(key, raw)
+        return jsonify({'ok': True})
+    try:
+        drafts = json.loads(_get_setting(key) or '[]')
+    except ValueError:
+        drafts = []
+    return jsonify({'ok': True, 'drafts': drafts if isinstance(drafts, list) else []})
+
+
 @app.route('/api/generate/first-frame', methods=['POST'])
 def api_generate_first_frame():
     """A storyboard's step one for a swap: the uploaded clip's opening frame as

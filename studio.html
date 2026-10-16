@@ -631,6 +631,9 @@
           <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('photo')">Make a long video from this photo</button>
           <span class="hint">Step by step: 5s parts you accept one at a time, each carrying on
             from the last frame of the one before, then stitched into one clip.</span></div>
+        <div class="gen-f" id="gen-text-story-row" style="display:none"><span>Longer than one clip?</span>
+          <button type="button" class="btn btn-ghost btn-sm" style="align-self:flex-start" onclick="startStory('text')">Make a long video from text</button>
+          <span class="hint">A photo of her from your text first, then 5s H3 parts you accept one at a time, stitched into one clip.</span></div>
         <div class="gen-f" id="gen-motion-ideas" style="display:none"><span>Ideas from the photo</span>
           <div class="motion-ideas"></div></div>
         <div class="gen-f" id="gen-lora-row" style="display:none"><span>LoRAs</span>
@@ -3781,11 +3784,35 @@ function loadStory() {
 }
 // Drafts are storyboards put aside so another can be made; their parts still
 // expire with staging, so a draft left for days comes back with parts gone.
+// Kept on the account; fetched once per persona, then written back whole.
+let draftCache = { slug: '', list: [], loading: false };
 function storyDrafts() {
-  try { return JSON.parse(localStorage.getItem('story_drafts_' + slug()) || '[]'); } catch (e) { return []; }
+  if (draftCache.slug !== slug() && !draftCache.loading && slug()) loadDrafts();
+  return draftCache.slug === slug() ? draftCache.list : [];
+}
+async function loadDrafts() {
+  const who = slug();
+  draftCache.loading = true;
+  try {
+    const d = await (await fetch('/api/generate/story-drafts?persona=' + encodeURIComponent(who))).json();
+    let list = d.drafts || [];
+    // Drafts from before they lived on the account move across once.
+    let local = [];
+    try { local = JSON.parse(localStorage.getItem('story_drafts_' + who) || '[]'); } catch (e) {}
+    draftCache = { slug: who, list: list, loading: false };
+    if (local.length) {
+      saveDrafts(local.concat(list.filter(x => !local.some(l => l.id === x.id))));
+      try { localStorage.removeItem('story_drafts_' + who); } catch (e) {}
+    }
+  } catch (e) { draftCache.loading = false; return; }
+  renderStoryEntry();
 }
 function saveDrafts(list) {
-  try { localStorage.setItem('story_drafts_' + slug(), JSON.stringify(list.slice(0, 20))); } catch (e) {}
+  draftCache = { slug: slug(), list: list.slice(0, 20), loading: false };
+  fetch('/api/generate/story-drafts', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ persona: slug(), drafts: draftCache.list }) })
+    .then(r => r.json()).then(d => { if (!d.ok) setGenStatus('✗ ' + (d.error || 'The drafts could not be saved'), false); })
+    .catch(() => setGenStatus('✗ The drafts could not be saved', false));
 }
 function draftStory() {
   if (!story) return;
@@ -3842,6 +3869,7 @@ function storyPartPrice(secs) {
   return rate ? Math.ceil(rate * secs) : undefined;
 }
 function storyStillPrice() {
+  if (story && story.from === 'text') return Object.values((genPrices.images || {})['wan-2-2-char'] || {})[0];
   const base = ((genPrices.images || {})['seedream-4-5'] || {})['2k'];
   return base === undefined ? undefined : base + ((genPrices.addons || {})['face-lock'] || 0);
 }
@@ -3877,6 +3905,8 @@ function startStory(from) {
     story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still:
       from === 'upload' ? { media: genSwap.id, url: genSwap.url, kind: 'video', accepted: true } : {} });
     if (from === 'upload') story.sel = 'next';
+  } else if (from === 'text') {
+    story = Object.assign(base, { model: 'h3-gv', aspect: currentAspect(), still: {} });
   } else {
     const photo = animPhoto();
     const row = (mediaVault || []).find(v => v.id === photo);
@@ -3907,6 +3937,8 @@ function storySetModel(m) {
 function renderStoryEntry() {
   const row = el('gen-anim-story-row');
   if (row) row.style.display = genJob === 'animate' && !genDrive && storyModels().length ? '' : 'none';
+  const textRow = el('gen-text-story-row');
+  if (textRow) textRow.style.display = genJob === 'text' && herLoraReady() && storyModels().includes('h3-gv') ? '' : 'none';
   const resume = el('story-resume');
   if (resume) resume.style.display = loadStory() && el('story').hidden ? '' : 'none';
   const box = el('story-drafts');
@@ -3945,9 +3977,9 @@ function renderStory() {
   if (!story || el('story').hidden) { renderStoryEntry(); return; }
   const sel = el('story-model');
   sel.innerHTML = storyModels().map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
-  sel.disabled = story.parts.length > 0;
+  sel.disabled = story.parts.length > 0 || story.from === 'text';
   const upload = story.from === 'upload';
-  el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : 'From your photo'} · ${storySeconds()}s accepted so far`;
+  el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : story.from === 'text' ? 'From your text' : 'From your photo'} · ${storySeconds()}s accepted so far`;
   const tiles = [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
   story.parts.forEach((p, i) => tiles.push(storyTile(i, 'Part ' + (i + 1), p, 'video')));
   const last = story.parts[story.parts.length - 1];
@@ -4083,7 +4115,9 @@ function renderStoryReview() {
     if (st === 'empty' || st === 'gone' || st === 'failed') {
       const j = storyJob(story.still.job);
       box.innerHTML = `${st === 'failed' ? `<p class="gen-err">${esc((j && j.error) || 'That failed.')} The tokens were refunded.</p>` : ''}
-        <p class="hint">Step 1: her character put into ${story.from === 'swap' ? "the clip's first frame" : 'your photo'}, scene, light and outfit kept.</p>
+        ${story.from === 'text' ? `<p class="hint">Step 1: a photo of her from her LoRA, the opening shot of the video.</p>
+        <label class="gen-f"><span>Describe the opening shot</span><textarea id="story-opening" rows="3" maxlength="600" placeholder="she lies on a bed in a dim bedroom, naked, looking at the camera">${esc(story.opening || '')}</textarea></label>`
+        : `<p class="hint">Step 1: her character put into ${story.from === 'swap' ? "the clip's first frame" : 'your photo'}, scene, light and outfit kept.</p>`}
         <div class="story-acts"><button type="button" class="btn btn-primary" onclick="makeStoryStill()">Make the still${tokensLabel(storyStillPrice())}</button></div>`;
     } else if (st === 'wait') {
       box.innerHTML = '<p class="hint">Putting her into the frame… this takes a minute.</p>';
@@ -4154,6 +4188,20 @@ async function makeStoryStill() {
   try {
     const old = storyMedia(story.still);
     let photo = story.photo;
+    if (story.from === 'text') {
+      const text = ((el('story-opening') || {}).value || '').trim();
+      if (!text) throw new Error('Describe the opening shot');
+      story.opening = text;
+      const d = await storyPost('/api/generate/job', { persona: story.persona, kind: 'image', model: 'wan-2-2-char',
+        prompt: text, rating: story.rating, aspect: story.aspect, batch: 1 });
+      if (old) dropStoryMedia([old.id]);
+      story.still = { job: d.job };
+      story.sel = 'still';
+      saveStory();
+      setStoryStatus(`Running${tokensLabel(d.tokens)}`);
+      loadCredits();
+      return pollGenJobs();
+    }
     if (story.from === 'swap') {
       photo = story.frame;
       if (!photo) {
