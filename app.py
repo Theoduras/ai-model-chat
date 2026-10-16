@@ -35250,24 +35250,13 @@ def _gen_spec(slug, body, user):
             except (TypeError, ValueError):
                 pass
             picked = [her] + picked[:3]
-        # A toy clip gets the toy LoRA even when none was ticked: close-up
-        # wording picks the close-up pair, anything else the full-body one.
         text = ' '.join(str(spec.get(k) or '') for k in ('prompt_extra', 'motion'))
-        if (spec['explicit'] and len(picked) < 4 and _TOY_WORDS.search(text)
-                and not any(p['trigger'] == 'piston_dildo_style' for p in picked)):
-            want = ('dildo-h3' if family == 'h3' else 'dildo-22-v2-closeup'
-                    if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
-            _auto_lora(picked, library.get(want))
-        if spec['explicit']:
-            wanted = ((_PUSSY_WORDS, 'hmpussy-h3'), (_FINGERING_WORDS, 'fingering-h3'),
-                      (_ORAL_WORDS, 'deepthroat-h3'), (_BREAST_WORDS, 'boobs-h3'),
-                      (_MASTURBATION_WORDS, 'masturbation-h3')) if family == 'h3' else (
-                      (_BREAST_WORDS, 'boobs-22'),)
-            for words, want in wanted:
-                lora = library.get(want)
-                if (len(picked) < 4 and words.search(text) and lora
-                        and not any(p['high'] == lora['high'] for p in picked)):
-                    _auto_lora(picked, lora)
+        for want in (_content_lora_ids(text, family) if spec['explicit'] else []):
+            lora = library.get(want)
+            if (len(picked) < 4 and lora and not any(
+                    p['high'] == lora['high'] or (lora['trigger'] and p['trigger'] == lora['trigger'])
+                    for p in picked)):
+                _auto_lora(picked, lora)
         spec['loras'] = _balance_loras(picked, family, library)
     return spec
 
@@ -35338,6 +35327,32 @@ _ORAL_WORDS = re.compile(r'\b(deepthroat\w*|blowjob|throat|sucks?|sucking|oral)\
 _BREAST_WORDS = re.compile(r'\b(breasts?|boobs?|tits?|nipples?|jiggl\w*|bounc\w*)\b', re.I)
 _PUSSY_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
 _FINGERING_WORDS = re.compile(r'\b(fingering|fingered|fingers?\s+(deep\s+)?(in|into|inside|herself))\b', re.I)
+
+
+def _content_lora_ids(text, family):
+    """The content LoRAs words call for, typed motion or a frame's caption
+    alike. A toy gets the toy LoRA; on Wan, close-up wording picks its
+    close-up pair, anything else the full-body one."""
+    ids = []
+    if _TOY_WORDS.search(text):
+        ids.append('dildo-h3' if family == 'h3' else 'dildo-22-v2-closeup'
+                   if _CLOSEUP_WORDS.search(text) else 'dildo-22-v2-fullbody')
+    wanted = ((_PUSSY_WORDS, 'hmpussy-h3'), (_FINGERING_WORDS, 'fingering-h3'),
+              (_ORAL_WORDS, 'deepthroat-h3'), (_BREAST_WORDS, 'boobs-h3'),
+              (_MASTURBATION_WORDS, 'masturbation-h3')) if family == 'h3' else (
+              (_BREAST_WORDS, 'boobs-22'),)
+    return ids + [want for words, want in wanted if words.search(text)]
+
+
+def _content_words(text):
+    """What in `text` matched a content LoRA, for the studio to show."""
+    seen = []
+    for words in (_TOY_WORDS, _PUSSY_WORDS, _FINGERING_WORDS, _ORAL_WORDS,
+                  _BREAST_WORDS, _MASTURBATION_WORDS):
+        m = words.search(text)
+        if m and m.group(0).lower() not in seen:
+            seen.append(m.group(0).lower())
+    return seen
 
 
 def _auto_lora(picked, lora):
@@ -38474,6 +38489,30 @@ def _story_parts(workspace, slug, story, last):
     if not parts or mid:
         return None
     return parts[::-1]
+
+
+@app.route('/api/generate/frame-loras', methods=['POST'])
+def api_generate_frame_loras():
+    """A storyboard part's start frame read by char-caption (never Google), and
+    the content LoRAs it calls for, to pre-tick in the sheet. A clip's start
+    frame is its last one. Free; a failed read just ticks nothing."""
+    user, slug, body = _story_request()
+    if slug is None:
+        return user
+    if (body.get('rating') or '') == 'sfw':
+        return jsonify({'ok': True, 'caption': '', 'seen': [], 'loras': []})
+    row = _media_row(slug, str(body.get('media') or '').strip())
+    if not row:
+        return jsonify({'ok': False, 'error': 'That frame is no longer there.'}), 400
+    data, _mime = _media_bytes(row)
+    frame = imagegen.last_frame(data) if row['kind'] == 'video' else data
+    caption = imagegen.read_frame(frame)
+    family = imagegen.lora_family(str(body.get('model') or 'h3-gv'))
+    library = {l['id'] for l in _video_loras()
+               if l.get('family', 'wan') == family and l.get('enabled', True) is not False}
+    return jsonify({'ok': True, 'caption': caption, 'seen': _content_words(caption),
+                    'loras': [i for i in _content_lora_ids(caption, family) if i in library],
+                    'note': '' if caption else 'The frame could not be read.'})
 
 
 @app.route('/api/generate/stitch', methods=['POST'])

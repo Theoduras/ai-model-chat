@@ -373,6 +373,9 @@ Stay completely in character. Never mention being an AI.
   re-swapped. `/api/generate/stitch` walks `parent_media` back to part one, colour matches
   every seam and joins them, free, into one staged clip. Parts are hidden from the staging
   list and expire like any staged media.
+  Each part's start frame is read by our RunPod `char-caption` endpoint (JoyCaption,
+  `infra/runpod-caption`, `RUNPOD_CAPTION_ENDPOINT`), never Google, and `/api/generate/frame-loras`
+  pre-ticks the content LoRAs through `_content_lora_ids`, the same table typed motion uses.
 - **Generated audio is provider-side.** The image now has ffmpeg, used only to keep,
   drop or replace a finished clip's own track (`imagegen.mux_audio`/`strip_audio`,
   free; lip-sync is a priced follow-on task, `RW_MODEL_LIPSYNC`, unverified). Either the

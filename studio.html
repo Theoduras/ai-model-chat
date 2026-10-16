@@ -3914,7 +3914,7 @@ function renderStory() {
   stitch.disabled = !(accepted >= 2 && canExtend);
   stitch.textContent = accepted >= 2 ? `Stitch ${accepted} parts into one clip · free` : 'Stitch (extend at least once)';
   el('story-play').disabled = !accepted;
-  renderStoryReview();
+  if (!el('story-review').contains(document.activeElement)) renderStoryReview();
 }
 
 function storyPrev(i) {
@@ -3934,8 +3934,61 @@ function storyFields(motion, prompt, secs) {
     <details${prompt ? ' open' : ''}><summary class="hint">Prompt (optional — written for you when empty)</summary>
       <textarea id="story-prompt" rows="4" maxlength="2000" style="width:100%">${esc(prompt || '')}</textarea>
       <button type="button" class="btn-ai btn-ai-secondary" onclick="writeStoryPrompt()">Write it from the motion</button></details>
+    <div class="gen-f"><span>LoRAs</span><span class="hint" id="story-seen"></span><div id="story-loras"></div></div>
     <span class="hint">Every part keeps the same room, light, colours, outfit and framing, and
       starts on the last frame of the part before.</span></div>`;
+}
+
+// The part's start frame is read by our own captioner and the content LoRAs it
+// calls for are pre-ticked; a tick changed by hand is kept for that part.
+let storyTicks = {}, storyTicksKey = '', storyTicksTouched = false;
+function storyPartIndex() { return story.sel === 'next' ? story.parts.length : Number(story.sel); }
+function storyFamily() { return story.model === 'h3-gv' ? 'h3' : 'wan'; }
+
+function renderStoryLoras() {
+  const box = el('story-loras');
+  if (!box) return;
+  if (genLoras === null) { loadLoras().then(renderStoryLoras); return; }
+  const i = storyPartIndex();
+  const start = storyPrev(i) || {};
+  const key = story.sel + ':' + start.id + ':' + story.model;
+  const part = story.sel === 'next' ? null : story.parts[i];
+  if (storyTicksKey !== key) {
+    storyTicksKey = key;
+    storyTicksTouched = !!(part && part.loras);
+    storyTicks = Object.assign({}, (part && part.loras) || {});
+  }
+  const readKey = start.id + ':' + storyFamily();
+  story.reads = story.reads || {};
+  const read = story.reads[readKey];
+  if (!read && start.id && story.rating === 'nsfw') readStoryFrame(start.id, readKey);
+  const mine = genLoras.filter(l => (l.family || 'wan') === storyFamily() && l.enabled !== false);
+  if (read && read.loras && !storyTicksTouched) {
+    storyTicks = {};
+    read.loras.forEach(id => { const l = mine.find(x => x.id === id); if (l) storyTicks[id] = l.scale; });
+  }
+  el('story-seen').textContent = !read ? '' : read.pending ? 'Reading the frame…'
+    : read.seen && read.seen.length ? 'Seen in the frame: ' + read.seen.join(', ')
+    : read.note || 'Nothing in the frame matched a LoRA.';
+  box.innerHTML = mine.map(l => `<label style="display:flex;align-items:center;gap:8px;margin:4px 0">
+      <input type="checkbox" ${l.id in storyTicks ? 'checked' : ''} onchange="storyTick('${esc(l.id)}', this.checked, ${l.scale})">
+      <span style="flex:1;min-width:0;overflow-wrap:anywhere">${esc(l.name)}</span></label>`).join('');
+}
+
+function storyTick(id, on, scale) {
+  storyTicksTouched = true;
+  if (on) storyTicks[id] = scale; else delete storyTicks[id];
+}
+
+async function readStoryFrame(media, readKey) {
+  story.reads[readKey] = { pending: true };
+  try {
+    const d = await storyPost('/api/generate/frame-loras', { persona: story.persona, media: media,
+      model: story.model, rating: story.rating });
+    story.reads[readKey] = d;
+  } catch (e) { story.reads[readKey] = { loras: [], seen: [], note: 'The frame could not be read.' }; }
+  saveStory();
+  renderStoryLoras();
 }
 
 function renderStoryReview() {
@@ -3964,6 +4017,7 @@ function renderStoryReview() {
       ${storyFields('', '', story.seconds)}
       <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
+    renderStoryLoras();
     return;
   }
   const i = Number(key);
@@ -3985,6 +4039,7 @@ function renderStoryReview() {
       <button type="button" class="btn btn-ghost btn-sm" id="story-go" onclick="redoStoryPart(${i})"></button>
       ${later ? `<span class="hint">Redoing this drops the ${later} part${later === 1 ? '' : 's'} after it.</span>` : ''}</div>`;
   renderStoryButtons();
+  renderStoryLoras();
 }
 
 function renderStoryButtons() {
@@ -4041,7 +4096,7 @@ function storyPartBody(i) {
   const body = { persona: story.persona, job: 'animate', rating: story.rating, model: story.model,
     seconds: secs, resolution: storyRes(), aspect: story.aspect, story: story.id, identity: 'vault', lock: false,
     motion: ((el('story-motion') || {}).value || '').trim(), video_prompt: prompt,
-    her_lora: genHerLora, loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })) };
+    her_lora: genHerLora, loras: Object.entries(storyTicks).map(([id, scale]) => ({ id, scale })) };
   if (i === 0) body.reference_media = storyMedia(story.still).id;
   else body.continue_from = storyMedia(story.parts[i - 1]).id;
   return body;
@@ -4055,7 +4110,8 @@ async function makeStoryPart(i) {
     const body = storyPartBody(i);
     if (!body.motion && !body.video_prompt) throw new Error('Say what she does in this part');
     const d = await storyPost('/api/generate/job', body);
-    story.parts[i] = { job: d.job, motion: body.motion, prompt: body.video_prompt, seconds: body.seconds };
+    story.parts[i] = { job: d.job, motion: body.motion, prompt: body.video_prompt, seconds: body.seconds,
+      loras: Object.assign({}, storyTicks) };
     story.parts = story.parts.slice(0, i + 1);
     story.seconds = body.seconds;
     story.sel = i;

@@ -212,6 +212,12 @@ def lora_family(model_key):
 # The prompt side of the pipeline, after RunPod's text-to-video tutorial: Qwen
 # reads what the still shows and suggests what it could do, then writes the
 # clip's prompt. Qwen reads text only, so the still arrives as its description.
+# Our char-caption endpoint (infra/runpod-caption): reads explicit frames,
+# which must never go to Google. Empty turns reading off.
+_CAPTION_EP = os.getenv('RUNPOD_CAPTION_ENDPOINT', 'e7ewhzvh98ybr7').strip().rstrip('/')
+CAPTION_ENDPOINT = ((_CAPTION_EP if '/' in _CAPTION_EP else f'https://api.runpod.ai/v2/{_CAPTION_EP}')
+                    if _CAPTION_EP else '')
+
 RUNPOD_QWEN_ENDPOINT = os.getenv('RUNPOD_QWEN_ENDPOINT', 'https://api.runpod.ai/v2/qwen3-32b-awq')
 
 # Swapping someone into an uploaded clip is video-to-video, which only Wan 2.7
@@ -1929,6 +1935,36 @@ def cut_window(video, start_frame, frames, fps, width, height):
         except Exception as e:
             logging.getLogger(__name__).warning('cut failed: %s', str(e)[:200])
             return b''
+
+
+def read_frame(image, wait=150):
+    """What an explicit frame shows, in plain words, from char-caption; '' on
+    any failure -- a read only pre-ticks LoRAs, it must never stop a clip."""
+    import io
+    import requests
+    from PIL import Image
+    key = (RUNPOD_API_KEY or os.getenv('RUNPOD_API_KEY') or '').strip()
+    if not (CAPTION_ENDPOINT and key and image):
+        return ''
+    try:
+        img = Image.open(io.BytesIO(image)).convert('RGB')
+        img.thumbnail((768, 768))
+        buf = io.BytesIO()
+        img.save(buf, 'JPEG', quality=88)
+        headers = {'Authorization': f'Bearer {key}', 'Content-Type': 'application/json'}
+        body = requests.post(f'{CAPTION_ENDPOINT}/run', headers=headers, timeout=TIMEOUT, json={
+            'input': {'image': base64.b64encode(buf.getvalue()).decode()}}).json()
+        end = time.time() + wait
+        while (body.get('status') or '').upper() not in ('COMPLETED', 'FAILED', 'CANCELLED', 'TIMED_OUT'):
+            if time.time() > end or not body.get('id'):
+                return ''
+            time.sleep(3)
+            body = requests.get(f"{CAPTION_ENDPOINT}/status/{body['id']}", headers=headers,
+                                timeout=TIMEOUT).json() | {'id': body['id']}
+        return str((body.get('output') or {}).get('caption') or '').strip()
+    except Exception as e:
+        logging.getLogger(__name__).warning('frame read failed: %s', str(e)[:200])
+        return ''
 
 
 def _ffmpeg(video, args, audio=None):

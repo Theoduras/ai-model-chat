@@ -991,6 +991,22 @@ def test_storyboard():
     check('the graded parts join', len(IG.join_clips(clips, grades)) > 0)
 
 
+def test_frame_loras():
+    print('frame loras')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    ids = A._content_lora_ids
+    check('a toy close-up on Wan picks the close-up pair',
+          ids('close-up of her dildo', 'wan') == ['dildo-22-v2-closeup'])
+    check('a caption picks what it names on H3',
+          ids('she holds a pink dildo against her pussy, breasts exposed', 'h3')
+          == ['dildo-h3', 'hmpussy-h3', 'boobs-h3'])
+    check('nothing named, nothing picked', ids('she smiles at the camera', 'h3') == [])
+    check('the words shown are what matched',
+          A._content_words('fingering herself, nipples hard') == ['fingering', 'nipples'])
+    check('no endpoint or key, no read', A.imagegen.read_frame(b'') == '')
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -1000,7 +1016,7 @@ if __name__ == '__main__':
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
                test_character_plus_vault_photos, test_wan22_on_runpod,
-               test_lock_windows, test_plus_tiers, test_storyboard):
+               test_lock_windows, test_plus_tiers, test_storyboard, test_frame_loras):
         fn()
     print()
     if FAILURES:
