@@ -35015,7 +35015,11 @@ def _gen_spec(slug, body, user):
     elif job == 'text':
         if not spec['prompt_extra'] and not (body.get('motion') or '').strip():
             raise imagegen.GenerationError('Write what she does in the clip.')
-        if not _char_lora_entry(slug):
+        # A prompt-only start claims to be nobody: a generic woman's still,
+        # animated without her LoRA.
+        if body.get('start') == 'prompt':
+            spec['generic'] = True
+        elif not _char_lora_entry(slug):
             raise imagegen.GenerationError(
                 'Train her LoRA first — the clip starts from a photo made with it.')
         spec['text_stage'] = 'still'
@@ -35254,7 +35258,8 @@ def _gen_spec(slug, body, user):
                                'examples': lora.get('examples', '')})
         her = _char_lora_entry(slug, family) if family in ('wan', 'h3') else None
         ask = body.get('her_lora') or {}
-        if her and (ask.get('on') is not False or model == imagegen.CHAR_LORA_VIDEO_MODEL):
+        if her and not spec.get('generic') and (
+                ask.get('on') is not False or model == imagegen.CHAR_LORA_VIDEO_MODEL):
             try:
                 her['scale'] = max(0.0, min(2.0, float(ask.get('scale', her['scale']))))
             except (TypeError, ValueError):
@@ -38481,6 +38486,40 @@ def _story_request():
     return _current_user(), slug, body
 
 
+@app.route('/api/generate/vault-copy', methods=['POST'])
+def api_generate_vault_copy():
+    """Super admin: copy media from any persona's vault into the one being
+    worked on, bytes included, so deleting either copy leaves the other."""
+    if not (_current_user() or {}).get('is_super_admin'):
+        return jsonify({'error': 'Not found'}), 404
+    from db import PersonaMedia
+    body = request.get_json(silent=True) or {}
+    src, dst = str(body.get('from') or ''), str(body.get('to') or '')
+    ids = [str(i) for i in (body.get('ids') or [])][:20]
+    if not (src and dst and ids):
+        return jsonify({'ok': False, 'error': 'Nothing to copy'}), 400
+    s = _db_session()
+    out = []
+    try:
+        for row in s.query(PersonaMedia).filter(PersonaMedia.slug == src, PersonaMedia.id.in_(ids)):
+            new = PersonaMedia(**{c.name: getattr(row, c.name) for c in PersonaMedia.__table__.columns
+                                  if c.name not in ('id', 'slug', 'created_at', 'position')})
+            new.slug = dst
+            for col in ('gcs_path', 'poster_gcs_path'):
+                path = getattr(row, col)
+                if path:
+                    prefix = storage.STAGING_PREFIX if path.startswith(storage.STAGING_PREFIX) else storage.KEPT_PREFIX
+                    setattr(new, col, storage.put(dst, storage.get(path) or b'',
+                                                  storage.mime_of(path) or row.mime, prefix=prefix))
+            s.add(new)
+            s.flush()
+            out.append((ids.index(row.id), new.id))
+        s.commit()
+    finally:
+        s.close()
+    return jsonify({'ok': True, 'ids': [n for _i, n in sorted(out)]})
+
+
 @app.route('/api/generate/story-drafts', methods=['GET', 'POST'])
 def api_generate_story_drafts():
     """Long videos put aside, kept on the account so any device can reopen them."""
@@ -39059,6 +39098,13 @@ def _gen_start(job_id, slug, spec, workspace):
 def _text_still_call(slug, spec):
     """Text to Video's first step: one photo of her from her LoRA, in the
     clip's frame shape, showing the opening moment of what she does."""
+    if spec.get('generic'):
+        action = (spec.get('prompt_extra') or spec.get('motion') or '').strip()
+        return {'model': imagegen.EXPLICIT_MODEL if spec.get('explicit') else 'seedream-4-5',
+                'resolution': '2k', 'aspect': spec.get('aspect') or '9:16', 'batch': 1,
+                'explicit': spec.get('explicit'), 'reference_urls': [], 'async_delivery': True,
+                'prompt': ('Amateur phone photo of an adult woman at the start of this moment: '
+                           + action)}
     her = _char_lora_entry(slug)
     if not her:
         raise imagegen.GenerationError('Her LoRA is no longer there.')

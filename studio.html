@@ -616,6 +616,8 @@
         </details>
       </div>
       <div id="gen-video-form" class="gen-stackform" style="display:none">
+        <div class="gen-f" id="gen-start-row" style="display:none"><span>Start from</span>
+          <div class="gen-seg" id="gen-start-seg"></div></div>
         <div class="gen-f" id="gen-anim-photo-row"><span>Photo to animate</span>
           <div class="anim-strip" id="gen-anim-photo"></div>
           <span class="hint" id="gen-anim-swap-note" hidden>Her character replaces the woman in this photo first, then it is animated.</span></div>
@@ -1023,6 +1025,27 @@ const GEN_SHOT_LABELS = {
 };
 const GEN_RES_LABELS = { '1k': '1K', '2k': '2K', '4k': '4K' };
 
+// The super admin picks from any persona's vault; a pick from another one is
+// copied into the persona being worked on, so every job path stays per persona.
+(function () {
+  const open = VaultPicker.open;
+  VaultPicker.open = o => {
+    if (!window.IS_SUPER || !o.persona || o.items) return open(o);
+    return open(Object.assign({}, o, { personas: true, onDone: async (ids, items, from) => {
+      if (from && from !== o.persona && ids.length) {
+        try {
+          const d = await (await fetch('/api/generate/vault-copy', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ from: from, to: o.persona, ids: ids }) })).json();
+          if (!d.ok) throw new Error(d.error || 'copy failed');
+          ids = d.ids;
+          await VaultPicker.refresh(o.persona);
+          if (typeof syncVault === 'function') syncVault();
+        } catch (e) { setGenStatus('✗ Could not copy from that vault: ' + e.message, false); return; }
+      }
+      if (o.onDone) o.onDone(ids, items, o.persona);
+    } }));
+  };
+})();
 let chatbotOff = false;
 async function init() {
   try {
@@ -1030,6 +1053,7 @@ async function init() {
     chatbotOff = (me.capabilities || {}).chatbot === false;
     el('gen-ex-admin').hidden = !me.is_admin;
     window.IS_ADMIN = !!me.is_admin;
+    window.IS_SUPER = !!me.is_super_admin;
     if (me.guest) guestMode();
     el('fv-sub-only').hidden = !chatbotOff;
   } catch (e) {}
@@ -1778,6 +1802,29 @@ function setJob(v) {
   renderGenForm();
 }
 
+// Photo to Video can start from a vault photo, a still from her LoRA, or a
+// prompt alone (a generic woman, not her); the last two run as Text to Video.
+let genTextStart = 'lora';
+function startOptions() {
+  return [['photo', 'A photo'], ['lora', 'Her LoRA'], ['prompt', 'Prompt only']]
+    .filter(o => o[0] !== 'lora' || herLoraReady());
+}
+function renderStartSeg() {
+  const row = el('gen-start-row');
+  if (!row) return;
+  const on = genJob === 'animate' || genJob === 'text';
+  row.style.display = on ? '' : 'none';
+  if (!on) return;
+  const cur = genJob === 'animate' ? 'photo' : genTextStart;
+  el('gen-start-seg').innerHTML = startOptions().map(([k, label]) =>
+    `<button type="button" class="gen-chip" aria-pressed="${k === cur}" onclick="setStart('${k}')">${label}</button>`).join('');
+}
+function setStart(k) {
+  if (k === 'photo') return setJob('animate');
+  genTextStart = k;
+  setJob('text');
+}
+
 function setMake(v) {
   setJob(v === 'video' ? 'animate' : v);
 }
@@ -2199,6 +2246,7 @@ function renderGenForm() {
   el('gen-image-form').style.display = genMake === 'image' ? 'flex' : 'none';
   el('gen-video-form').style.display = animate || genJob === 'text' ? 'flex' : 'none';
   el('gen-anim-photo-row').style.display = animate ? '' : 'none';
+  renderStartSeg();
   el('gen-anim-swap-note').hidden = !(animate && genCharacter && genIdentity !== 'vault');
   el('gen-lock-row').style.display = animate && genRating === 'nsfw' && herLoraReady()
     && ['wan-2-2-gv', 'h3-gv'].includes(videoModel()) ? 'flex' : 'none';
@@ -3654,6 +3702,7 @@ async function jobPayload() {
   }
   return Object.assign(base, {
     reference_media: genJob === 'text' ? '' : animPhoto(),
+    start: genJob === 'text' ? genTextStart : '',
     identity: genIdentity,
     lock: genJob === 'animate' && el('gen-lock-row').style.display !== 'none' && el('gen-lock').checked,
     motion: (el('gen-video-motion') || {}).value || '',
@@ -4908,7 +4957,7 @@ function studioSave() {
   });
   try {
     localStorage.setItem(STUDIO_STATE, JSON.stringify({
-      persona: el('persona').value, rating: genRating, job: genJob, swapIn: genSwapIn,
+      persona: el('persona').value, rating: genRating, job: genJob, swapIn: genSwapIn, textStart: genTextStart,
       level: genRating === 'nsfw' && window.StudioNSFW ? StudioNSFW.level() : '',
       loras: genLoraPick, herLora: genHerLora,
       identity: genIdentityTouched ? genIdentity : '', imageAspect: genImageAspect,
@@ -4930,6 +4979,7 @@ async function studioRestore() {
   try {
     if (s.level && window.StudioNSFW) StudioNSFW.setLevel(s.level);
     if (s.rating) setRating(s.rating);
+    if (s.textStart) genTextStart = s.textStart;
     if (s.job) setJob(s.job);
     if (s.swapIn && s.job === 'image') setSwapIn(true);
     if (s.loras) Object.assign(genLoraPick, s.loras);

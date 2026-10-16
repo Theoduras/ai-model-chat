@@ -960,6 +960,11 @@ def test_storyboard():
             ok = True
         check('a storyboard runs only on its own engines', ok)
         check('a bad story id is ignored', A._story_id({'story': '../x'}) == '')
+        txt = A._gen_spec('lilith', {'job': 'text', 'model': 'h3-gv', 'seconds': 5, 'rating': 'nsfw',
+                                     'motion': 'she lies back', 'start': 'prompt'}, None)
+        check('a prompt-only start needs no LoRA and claims to be nobody',
+              txt['generic'] and not any(l.get('name') == 'Her LoRA' for l in txt.get('loras') or [])
+              and A._text_still_call('lilith', txt)['reference_urls'] == [])
         real_src = A._video_source_row
         A._video_source_row = lambda slug, sid: {'path': 'sources/up'} if sid == 'up' else None
         try:

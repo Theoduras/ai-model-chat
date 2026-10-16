@@ -462,6 +462,7 @@
   window.VaultPicker = {
     open, field, thumb,
     invalidate: slug => { delete cache[slug]; },
+    refresh: slug => load(slug, true),
     items: slug => (cache[slug] || {}).items || null
   };
 })();
