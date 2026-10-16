@@ -4434,7 +4434,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-tiles.st-chips-ex { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr)); gap: 8px; }
 .st-chips-ex .st-tile { border-radius: 12px; padding: 0; min-height: 0; justify-content: flex-start; }
 .st-chips-ex .st-media { display: block; aspect-ratio: 4 / 5; }
-.st-chips-ex .st-lbl { display: block; padding: 6px 8px 8px; font-size: 12px; line-height: 16px; }
+.st-chips-ex .st-lbl { display: block; padding: 8px 10px; font-size: 12px; line-height: 16px; font-weight: 600; color: var(--text); }
 .st-media:has(.st-photo) { aspect-ratio: 4 / 5; }
 .st-zoom { position: absolute; right: 6px; bottom: 6px; z-index: 2; width: 28px; height: 28px; border-radius: 50%; background: #000a; color: #fff; display: flex; align-items: center; justify-content: center; }
 .st-zoom:hover { background: #000d; }
@@ -4521,7 +4521,6 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     : `linear-gradient(160deg, hsl(${hue(v || 'x')} 25% 28%), hsl(${hue(v || 'x')} 25% 10%))`; };
   const keyOf = v => (v || '').toLowerCase().replace(/\s+/g, '-');
   const shown = n => !!n && n.offsetParent !== null;
-  let rowEx = false;
 
   const EX_GROUP = { 'gen-shot': 'shot', 'gen-zoom': 'zoom', 'gen-style': 'style', 'gen-scene': 'place',
     'gen-scene-nsfw': 'scene', 'gen-expression': 'expression', 'gen-camera': 'camera', 'gen-lighting': 'light',
@@ -4536,7 +4535,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     if (kind === 'light') return `<div class="st-media" style="background:${grad(v, LIGHTS)}"></div>`;
     if (kind === 'place') return `<div class="st-media" style="background:${grad(v, PLACES)}"></div>`;
     if (kind === 'small' || kind === 'big') return `<div class="st-media"><div class="st-big">${t}</div></div>`;
-    if (kind === 'chips') return rowEx ? '<div class="st-media"><div class="st-slot"></div></div>' : '';
+    if (kind === 'chips') return EX_GROUP[id] ? '<div class="st-media"><div class="st-slot">Example photo</div></div>' : '';
     return '<div class="st-media"><div class="st-slot">Example photo</div></div>';
   }
 
@@ -4554,7 +4553,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     let box = sel.nextElementSibling && sel.nextElementSibling.classList.contains('st-tiles') ? sel.nextElementSibling : null;
     if (!box) {
       box = document.createElement('div');
-      box.className = 'st-tiles' + (kind === 'small' ? ' st-small' : kind === 'chips' ? ' st-chips' : '');
+      box.className = 'st-tiles' + (kind === 'small' ? ' st-small' : kind === 'chips' ? ' st-chips st-chips-ex' : '');
       box.setAttribute('role', 'group');
       box.addEventListener('click', e => {
         const ed = e.target.closest('.st-edit');
@@ -4581,8 +4580,6 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const sig = sel.value + '|' + (window.IS_ADMIN ? 'a' : '') + (EX_GROUP[id] ? exampleSig() : '') + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
-    rowEx = kind === 'chips' && !!EX_GROUP[id] && [...sel.options].some(o => o.value && !o.hidden && exampleFor(EX_GROUP[id] + ':' + o.value));
-    box.classList.toggle('st-chips-ex', rowEx);
     let html = '';
     for (const node of sel.children) {
       if (node.tagName === 'OPTGROUP') {
