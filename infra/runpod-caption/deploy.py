@@ -31,7 +31,7 @@ def deploy(dc):
             'containerDiskInGb': 40,
             'env': {'CAPTION_HANDLER': handler, 'HF_HOME': '/runpod-volume/hf'},
             'dockerStartCmd': ['bash', '-c', 'echo "$CAPTION_HANDLER" | base64 -d > /caption.py; '
-                               'pip install -q runpod transformers==4.49.0 accelerate==1.4.0 pillow; '
+                               'python3 -m pip install -q runpod transformers==4.49.0 accelerate==1.4.0 pillow; '
                                'exec python3 -u /caption.py']}
     tpl = find('/templates', 'char-caption-worker')
     if tpl:

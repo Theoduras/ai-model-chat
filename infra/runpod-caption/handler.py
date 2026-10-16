@@ -12,7 +12,11 @@ else:
     os.environ['HF_HOME'] = '/root/hf'
 
 import runpod  # noqa: E402
-import torch  # noqa: E402
+try:
+    import torch  # noqa: E402
+    TORCH_ERROR = ''
+except Exception as e:  # reported on the job: a worker log is not reachable from the app
+    TORCH_ERROR = repr(e)
 from PIL import Image  # noqa: E402
 from transformers import AutoProcessor, LlavaForConditionalGeneration  # noqa: E402
 
@@ -29,6 +33,8 @@ def load():
     # On the first job, not at import: a worker that fails to load still
     # answers, so the error comes back on the job instead of a silent exit.
     global proc, model
+    if TORCH_ERROR:
+        raise RuntimeError('torch: ' + TORCH_ERROR)
     if model is None:
         proc = AutoProcessor.from_pretrained(MODEL)
         model = LlavaForConditionalGeneration.from_pretrained(
