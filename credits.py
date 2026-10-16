@@ -171,8 +171,8 @@ ADDON_COST_USD = {
     'lock': 0.60,
     # Text to Video's first step: one Her LoRA still (the wan-2-2-char price).
     'still': 0.08,
-    # Swap her in's face lock: one ModelsLab still face swap. Unmeasured.
-    'face-lock': 0.02,
+    # Swap into photo's face lock: one Seedream 4.5 edit on Runware.
+    'face-lock': 0.04,
 }
 
 

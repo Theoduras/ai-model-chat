@@ -38791,8 +38791,15 @@ def _swap_still_call(slug, spec):
             'async_delivery': True, 'prompt': prompt}
 
 
+FACE_LOCK_PROMPT = (
+    'Edit the second image. Replace only the face with the exact face from the first image: '
+    'same facial features, eyes, nose, lips, jawline, skin tone and hairline. Keep the '
+    'expression direction, head angle, hair, body, clothing, lighting, background and framing '
+    'of the second image exactly. Seamless, photorealistic, adult woman.')
+
+
 def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
-    """Swap her in's second pass: her approved face swapped onto the redraw.
+    """Swap her in's second pass: her approved face redrawn onto it on Runware.
     A failed lock hands back the redraw and returns the lock's tokens."""
     if not spec.get('face_lock'):
         return urls
@@ -38804,8 +38811,11 @@ def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
             face = _character_urls(spec['character'], None, None, face_only=True)
             if not face:
                 raise imagegen.GenerationError('her face photo is gone')
-            provider = imagegen.get_provider('modelslab')
-            task_id, result = provider.face_swap_image(url, face[0])
+            provider = imagegen.get_provider('runware')
+            task_id, result = provider.submit_image({
+                'model': 'seedream-4-5', 'resolution': '2k', 'aspect': spec.get('aspect') or '',
+                'batch': 1, 'explicit': spec.get('explicit'), 'reference_urls': [face[0], url],
+                'async_delivery': True, 'prompt': FACE_LOCK_PROMPT})
             for _ in range(GEN_LOCK_POLLS):
                 if result.status in ('done', 'failed'):
                     break

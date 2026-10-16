@@ -455,10 +455,6 @@ MODELSLAB_FACESWAP_PATH = os.getenv('ML_FACESWAP_PATH', 'video/face_swap')
 MODELSLAB_FACESWAP_MODEL = os.getenv('ML_MODEL_FACESWAP', 'video-face-swap')
 MODELSLAB_FACESWAP_VIDEO_FIELD = os.getenv('ML_FACESWAP_VIDEO_FIELD', 'init_video')
 MODELSLAB_FACESWAP_FACE_FIELD = os.getenv('ML_FACESWAP_FACE_FIELD', 'target_image')
-# Still face swap for Swap her in's face lock. Unverified against ModelsLab's live API.
-MODELSLAB_IMAGE_FACESWAP_PATH = os.getenv('ML_IMAGE_FACESWAP_PATH', 'deepfake/single_face_swap')
-MODELSLAB_IMAGE_FACESWAP_TARGET_FIELD = os.getenv('ML_IMAGE_FACESWAP_TARGET_FIELD', 'init_image')
-MODELSLAB_IMAGE_FACESWAP_FACE_FIELD = os.getenv('ML_IMAGE_FACESWAP_FACE_FIELD', 'target_image')
 
 # Dimensions are per model, not global: Seedream refuses anything under
 # 3,686,400 pixels, and the Google models take only sizes from their own list.
@@ -2551,14 +2547,6 @@ class ModelsLabProvider(Provider):
             # Only the first face: a swap conditions on one identity, and more
             # references here would only give it something to average towards.
             MODELSLAB_FACESWAP_FACE_FIELD: refs[0],
-            'watermark': 'no',
-        })
-        return str(body.get('id') or ''), self._read(body)
-
-    def face_swap_image(self, image_url, face_url):
-        body = self._send(MODELSLAB_IMAGE_FACESWAP_PATH, {
-            MODELSLAB_IMAGE_FACESWAP_TARGET_FIELD: image_url,
-            MODELSLAB_IMAGE_FACESWAP_FACE_FIELD: face_url,
             'watermark': 'no',
         })
         return str(body.get('id') or ''), self._read(body)
