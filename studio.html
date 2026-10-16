@@ -3906,7 +3906,11 @@ function startStory(from) {
       from === 'upload' ? { media: genSwap.id, url: genSwap.url, kind: 'video', accepted: true } : {} });
     if (from === 'upload') story.sel = 'next';
   } else if (from === 'text') {
-    story = Object.assign(base, { model: 'h3-gv', aspect: currentAspect(), still: {} });
+    // Built from the Text to Video form's own choices, so nothing is typed twice.
+    const motion = ((el('gen-video-motion') || {}).value || '').trim();
+    if (!motion) return setGenStatus('✗ Write what she does', false);
+    story = Object.assign(base, { model: 'h3-gv', aspect: currentAspect(), still: {}, opening: motion,
+      loras: Object.assign({}, genLoraPick) });
   } else {
     const photo = animPhoto();
     const row = (mediaVault || []).find(v => v.id === photo);
@@ -4030,7 +4034,8 @@ function storyFields(motion, prompt, secs) {
   const anchor = story.from === 'upload' && storyPartIndex() === 0 ? storyAnchorField() : '';
   return `<div class="story-fields">${anchor}
     <label class="gen-f"><span>What she does in this part</span>
-      <input type="text" id="story-motion" maxlength="300" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body"></label>
+      <input type="text" id="story-motion" maxlength="300" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body">
+      <span class="motion-ideas" id="story-ideas"></span></label>
     <label class="gen-f"><span>Length</span><select id="story-secs" onchange="renderStoryButtons()">${options}</select></label>
     <details${prompt ? ' open' : ''}><summary class="hint">Prompt (optional — written for you when empty)</summary>
       <textarea id="story-prompt" rows="4" maxlength="2000" style="width:100%">${esc(prompt || '')}</textarea>
@@ -4066,13 +4071,19 @@ function renderStoryLoras() {
   // A failed read is retried once per page load, never kept as the answer.
   if ((!read || (read.note && !read.caption && !storyRetried[readKey])) && start.id && story.rating === 'nsfw') {
     storyRetried[readKey] = true;
-    readStoryFrame(start.id, readKey);
+    readStoryFrame(start.id, readKey, i ? (story.parts[i - 1] || {}).motion || '' : story.opening || '');
   }
   const mine = genLoras.filter(l => (l.family || 'wan') === storyFamily() && l.enabled !== false);
   if (read && read.loras && !storyTicksTouched) {
-    storyTicks = {};
+    storyTicks = Object.assign({}, i === 0 && story.loras || {});
     read.loras.forEach(id => { const l = mine.find(x => x.id === id); if (l) storyTicks[id] = l.scale; });
   }
+  // What she does next is written from the frame; a typed motion is never replaced.
+  const motionBox = el('story-motion');
+  const ideas = (read && read.ideas) || [];
+  if (motionBox && ideas.length && !motionBox.value.trim() && story.sel === 'next') motionBox.value = ideas[0];
+  const chips = el('story-ideas');
+  if (chips) chips.innerHTML = ideas.map(t => `<button type="button" class="btn btn-ghost btn-sm" onclick="el('story-motion').value=this.textContent">${esc(t)}</button>`).join('');
   el('story-seen').textContent = !read ? '' : read.starting ? 'Reading the frame (the reader is starting up)…'
     : read.pending ? 'Reading the frame…'
     : read.seen && read.seen.length ? 'Seen in the frame: ' + read.seen.join(', ')
@@ -4087,10 +4098,10 @@ function storyTick(id, on, scale) {
   if (on) storyTicks[id] = scale; else delete storyTicks[id];
 }
 
-async function readStoryFrame(media, readKey) {
+async function readStoryFrame(media, readKey, before) {
   story.reads[readKey] = { pending: true };
   try {
-    const ask = { persona: story.persona, model: story.model, rating: story.rating };
+    const ask = { persona: story.persona, model: story.model, rating: story.rating, before: before || '' };
     if (story.from === 'upload' && media === story.source) ask.source = media; else ask.media = media;
     let d = await storyPost('/api/generate/frame-loras', ask);
     // A cold reader takes minutes to start; the read is polled, not dropped.
@@ -4131,7 +4142,7 @@ function renderStoryReview() {
   if (key === 'next') {
     const i = story.parts.length;
     box.innerHTML = `<div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i} — part ${i + 1} starts on its last frame` : 'Part 1 starts on this')}</div>
-      ${storyFields('', '', story.seconds)}
+      ${storyFields(i === 0 && story.from === 'text' ? story.opening : '', '', story.seconds)}
       <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
     renderStoryLoras();
@@ -4193,7 +4204,7 @@ async function makeStoryStill() {
       if (!text) throw new Error('Describe the opening shot');
       story.opening = text;
       const d = await storyPost('/api/generate/job', { persona: story.persona, kind: 'image', model: 'wan-2-2-char',
-        prompt: text, rating: story.rating, aspect: story.aspect, batch: 1, story: story.id });
+        prompt: 'Photo of her at the start of this moment: ' + text, rating: story.rating, aspect: story.aspect, batch: 1, story: story.id });
       if (old) dropStoryMedia([old.id]);
       story.still = { job: d.job };
       story.sel = 'still';

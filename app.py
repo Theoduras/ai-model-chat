@@ -38571,7 +38571,12 @@ def api_generate_frame_loras():
     family = imagegen.lora_family(str(body.get('model') or 'h3-gv'))
     library = {l['id'] for l in _video_loras()
                if l.get('family', 'wan') == family and l.get('enabled', True) is not False}
-    return jsonify({'ok': True, 'caption': caption, 'seen': _content_words(caption),
+    before = str(body.get('before') or '').strip()[:300]
+    # What she does next is written from what the frame shows and what she was
+    # just doing, by Qwen on RunPod, so a part needs no typed motion.
+    ideas = imagegen.suggest_motions(
+        caption + (f' She was just: {before}.' if before else ''), True) if caption else []
+    return jsonify({'ok': True, 'caption': caption, 'seen': _content_words(caption), 'ideas': ideas,
                     'loras': [i for i in _content_lora_ids(caption, family) if i in library],
                     'note': '' if caption else 'The frame could not be read'
                             + (f" ({read['error']})." if read['error'] else '.')})

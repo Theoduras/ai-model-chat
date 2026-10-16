@@ -1050,6 +1050,21 @@ def test_frame_loras():
     check('the words shown are what matched',
           A._content_words('fingering herself, nipples hard') == ['fingering', 'nipples'])
     check('no endpoint or key, no read', A.imagegen.read_frame(b'')['caption'] == '')
+    IG, seen = A.imagegen, []
+    real = (A._story_request, IG.read_frame, IG.suggest_motions, A._media_row, A._media_bytes)
+    A._story_request = lambda: ({}, 'lilith', __import__('flask').request.get_json())
+    IG.read_frame = lambda data, wait=0, job='': {'caption': 'she lies on a bed', 'job': '', 'error': ''}
+    IG.suggest_motions = lambda text, explicit=False: seen.append(text) or ['she rolls over']
+    A._media_row = lambda slug, mid: {'kind': 'image'}
+    A._media_bytes = lambda row: (b'x', 'image/jpeg')
+    try:
+        with A.app.test_request_context('/api/generate/frame-loras', method='POST', json={
+                'persona': 'lilith', 'media': 'm', 'rating': 'nsfw', 'before': 'she smiles'}):
+            got = A.api_generate_frame_loras().get_json()
+        check('a read frame writes what she does next', got['ideas'] == ['she rolls over'], got)
+        check('from what she was just doing', 'she smiles' in seen[0], seen)
+    finally:
+        (A._story_request, IG.read_frame, IG.suggest_motions, A._media_row, A._media_bytes) = real
 
 
 if __name__ == '__main__':
