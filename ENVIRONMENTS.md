@@ -1,10 +1,14 @@
 # Environment
 
-One Cloud Run service, auto-deploying from `develop`.
+Two hosts, both deploying from `develop`.
 
-| Git branch | Cloud Run service | Region | URL |
-|---|---|---|---|
-| `develop` | `ai-model-chat-dev` | `europe-west4` | https://velvetfunneler.com |
+| Host | Service | Serves |
+|---|---|---|
+| Vercel | project `ai-model-chat-test` | https://velvetfunneler.com (and `www`) |
+| Cloud Run | `ai-model-chat-dev`, `europe-west4` | the loops, the sign-in browser, `velvt.online` |
+
+The site's env vars (including `PUBLIC_BASE_URL`) must be set on the Vercel project. The `gcloud`
+commands below change the Cloud Run service only.
 
 ## `PUBLIC_BASE_URL`
 

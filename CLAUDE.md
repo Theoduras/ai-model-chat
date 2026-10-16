@@ -16,10 +16,11 @@ This is an **OnlyFans-style AI chatbot platform** where content creators (models
 2. Define the persona's voice, tone, backstory, and escalation strategy.
 3. Deploy that persona to convert fans → engaged chatters → content buyers.
 
-The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. The site runs on
-**Google Cloud Run** (`ai-model-chat-dev`, `europe-west4`, built by Cloud Build from `develop`),
-loops and sign-in browser included. Vercel (site) and Fly.io (bots) are **the move in progress**: keep their files working,
-but nothing deploys there (see Deployment Rules below).
+The backend is Python/Flask + Google Gemini. The frontend is plain HTML/JS. The site
+(`velvetfunneler.com`, `www`) runs on **Vercel** (project `ai-model-chat-test`, deployed from every push
+to `develop`). **Google Cloud Run** (`ai-model-chat-dev`, `europe-west4`, built by Cloud Build from
+`develop`) runs the loops and the sign-in browser, and still serves the bio domain `velvt.online`.
+Fly.io (bots) is the move in progress: keep its files working, but nothing deploys there.
 
 ---
 
@@ -222,8 +223,9 @@ Stay completely in character. Never mention being an AI.
   the database.
 - Static assets served directly from root via Flask `static_folder=BASE_DIR`.
 - Test locally with `python app.py` before pushing.
-- Cloud Run serves everything (`cloudbuild.app.yaml`, `cloudbuild.browser.yaml`).
-  On hold: Vercel serves the site through `api/index.py`; Fly.io builds the `Dockerfile` (`fly.toml`).
+- Vercel serves the site through `api/index.py`. Cloud Run runs the loops, the sign-in browser and
+  `velvt.online` (`cloudbuild.app.yaml`, `cloudbuild.browser.yaml`). On hold: Fly.io builds the
+  `Dockerfile` (`fly.toml`).
   Keep both working when adding routes — everything already routes through
   Flask, so a new `@app.route` needs no config change on either host. A file the
   site reads at runtime must match `includeFiles` in `vercel.json`. See `DEPLOY.md`.
@@ -497,13 +499,16 @@ Stay completely in character. Never mention being an AI.
 
 ## Deployment Rules
 
-Push to `develop`. Cloud Build deploys the app and browser services to Cloud
-Run from that push (`cloudbuild.*.yaml`, `infra/`, `ENVIRONMENTS.md`). Env vars
-live on the Cloud Run service, not in this repository; change them with
-`gcloud run services update ai-model-chat-dev --region europe-west4
---update-env-vars ...` (never `--set-env-vars`, which wipes the rest).
+Push to `develop`. That push deploys the site to Vercel and, through Cloud Build, the app and
+browser services to Cloud Run (`cloudbuild.*.yaml`, `infra/`, `ENVIRONMENTS.md`). Env vars live on
+each host, not in this repository: in the Vercel project's settings for the site, and on the Cloud Run
+service for the loops, changed with `gcloud run services update ai-model-chat-dev --region europe-west4
+--update-env-vars ...` (never `--set-env-vars`, which wipes the rest). A variable the site needs must
+be set on Vercel.
 
-- Vercel and Fly.io are not live yet. Never run the loops on more than one host:
+- DNS for `velvetfunneler.com` is at mijndomein.nl. Every apex record must point at one host: an A on
+  Vercel next to AAAA records on Google once left Vercel without a certificate.
+- Fly.io is not live yet. Never run the loops on more than one host:
   two hosts means two bots answering the same fan.
 - Explicit Photo to Video, "Explicit Video Realism Pro" (`wan-2-2-gv`), runs on our own RunPod
   serverless endpoint `ys8km1d7sayxtz` (hub listing `wlsdml1114/generate_video`,
