@@ -3943,6 +3943,7 @@ function storyFields(motion, prompt, secs) {
 // The part's start frame is read by our own captioner and the content LoRAs it
 // calls for are pre-ticked; a tick changed by hand is kept for that part.
 let storyTicks = {}, storyTicksKey = '', storyTicksTouched = false;
+const storyRetried = {};
 function storyPartIndex() { return story.sel === 'next' ? story.parts.length : Number(story.sel); }
 function storyFamily() { return story.model === 'h3-gv' ? 'h3' : 'wan'; }
 
@@ -3962,7 +3963,11 @@ function renderStoryLoras() {
   const readKey = start.id + ':' + storyFamily();
   story.reads = story.reads || {};
   const read = story.reads[readKey];
-  if (!read && start.id && story.rating === 'nsfw') readStoryFrame(start.id, readKey);
+  // A failed read is retried once per page load, never kept as the answer.
+  if ((!read || (read.note && !read.caption && !storyRetried[readKey])) && start.id && story.rating === 'nsfw') {
+    storyRetried[readKey] = true;
+    readStoryFrame(start.id, readKey);
+  }
   const mine = genLoras.filter(l => (l.family || 'wan') === storyFamily() && l.enabled !== false);
   if (read && read.loras && !storyTicksTouched) {
     storyTicks = {};
