@@ -171,6 +171,8 @@ ADDON_COST_USD = {
     'lock': 0.60,
     # Text to Video's first step: one Her LoRA still (the wan-2-2-char price).
     'still': 0.08,
+    # Swap her in's face lock: one ModelsLab still face swap. Unmeasured.
+    'face-lock': 0.02,
 }
 
 
@@ -255,6 +257,7 @@ ADDON_PRICES = {
     'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
     'lock': credits_for_cost(ADDON_COST_USD['lock']),
     'still': credits_for_cost(ADDON_COST_USD['still']),
+    'face-lock': credits_for_cost(ADDON_COST_USD['face-lock']),
 }
 
 

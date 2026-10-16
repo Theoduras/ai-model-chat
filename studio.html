@@ -459,6 +459,17 @@
         <span class="hint" id="persona-hint"></span>
       </div>
 
+    <div class="gen-panel st-sec st-off" id="gen-p-swapin" data-title="The photo">
+      <div class="gen-head"><h2>The photo</h2></div>
+      <span class="hint">Her character replaces the person in this photo. The place, light, objects and outfit stay as they are.</span>
+      <div class="gen-f"><span>Photo</span>
+        <div id="gen-swapin-photo"></div>
+        <button type="button" class="btn" onclick="pickSwapInPhoto()">Choose or upload photo</button>
+      </div>
+      <label class="gen-f"><span>Extra instructions (optional)</span>
+        <textarea id="gen-swapin-extra" rows="2" maxlength="500" placeholder="e.g. keep her hair tied up"></textarea></label>
+    </div>
+
     <div class="gen-panel gen-prompt st-sec" id="gen-p-prompt" data-title="Prompt">
       <div class="gen-head"><b>5</b><h2 id="gen-prompt-head">Prompt</h2></div>
       <div id="gen-image-form" class="gen-stackform">
@@ -1492,17 +1503,59 @@ function renderJobTiles() {
       onclick="setJob('${key}')"><b>${esc(row.label)}</b>
       <small>${esc(row.note)}</small></button>`;
   };
-  // Photo has one job, so the Photo button is it; the video jobs sit under Video.
   const video = jobKeys().filter(jobServes).filter(k => jobKind(k) !== 'image')
     .filter(k => k !== 'text' || herLoraReady());
-  box.innerHTML = `<div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
-  box.hidden = genMake === 'image';
+  box.innerHTML = genMake === 'image'
+    ? `<div class="gen-jobs-row"><button type="button" class="gen-job" aria-pressed="${!genSwapIn}" onclick="setSwapIn(false)"><b>Create</b><small>A new photo from her look</small></button>`
+      + `<button type="button" class="gen-job" aria-pressed="${genSwapIn}" onclick="setSwapIn(true)"><b>Swap into photo</b><small>Put her in an existing photo</small></button></div>`
+    : `<div class="gen-jobs-row">${video.map(tile).join('')}</div>`;
+  box.hidden = false;
   const photo = genMake === 'image';
   el('make-photo').setAttribute('aria-pressed', String(photo));
   el('make-video').setAttribute('aria-pressed', String(!photo));
   el('make-photo').classList.toggle('active', photo);
   el('make-video').classList.toggle('active', !photo);
   if (window.StudioNSFW) StudioNSFW.sync();
+}
+
+let genSwapIn = false, genSwapInPhoto = '';
+function setSwapIn(on) {
+  genSwapIn = on;
+  renderGenForm();
+}
+
+function pickSwapInPhoto() {
+  VaultPicker.open({ persona: slug(), kind: 'image', max: 1, title: 'Photo to swap her into',
+    picked: genSwapInPhoto ? [genSwapInPhoto] : [], onUpload: syncVault,
+    onDone: ids => {
+      genSwapInPhoto = ids[0] || '';
+      el('gen-swapin-photo').innerHTML = genSwapInPhoto
+        ? `<img src="/api/personas/${encodeURIComponent(slug())}/media/${encodeURIComponent(genSwapInPhoto)}/image" alt="" style="max-width:220px;max-height:280px;border-radius:10px;display:block;margin-bottom:8px">` : '';
+      genQuote();
+    } });
+}
+
+function swapInPrice() {
+  const base = ((genPrices.images || {})['seedream-4-5'] || {})['2k'];
+  return base === undefined ? undefined : base + ((genPrices.addons || {})['face-lock'] || 0);
+}
+
+async function runSwapIn() {
+  const btn = el('gen-run-btn');
+  btn.disabled = true;
+  try {
+    const res = await fetch('/api/generate/swap-in', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ persona: slug(), reference_media: genSwapInPhoto, rating: genRating,
+        prompt_extra: el('gen-swapin-extra').value }),
+    });
+    const d = await res.json();
+    if (!d.ok) throw new Error(d.error || 'Swap failed');
+    setGenStatus(`Swapping her in — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It lands in your generations.`, null);
+    loadCredits();
+    pollGenJobs();
+  } catch (e) { setGenStatus('✗ ' + e.message, false); }
+  finally { btn.disabled = false; genQuote(); }
 }
 
 let genLastVideoJob = '';
@@ -3291,6 +3344,19 @@ function genQuote() {
   const what = el('gen-quote-what');
   const cost = el('gen-cost');
 
+  if (genMake === 'image' && genSwapIn) {
+    const btn = el('gen-run-btn'), total = swapInPrice();
+    if (what) what.textContent = 'Her swapped into your photo, 2K';
+    if (cost) cost.textContent = total === undefined ? '' : `${total} tokens`;
+    setMoney(total || 0);
+    const cash = cashFor(total);
+    btn.disabled = !genSwapInPhoto;
+    btn.textContent = !genSwapInPhoto ? 'Choose a photo first'
+      : `Swap her in · ${total} token${total === 1 ? '' : 's'}` + (cash ? ` · ${cash}` : '');
+    noteShort(total);
+    return total;
+  }
+
   if (genMake === 'swap') {
     const btn = el('gen-run-btn');
     const total = swapPrice();
@@ -3397,6 +3463,7 @@ function setGenStatus(msg, ok) {
 }
 
 async function runGeneration() {
+  if (genMake === 'image' && genSwapIn) return runSwapIn();
   if (!slug()) return;
   const blocked = jobBlocker();
   if (blocked) return setGenStatus('✗ ' + blocked, false);
@@ -4659,6 +4726,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const who = { title: 'Who', ids: ['gen-p-type', 'gen-p-character'], sum: () => txt('persona') || 'Pick whose photos' };
     const lev = { title: 'Content level', ids: ['gen-p-rating'], sum: lv };
     const eng6 = { title: 'Engine and size', ids: ['gen-p-engine', 'gen-p-result'], sum: () => [eng(), txt('gen-res')].filter(Boolean).join(' · ') };
+    if (genMake === 'image' && genSwapIn) return [who, lev,
+      { title: 'The photo', ids: ['gen-p-swapin'], sum: () => genSwapInPhoto ? 'Photo picked' : 'Pick a photo' }];
     if (genMake === 'image') return [who, lev, eng6,
       { title: 'The shot', ids: ['gen-p-prompt'], g: 3, sum: () => [txt('gen-scene'), txt('gen-shot'), txt('gen-pose')].filter(Boolean).join(' · ') },
       { title: 'Her', ids: ['gen-p-prompt'], g: 4, sum: () => [txt('gen-expression'), (el('gen-clothing') || {}).value].filter(Boolean).join(' · ') },
@@ -4729,8 +4798,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     Object.keys(TILED).forEach(syncSelect);
     decorateExtras();
     applyStep();
-    const list = issues();
     const steps = stepList();
+    const list = issues().filter(x => steps.some(st => st.ids.includes(x.sec)));
     const rail = steps.map((st, i) => {
       const mine = list.filter(x => stepOf(x.sec) === i + 1);
       const cls = mine.some(x => x.kind === 'err') ? 'st-err' : mine.length ? 'st-warn' : '';

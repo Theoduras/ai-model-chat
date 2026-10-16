@@ -38286,6 +38286,54 @@ def api_generate_undress():
     return _gen_submit(user, slug, spec, CR.quote(spec))
 
 
+@app.route('/api/generate/swap-in', methods=['POST'])
+def api_generate_swap_in():
+    """Swap her in: her character replaces the person in a vault photo, scene,
+    light and outfit kept, then her face is swapped on."""
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    user = _current_user()
+    body = request.get_json(silent=True) or {}
+    slug = (body.get('persona') or '').strip().lower()
+    if not re.match(r'^[a-z0-9_-]+$', slug or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and slug not in mine:
+        return jsonify({'ok': False, 'error': 'Not your persona'}), 403
+    explicit = (body.get('rating') or '') == 'nsfw'
+    if explicit and _is_guest(user):
+        return jsonify({'ok': False, 'guest': True,
+                        'error': 'Register to generate explicit content.'}), 403
+    char = _character_snapshot(slug)
+    if not char or not _character_urls(char, None, None, face_only=True):
+        return jsonify({'ok': False, 'error': 'Pick a character with an approved face photo.'}), 400
+    media_id = str(body.get('reference_media') or '').strip()
+    from db import get_persona_media
+    s = _db_session()
+    try:
+        row = get_persona_media(s, media_id) if media_id else None
+        ok = (row is not None and row.slug == slug and (row.kind or 'image') == 'image'
+              and bool(row.gcs_path or row.image_data))
+        size = _undress_aspect(row) if ok and row.gcs_path else ''
+    finally:
+        s.close()
+    if not ok:
+        return jsonify({'ok': False, 'error': 'Pick a photo to swap her into.'}), 400
+    spec = {'kind': 'image', 'slug': slug, 'job': '', 'swap_in': True, 'face_lock': True,
+            'model': imagegen.EXPLICIT_MODEL if explicit else 'seedream-4-5',
+            'resolution': '2k', 'aspect': size, 'batch': 1, 'explicit': explicit,
+            'reference_media': media_id, 'parent_media': media_id,
+            'prompt_extra': (body.get('prompt_extra') or '').strip()[:500],
+            'character': char, 'character_id': char['id'],
+            'character_version': char['version'], 'addons': ['face-lock']}
+    try:
+        price = CR.quote(spec)
+    except CR.PricingError as e:
+        return jsonify({'ok': False, 'error': str(e)[:300]}), 400
+    return _gen_submit(user, slug, spec, price)
+
+
 def _undress_slug(user):
     """Where the Undress page keeps a creator's photos: the account, not a persona."""
     return 'acct-' + (user.get('workspace_id') or user['id'])
@@ -38505,6 +38553,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 provider_job, result = provider.submit_image(_swap_still_call(slug, spec))
             elif spec.get('text_stage') == 'still':
                 provider_job, result = provider.submit_image(_text_still_call(slug, spec))
+            elif spec.get('swap_in'):
+                provider_job, result = provider.submit_image(_swap_still_call(slug, spec))
             elif spec.get('undress'):
                 call['prompt'] = UNDRESS_PROMPT
                 call['async_delivery'] = True
@@ -38713,21 +38763,75 @@ def _text_still_call(slug, spec):
             'prompt': ', '.join(t for t in [her.get('trigger', '')] if t) + ', ' + text}
 
 
+SWAP_IN_PROMPT = (
+    'Replace only the person in the last image with the woman shown in the other reference '
+    'images. Use her exact face and facial features, hair colour, length and style, skin tone, '
+    'body shape and proportions, tattoos and piercings. Keep everything else in the last image '
+    'exactly as it is: the pose and hand positions, {clothing}, accessories, objects, '
+    'background, lighting direction and colour, shadows, camera angle, framing, crop and photo '
+    'quality. Do not add, remove or move anything. Seamless, photorealistic, natural skin '
+    'texture, adult woman.')
+
+
 def _swap_still_call(slug, spec):
-    """Photo to Video's first step when she has a character: the woman in the
-    picked photo is replaced by her, pose, scene and framing kept."""
+    """Her character in place of whoever the picked photo shows, everything
+    else kept: Photo to Video's first step, and the whole of Swap her in."""
     photo = _gen_media_urls(slug, [spec['reference_media']])
-    refs = _character_urls(spec['character'], None, None)[:imagegen.MAX_REFERENCES - 1]
+    refs = _character_urls(spec['character'], 'nude' if spec.get('explicit') else None,
+                           None)[:imagegen.MAX_REFERENCES - 1]
     if not photo or not refs:
         raise imagegen.GenerationError('Her character photos or the picked photo could not be read.')
+    prompt = SWAP_IN_PROMPT.format(clothing='the clothing or lack of it, exactly as shown'
+                                   if spec.get('explicit') else 'the clothing and how it fits her')
+    if spec.get('swap_in') and spec.get('prompt_extra'):
+        prompt += ' ' + spec['prompt_extra']
     return {'model': imagegen.EXPLICIT_MODEL if spec.get('explicit') else 'seedream-4-5',
             'resolution': '2k', 'aspect': spec.get('aspect') or '', 'batch': 1,
             'explicit': spec.get('explicit'), 'reference_urls': refs + photo,
-            'async_delivery': True,
-            'prompt': ('Replace the woman in the last image with the woman in the other reference '
-                       'images: her exact face, hair, body, skin, tattoos and piercings. Keep the '
-                       'pose, hands, objects, clothing state, lighting, framing and background of '
-                       'the last image exactly. Photorealistic, adult woman.')}
+            'async_delivery': True, 'prompt': prompt}
+
+
+def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
+    """Swap her in's second pass: her approved face swapped onto the redraw.
+    A failed lock hands back the redraw and returns the lock's tokens."""
+    if not spec.get('face_lock'):
+        return urls
+    import time as _t
+    out = []
+    for url in urls:
+        locked = ''
+        try:
+            face = _character_urls(spec['character'], None, None, face_only=True)
+            if not face:
+                raise imagegen.GenerationError('her face photo is gone')
+            provider = imagegen.get_provider('modelslab')
+            task_id, result = provider.face_swap_image(url, face[0])
+            for _ in range(GEN_LOCK_POLLS):
+                if result.status in ('done', 'failed'):
+                    break
+                _t.sleep(GEN_LOCK_POLL_SECONDS)
+                try:
+                    result = provider.poll(task_id)
+                except imagegen.GenerationError as e:
+                    logger.warning('generation job=%s face lock poll: %s', job_id, e)
+            if result.status == 'done' and result.urls:
+                locked = result.urls[0]
+            else:
+                logger.warning('generation job=%s face lock gave nothing: %s',
+                               job_id, result.error or result.status)
+        except Exception as e:
+            logger.warning('generation job=%s face lock failed: %s', job_id, str(e)[:200])
+        if not locked:
+            from db import SessionLocal, token_refund_part
+            s = SessionLocal()
+            try:
+                token_refund_part(s, workspace, job_id, CR.ADDON_PRICES['face-lock'],
+                                  note='face lock failed')
+                s.commit()
+            finally:
+                s.close()
+        out.append(locked or url)
+    return out
 
 
 def _gen_text_animate(job_id, slug, spec, workspace, provider_job, url):
@@ -39009,6 +39113,7 @@ def _gen_finish(job_id, slug, spec, workspace, urls):
         return _character_finish(job_id, spec, workspace, urls)
     made = []
     urls = _gen_lock_urls(job_id, slug, spec, workspace, urls)
+    urls = _gen_face_lock_urls(job_id, slug, spec, workspace, urls)
     urls = _gen_audio_urls(job_id, spec, urls)
     for url in urls:
         try:
