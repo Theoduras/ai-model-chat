@@ -911,6 +911,86 @@ def test_plus_tiers():
           sum(CR.cheapest_packs(1300)[1]) >= 1300)
 
 
+def test_storyboard():
+    print('storyboard')
+    os.environ.setdefault('GEMINI_API_KEY', 'test')
+    import app as A
+    IG = A.imagegen
+    specs = {'p1': {'story_id': 'abcd1234', 'seed': 77, 'story_anchor': 'still',
+                    'motion': 'she smiles', 'model': 'h3-gv', 'seconds': 5},
+             'p2': {'story_id': 'abcd1234', 'seed': 77, 'story_anchor': 'still',
+                    'continue_from': 'p1', 'model': 'h3-gv', 'seconds': 5},
+             'other': {'story_id': 'zzzz9999', 'seed': 1}}
+    rows = {k: {'kind': 'video', 'gcs_path': 'staging/' + k} for k in specs}
+    rows['img'] = {'kind': 'image', 'gcs_path': 'staging/img'}
+    real = A._story_spec, A._media_row, A._workspace_id
+    A._story_spec = lambda ws, slug, story, mid: (
+        specs[mid] if mid in specs and specs[mid].get('story_id') == story else None)
+    A._media_row = lambda slug, mid: rows.get(mid)
+    A._workspace_id = lambda user: 'ws'
+    # The RunPod engines are only listed when a key was set at import.
+    animate = CR.JOB_MODELS['animate']
+    CR.JOB_MODELS['animate'] = tuple(animate) + ('h3-gv',)
+    base = {'job': 'animate', 'model': 'h3-gv', 'seconds': 5, 'story': 'abcd1234',
+            'motion': 'she turns', 'rating': 'nsfw'}
+    try:
+        first = A._gen_spec('lilith', dict(base, reference_media='still'), None)
+        check('part one anchors on its still and draws a seed',
+              first['story_anchor'] == 'still' and isinstance(first.get('seed'), int))
+        check('a storyboard part is never chained, locked or re-swapped',
+              not first.get('chain') and not first.get('lock') and not first.get('swap_still'))
+        nxt = A._gen_spec('lilith', dict(base, continue_from='p1'), None)
+        check('a later part keeps the seed and anchor of the part before',
+              nxt['seed'] == 77 and nxt['story_anchor'] == 'still'
+              and nxt['parent_media'] == 'p1' and not nxt['reference_media'])
+        check('and negates what the part before did', nxt['story_before'] == 'she smiles')
+        for bad, why in (('other', "another storyboard's clip"), ('img', 'a photo'),
+                         ('gone', 'a dropped clip')):
+            try:
+                A._gen_spec('lilith', dict(base, continue_from=bad), None)
+                ok = False
+            except IG.GenerationError:
+                ok = True
+            check(f'a part cannot carry on from {why}', ok)
+        try:
+            A._gen_spec('lilith', dict(base, model='seedance-2-0-fast', reference_media='still',
+                                       rating='sfw'), None)
+            ok = False
+        except IG.GenerationError:
+            ok = True
+        check('a storyboard runs only on its own engines', ok)
+        check('a bad story id is ignored', A._story_id({'story': '../x'}) == '')
+        check('parts walk back to part one, in order',
+              [p for p, _s in A._story_parts('ws', 'lilith', 'abcd1234', 'p2')]
+              == ['staging/p1', 'staging/p2'])
+        del rows['p1']
+        check('a missing part breaks the walk',
+              A._story_parts('ws', 'lilith', 'abcd1234', 'p2') is None)
+    finally:
+        A._story_spec, A._media_row, A._workspace_id = real
+        CR.JOB_MODELS['animate'] = animate
+    if not IG.HAS_FFMPEG:
+        print('  skip colour match (no ffmpeg)')
+        return
+    import subprocess
+    d = tempfile.mkdtemp()
+    a, b = os.path.join(d, 'a.mp4'), os.path.join(d, 'b.mp4')
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'lavfi', '-i',
+                    'color=c=0x806040:size=160x120:rate=16:duration=1', '-pix_fmt', 'yuv420p', a],
+                   check=True)
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', a, '-vf',
+                    'lutrgb=r=val+25:g=val-15:b=val+10', '-pix_fmt', 'yuv420p', b], check=True)
+    clips = [open(a, 'rb').read(), open(b, 'rb').read()]
+    grades = IG.colour_grades(clips)
+    ref = IG._frame_stats(IG.last_frame(clips[0]))
+    fixed = IG._frame_stats(IG.first_frame(clips[1]), grades[1])
+    check('a tinted part is pulled back onto the part before',
+          grades[0] is None and all(abs(r[0] - f[0]) < 4 for r, f in zip(ref, fixed)),
+          f'{ref} vs {fixed}')
+    check('an untinted part is left alone', IG.colour_grades([clips[0], clips[0]])[1] is None)
+    check('the graded parts join', len(IG.join_clips(clips, grades)) > 0)
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
@@ -920,7 +1000,7 @@ if __name__ == '__main__':
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
                test_character_plus_vault_photos, test_wan22_on_runpod,
-               test_lock_windows, test_plus_tiers):
+               test_lock_windows, test_plus_tiers, test_storyboard):
         fn()
     print()
     if FAILURES:

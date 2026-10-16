@@ -364,6 +364,15 @@ Stay completely in character. Never mention being an AI.
   stitching. The frame it continues from is captured **client-side** — a canvas
   seek in `studio.html` — for the same reason: there is nothing on the server
   that can decode a video.
+- **A long video is a storyboard of reviewed parts** (Photo to Video and Swap, studio
+  "Make a long video"). Each step is its own job, so a finished job is the review gate:
+  the still (Swap her in, on the clip's first frame for a swap), then `animate` parts on
+  `imagegen.STORY_MODELS` that carry `story` and `continue_from`. A part starts on the last
+  frame of the part before (server ffmpeg), keeps part one's seed and, on H3, her still as
+  the identity image, and gets `CONTINUITY_CLAUSE`; it is never chained, locked or
+  re-swapped. `/api/generate/stitch` walks `parent_media` back to part one, colour matches
+  every seam and joins them, free, into one staged clip. Parts are hidden from the staging
+  list and expire like any staged media.
 - **Generated audio is provider-side.** The image now has ffmpeg, used only to keep,
   drop or replace a finished clip's own track (`imagegen.mux_audio`/`strip_audio`,
   free; lip-sync is a priced follow-on task, `RW_MODEL_LIPSYNC`, unverified). Either the
