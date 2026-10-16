@@ -37302,6 +37302,8 @@ def _char_lora_save(char_id, state):
 
 
 def _char_lora_status(state):
+    if not imagegen.LORA_ENABLED:
+        return 'off'
     if state.get('status') == 'training':
         return 'training'
     return 'ready' if state.get('high') else state.get('status') or 'none'
@@ -37310,6 +37312,8 @@ def _char_lora_status(state):
 def _char_lora_entry(slug, family='wan'):
     """The persona's trained character LoRA for a model family ('wan' or
     'h3') as a library entry, or None."""
+    if not imagegen.LORA_ENABLED:
+        return None
     from db import Character
     s = _db_session()
     try:
@@ -37405,7 +37409,7 @@ def api_character_lora(char_id):
         return jsonify({'ok': False, 'error': f'Approve at least {CHAR_LORA_MIN_PHOTOS} '
                         f'photos first ({len(photos)} so far).'}), 400
     elif imagegen.CHAR_LORA_IMAGE_MODEL not in imagegen.RUNPOD_ENDPOINTS:
-        return jsonify({'ok': False, 'error': 'LoRA training is not set up yet.'}), 503
+        return jsonify({'ok': False, 'error': 'Character LoRAs are switched off for now.'}), 503
     else:
         with_h3 = (request.get_json(silent=True) or {}).get('h3') is True
         price = CR.LORA_TRAIN_PRICE + (CR.LORA_H3_TRAIN_PRICE if with_h3 else 0)
@@ -37454,6 +37458,7 @@ def api_character_lora(char_id):
             _char_lora_save(char_id, current)
         threading.Thread(target=submit, daemon=True).start()
     return jsonify({'ok': True, 'lora': {
+        'off': not imagegen.LORA_ENABLED,
         'status': _char_lora_status(state), 'version': state.get('version') or 0,
         'error': state.get('error', ''), 'photos': len(photos),
         'trained_at': state.get('trained_at'), 'price': CR.LORA_TRAIN_PRICE,
