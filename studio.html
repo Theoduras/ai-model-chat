@@ -2736,12 +2736,12 @@ function picksBefore(ssecs) {
 }
 
 // The rating picks the swap engine: safe work on Kling motion control, any
-// explicit rating redrawn as her with her LoRA.
+// explicit rating on H3 (her into the first frame, then locked as her).
 const EXPLICIT_SWAPS = ['wan-2-2-char-video', 'h3-gv'];
 function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (genRating !== 'sfw' && EXPLICIT_SWAPS.includes(picked)) return picked;
-  const want = genRating === 'sfw' ? 'kling-3-0-mc' : 'wan-2-2-char-video';
+  const want = genRating === 'sfw' ? 'kling-3-0-mc' : 'h3-gv';
   if (swapModels().includes(want)) return want;
   return (genPrices && genPrices.default_swap_model) || swapModels()[0];
 }
@@ -5370,7 +5370,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   const LVL4 = [['sfw', 'Safe for work', 'Clothed. Feeds and socials.'], ['tease', 'Tease', 'Lingerie, sheer, implied.'],
     ['spicy', 'Spicy', 'Topless and nude.'], ['explicit', 'Explicit', 'Fully explicit. PPV only.']];
   const lvlNow = () => genRating !== 'nsfw' || !window.StudioNSFW ? 'sfw' : StudioNSFW.level();
-  const safeOnly = () => ['reel', 'swap'].includes(genJob);
+  const safeOnly = () => genJob === 'reel';
   const motionText = () => {
     const m = ['gen-video-motion', 'gen-swap-motion', 'gen-reel-prompt', 'gen-extend-motion', 'gen-multiref-motion']
       .map(i => el(i)).find(i => shown(i) && i.value.trim());
