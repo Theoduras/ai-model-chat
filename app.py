@@ -35143,6 +35143,15 @@ def _gen_spec(slug, body, user):
             and body.get('lock') is not False and _char_lora_entry(slug)):
         spec['lock'] = True
         spec['addons'].append('lock')
+    # Her character replaces whoever the photo shows before it is animated.
+    if (job == 'animate' and spec.get('reference_media') and not spec.get('source_path')
+            and (body.get('identity') or '').strip().lower() != 'vault'):
+        char = _character_snapshot(slug)
+        if char:
+            spec['character'] = char
+            spec['text_stage'] = 'still'
+            spec['swap_still'] = True
+            spec['addons'].append('still')
     if job == 'swap' and model == 'h3-gv' and level != 'sfw':
         if not _char_lora_entry(slug):
             raise imagegen.GenerationError(
@@ -38470,7 +38479,8 @@ def _gen_start(job_id, slug, spec, workspace):
     with app.app_context():
         from db import update_generation
         try:
-            provider = imagegen.provider_for(spec)
+            swap_first = spec.get('swap_still') and spec.get('text_stage') == 'still'
+            provider = imagegen.get_provider() if swap_first else imagegen.provider_for(spec)
             call = dict(spec)
             if spec.get('chain'):
                 call['seconds'] = spec['chain']['plan'][0]
@@ -38491,7 +38501,9 @@ def _gen_start(job_id, slug, spec, workspace):
                 import base64
                 call['reference_b64'] = base64.b64encode(storage.get(spec['still_path'])).decode()
                 call['reference_mime'] = 'image/png'
-            if spec.get('text_stage') == 'still':
+            if swap_first:
+                provider_job, result = provider.submit_image(_swap_still_call(slug, spec))
+            elif spec.get('text_stage') == 'still':
                 provider_job, result = provider.submit_image(_text_still_call(slug, spec))
             elif spec.get('undress'):
                 call['prompt'] = UNDRESS_PROMPT
@@ -38673,7 +38685,7 @@ def _gen_start(job_id, slug, spec, workspace):
             return
         s = _db_session()
         try:
-            update_generation(s, job_id, status='running',
+            update_generation(s, job_id, status='running', provider=provider.name,
                               provider_job_id=provider_job or '',
                               **({'spec_json': json.dumps(spec)} if spec.get('sent') else {}))
         finally:
@@ -38699,6 +38711,23 @@ def _text_still_call(slug, spec):
     return {'model': imagegen.CHAR_LORA_IMAGE_MODEL, 'aspect': aspect, 'seed': spec.get('seed'),
             'loras': [her], 'negative': imagegen.merge_negative(spec.get('negative_extra')),
             'prompt': ', '.join(t for t in [her.get('trigger', '')] if t) + ', ' + text}
+
+
+def _swap_still_call(slug, spec):
+    """Photo to Video's first step when she has a character: the woman in the
+    picked photo is replaced by her, pose, scene and framing kept."""
+    photo = _gen_media_urls(slug, [spec['reference_media']])
+    refs = _character_urls(spec['character'], None, None)[:imagegen.MAX_REFERENCES - 1]
+    if not photo or not refs:
+        raise imagegen.GenerationError('Her character photos or the picked photo could not be read.')
+    return {'model': imagegen.EXPLICIT_MODEL if spec.get('explicit') else 'seedream-4-5',
+            'resolution': '2k', 'aspect': spec.get('aspect') or '', 'batch': 1,
+            'explicit': spec.get('explicit'), 'reference_urls': refs + photo,
+            'async_delivery': True,
+            'prompt': ('Replace the woman in the last image with the woman in the other reference '
+                       'images: her exact face, hair, body, skin, tattoos and piercings. Keep the '
+                       'pose, hands, objects, clothing state, lighting, framing and background of '
+                       'the last image exactly. Photorealistic, adult woman.')}
 
 
 def _gen_text_animate(job_id, slug, spec, workspace, provider_job, url):
@@ -39086,7 +39115,7 @@ def _gen_advance(row):
     except ValueError:
         spec = {}
     parts = len((spec.get('chain') or {}).get('plan') or ()) or 1
-    if spec.get('job') == 'text':
+    if spec.get('job') == 'text' or spec.get('swap_still'):
         parts += 1
     if age > GEN_JOB_TIMEOUT * parts:
         logger.warning('generation job %s timed out after %.0fs', job_id, age)

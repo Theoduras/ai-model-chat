@@ -574,7 +574,8 @@
       </div>
       <div id="gen-video-form" class="gen-stackform" style="display:none">
         <div class="gen-f" id="gen-anim-photo-row"><span>Photo to animate</span>
-          <div class="anim-strip" id="gen-anim-photo"></div></div>
+          <div class="anim-strip" id="gen-anim-photo"></div>
+          <span class="hint" id="gen-anim-swap-note" hidden>Her character replaces the woman in this photo first, then it is animated.</span></div>
         <label class="gen-f" id="gen-lock-row" style="display:none;flex-direction:row;align-items:center;gap:8px">
           <input type="checkbox" id="gen-lock" checked onchange="genQuote()">
           <span>Lock her face and body — redraw the finished clip as her, from her LoRA</span></label>
@@ -2088,6 +2089,7 @@ function renderGenForm() {
   el('gen-image-form').style.display = genMake === 'image' ? 'flex' : 'none';
   el('gen-video-form').style.display = animate || genJob === 'text' ? 'flex' : 'none';
   el('gen-anim-photo-row').style.display = animate ? '' : 'none';
+  el('gen-anim-swap-note').hidden = !(animate && genCharacter && genIdentity !== 'vault');
   el('gen-lock-row').style.display = animate && genRating === 'nsfw' && herLoraReady()
     && ['wan-2-2-gv', 'h3-gv'].includes(videoModel()) ? 'flex' : 'none';
   if (animate) renderAnimPhotos();
@@ -3511,6 +3513,7 @@ async function jobPayload() {
   }
   return Object.assign(base, {
     reference_media: genJob === 'text' ? '' : animPhoto(),
+    identity: genIdentity,
     lock: genJob === 'animate' && el('gen-lock-row').style.display !== 'none' && el('gen-lock').checked,
     motion: (el('gen-video-motion') || {}).value || '',
     source: genDrive ? genDrive.id : '',
