@@ -38638,8 +38638,11 @@ def _gen_start(job_id, slug, spec, workspace):
                             call['reference_urls'] = refs
                 if spec.get('video_prompt'):
                     call['prompt'] = _gen_own_video_prompt(spec)
+                # Off by default: a worker fetching from our own domain failed
+                # whenever its certificate did; the still rides inline instead.
                 if (spec.get('model') in imagegen.RUNPOD_MODELS and _row
-                        and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')):
+                        and _row.get('gcs_path') and os.getenv('PUBLIC_BASE_URL')
+                        and os.getenv('RUNPOD_FETCH_LINKS') == '1'):
                     call['reference_url'] = (f"{_callback_origin()}/wish-file/"
                                              f"{_wish_file_token(_row['id'], ttl=900 + (imagegen.VAST_ROUTE_WAIT if spec.get('model') in imagegen.VAST_MODELS else 0))}")
                 if spec.get('model') == 'h3-gv' and not spec.get('video_prompt'):
