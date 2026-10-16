@@ -170,7 +170,10 @@ CHAR_LORA_VIDEO_MODEL = 'wan-2-2-char-video'
 LOCK_STRENGTH = float(os.getenv('LOCK_STRENGTH', '0.7'))
 # The id is the default so the LoRA never depends on host config; set it empty to drop it.
 _LORA_EP = os.getenv('RUNPOD_LORA_ENDPOINT', 'x6e9ylow7ss8pa').strip().rstrip('/')
-if _LORA_EP:
+# Off until it pays for itself: training is free and the lock windows ran $7 a
+# day. Off drops training, the lock, Her LoRA stills and clips. LORA_ENABLED=1 restores it.
+LORA_ENABLED = os.getenv('LORA_ENABLED', '0') == '1'
+if _LORA_EP and LORA_ENABLED:
     RUNPOD_ENDPOINTS[CHAR_LORA_IMAGE_MODEL] = (
         _LORA_EP if '/' in _LORA_EP else f'https://api.runpod.ai/v2/{_LORA_EP}')
     # The same worker makes clips from her LoRA: from a prompt, or redrawing a
@@ -189,7 +192,8 @@ VAST_ENDPOINTS = {m: os.getenv(f'VAST_{m.upper().replace("-", "_")}_ENDPOINT', m
 VAST_MODELS = (tuple(VAST_ENDPOINTS)
                if VAST_API_KEY and os.getenv('VAST_ENABLED', '').strip() == '1' else ())
 for _m in VAST_MODELS:
-    RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
+    if _m != CHAR_LORA_IMAGE_MODEL or LORA_ENABLED:
+        RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # Vast has no queue: a submit waits here while a cold worker boots.
 VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '3600'))

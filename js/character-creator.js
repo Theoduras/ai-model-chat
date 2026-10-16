@@ -560,7 +560,7 @@
   };
   function loraBox() {
     const l = S.lora;
-    if (!l) return '';
+    if (!l || l.off) return '';
     const body = l.status === 'ready' ? '<span class="pill ok">Trained' + (l.h3 ? ' · Wan 2.2 + H3' : ' · Wan 2.2') + '</span>'
         + (l.h3 ? '' : `<input type="checkbox" id="loraH3" checked hidden><button type="button" class="btn btn-ghost btn-sm" style="justify-self:start;width:auto" onclick="CC.trainLora()">Add H3 version (retrains, about 2 hours) · ${+l.h3_price + +l.price ? esc(+l.h3_price + +l.price) + ' tokens' : 'free'}</button>`)
       : l.status === 'training' ? '<span class="pill">Training…</span>'
