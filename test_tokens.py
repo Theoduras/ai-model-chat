@@ -1054,7 +1054,7 @@ def test_frame_loras():
     real = (A._story_request, IG.read_frame, IG.suggest_motions, A._media_row, A._media_bytes)
     A._story_request = lambda: ({}, 'lilith', __import__('flask').request.get_json())
     IG.read_frame = lambda data, wait=0, job='': {'caption': 'she lies on a bed', 'job': '', 'error': ''}
-    IG.suggest_motions = lambda text, explicit=False: seen.append(text) or ['she rolls over']
+    IG.suggest_motions = lambda text, explicit=False, detailed=False: seen.append(text) or ['she rolls over']
     A._media_row = lambda slug, mid: {'kind': 'image'}
     A._media_bytes = lambda row: (b'x', 'image/jpeg')
     try:

@@ -3270,11 +3270,35 @@ def _level_words(explicit):
             if explicit else 'Keep it safe for work: no nudity or sexual acts.')
 
 
-def suggest_motions(description, explicit=False):
-    """Short actions this still could plausibly show as a clip, from what it
-    shows -- her pose, her hands, what she is holding, where she is."""
+# A long video's part is told in full: the one line is what the motion field
+# holds and what the part's prompt is written from.
+DETAILED_MOTIONS = (
+    'You write what happens next in a 5 second part of an explicit adult (18+) video, for an '
+    'image-to-video model that continues from the frame described. Suggest 5 different, '
+    'explicit, in-depth continuations, each 25 to 45 words: start from her exact pose in the '
+    'frame; say what she does and with which hand, using only bodies and objects the frame '
+    'shows; how the pace starts and builds; how her body responds (hips, thighs, breasts, '
+    'back); her expression, eyes and breathing. One continuous action per suggestion, camera '
+    'fixed, same woman, same place. Answer with a JSON array of strings only.')
+
+
+def suggest_motions(description, explicit=False, detailed=False):
+    """Actions this still could plausibly show as a clip, from what it shows --
+    her pose, her hands, what she is holding, where she is. `detailed` writes
+    a long video part's explicit continuation in full."""
     if not (description or '').strip():
         return []
+    if detailed:
+        text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
+            {'role': 'system', 'content': DETAILED_MOTIONS},
+            {'role': 'user', 'content': f'The frame: {description.strip()[:2000]} /no_think'},
+        ], max_tokens=1400)
+        match = re.search(r'\[.*\]', text, flags=re.DOTALL)
+        try:
+            ideas = json.loads(match.group(0)) if match else []
+        except ValueError:
+            ideas = []
+        return [str(i).strip()[:600] for i in ideas if isinstance(i, str) and i.strip()][:5]
     text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
             'You suggest motions for an image-to-video model that animates an existing photo. '

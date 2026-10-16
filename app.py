@@ -38551,6 +38551,7 @@ def api_generate_frame_loras():
     if (body.get('rating') or '') == 'sfw':
         return jsonify({'ok': True, 'caption': '', 'seen': [], 'loras': []})
     job = str(body.get('job') or '').strip()
+    row = _media_row(slug, str(body['media']).strip()) if body.get('media') else None
     if job:
         read = imagegen.read_frame(b'', wait=20, job=job)
     elif body.get('source'):
@@ -38559,7 +38560,6 @@ def api_generate_frame_loras():
             return jsonify({'ok': False, 'error': 'That clip is no longer there.'}), 400
         read = imagegen.read_frame(imagegen.last_frame(storage.get(src['path']) or b''), wait=20)
     else:
-        row = _media_row(slug, str(body.get('media') or '').strip())
         if not row:
             return jsonify({'ok': False, 'error': 'That frame is no longer there.'}), 400
         data, _mime = _media_bytes(row)
@@ -38574,8 +38574,11 @@ def api_generate_frame_loras():
     before = str(body.get('before') or '').strip()[:300]
     # What she does next is written from what the frame shows and what she was
     # just doing, by Qwen on RunPod, so a part needs no typed motion.
+    # An unread frame still has its generation settings to go on.
+    seen_as = caption or (_media_description(slug, row) if row else '')
     ideas = imagegen.suggest_motions(
-        caption + (f' She was just: {before}.' if before else ''), True) if caption else []
+        seen_as + (f' She was just: {before}.' if before else ''),
+        True, detailed=True) if seen_as else []
     return jsonify({'ok': True, 'caption': caption, 'seen': _content_words(caption), 'ideas': ideas,
                     'loras': [i for i in _content_lora_ids(caption, family) if i in library],
                     'note': '' if caption else 'The frame could not be read'

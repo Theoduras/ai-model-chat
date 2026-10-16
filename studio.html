@@ -4034,7 +4034,7 @@ function storyFields(motion, prompt, secs) {
   const anchor = story.from === 'upload' && storyPartIndex() === 0 ? storyAnchorField() : '';
   return `<div class="story-fields">${anchor}
     <label class="gen-f"><span>What she does in this part</span>
-      <input type="text" id="story-motion" maxlength="300" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body">
+      <input type="text" id="story-motion" maxlength="600" value="${esc(motion || '')}" placeholder="she leans back and slowly runs her hands down her body">
       <span class="motion-ideas" id="story-ideas"></span></label>
     <label class="gen-f"><span>Length</span><select id="story-secs" onchange="renderStoryButtons()">${options}</select></label>
     <details${prompt ? ' open' : ''}><summary class="hint">Prompt (optional — written for you when empty)</summary>
@@ -4083,7 +4083,7 @@ function renderStoryLoras() {
   const ideas = (read && read.ideas) || [];
   if (motionBox && ideas.length && !motionBox.value.trim() && story.sel === 'next') motionBox.value = ideas[0];
   const chips = el('story-ideas');
-  if (chips) chips.innerHTML = ideas.map(t => `<button type="button" class="btn btn-ghost btn-sm" onclick="el('story-motion').value=this.textContent">${esc(t)}</button>`).join('');
+  if (chips) chips.innerHTML = (read && (read.pending || read.starting) ? '<span class="hint">Writing ideas from the frame…</span>' : '') + ideas.map(t => `<button type="button" class="btn btn-ghost btn-sm" onclick="el('story-motion').value=this.textContent">${esc(t)}</button>`).join('');
   el('story-seen').textContent = !read ? '' : read.starting ? 'Reading the frame (the reader is starting up)…'
     : read.pending ? 'Reading the frame…'
     : read.seen && read.seen.length ? 'Seen in the frame: ' + read.seen.join(', ')
