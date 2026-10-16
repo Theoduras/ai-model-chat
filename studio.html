@@ -4000,7 +4000,7 @@ async function readStoryFrame(media, readKey) {
       d = await storyPost('/api/generate/frame-loras', Object.assign({}, ask, { job: d.job }));
     }
     story.reads[readKey] = d.pending ? { loras: [], seen: [], note: 'The reader did not start in time.' } : d;
-  } catch (e) { story.reads[readKey] = { loras: [], seen: [], note: 'The frame could not be read.' }; }
+  } catch (e) { story.reads[readKey] = { loras: [], seen: [], note: 'The frame could not be read: ' + e.message }; }
   saveStory();
   renderStoryLoras();
 }
