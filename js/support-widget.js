@@ -9,7 +9,16 @@
       || /[?&]embed=/.test(location.search)) return;
   window.__supportWidget = true;
 
-  var OPEN_POLL = 4000, CLOSED_POLL = 7000;
+  // Every poll wakes the database, which bills by the hour it is awake: a tab
+  // left open must stop asking, or it keeps the database up all night.
+  var OPEN_POLL = 4000, CLOSED_POLL = 30000, IDLE_AFTER = 10 * 60 * 1000;
+  var lastActive = Date.now(), idle = false;
+  ['mousemove', 'keydown', 'touchstart', 'scroll', 'focus'].forEach(function (ev) {
+    window.addEventListener(ev, function () {
+      lastActive = Date.now();
+      if (idle) { idle = false; poll(); }
+    }, { passive: true });
+  });
   var state = { open: false, messages: [], mode: 'ai', unread: 0, isAdmin: false,
                 sending: false, sig: '' };
   var timer = null, root, panel, list, input, badge, modeLine, humanBtn;
@@ -373,6 +382,7 @@
     clearTimeout(timer);
     timer = setTimeout(function () {
       if (document.hidden) { schedule(); return; }
+      if (Date.now() - lastActive > IDLE_AFTER) { idle = true; return; }
       poll();
     }, state.open ? OPEN_POLL : CLOSED_POLL);
   }

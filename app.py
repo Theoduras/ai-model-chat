@@ -30848,7 +30848,21 @@ def handle_exception(e):
             return jsonify({'error': e.name, 'status': e.code}), e.code
         return e
     error_logger.error(f'Unhandled: {e}', exc_info=True)
+    from sqlalchemy.exc import OperationalError
+    if isinstance(e, OperationalError):
+        if (request.path or '').startswith('/api/'):
+            return jsonify({'error': 'Service temporarily unavailable', 'status': 503}), 503
+        return render_template_string(DB_DOWN_HTML), 503, {'Retry-After': '120'}
     return jsonify({'error': 'Internal server error'}), 500
+
+
+DB_DOWN_HTML = """<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
+<meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light dark">
+<title>Back shortly</title><style>body{font-family:Inter,system-ui,sans-serif;display:flex;min-height:100vh;
+margin:0;align-items:center;justify-content:center;background:#fff;color:#1a1614;text-align:center;padding:16px}
+@media (prefers-color-scheme:dark){body{background:#111113;color:#f0ece9}}p{opacity:.7}</style></head>
+<body><div><h1>We'll be right back</h1><p>The service is temporarily unavailable. Please try again in a few minutes.</p>
+<p><a href="" style="color:inherit">Try again</a></p></div></body></html>"""
 
 
 # ── Threads (Meta) reply-bot ─────────────────────────────────────────────────
