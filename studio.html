@@ -4383,7 +4383,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .gen-adv > summary { pointer-events: none; } .gen-adv > summary::before { display: none; }
 
 /* Tiles: a 16:10 media area over a label. */
-.st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(128px, 100%), 1fr)); gap: 8px; }
+.st-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(160px, 100%), 1fr)); gap: 8px; }
 .st-tiles.st-small { grid-template-columns: repeat(auto-fit, minmax(min(78px, 100%), 1fr)); }
 .st-tiles.st-chips { display: flex; flex-wrap: wrap; gap: 6px; }
 .st-grp { grid-column: 1 / -1; font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--text-muted); margin-top: 4px; }
@@ -4431,6 +4431,13 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 .st-small .st-lbl { display: none; }
 .st-chips .st-tile { border-radius: 999px; padding: 0 14px; min-height: 38px; justify-content: center; font-size: 13px; color: var(--text-2); }
 .st-chips .st-media, .st-chips .st-lbl { display: contents; }
+.st-tiles.st-chips-ex { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(120px, 100%), 1fr)); gap: 8px; }
+.st-chips-ex .st-tile { border-radius: 12px; padding: 0; min-height: 0; justify-content: flex-start; }
+.st-chips-ex .st-media { display: block; aspect-ratio: 4 / 5; }
+.st-chips-ex .st-lbl { display: block; padding: 6px 8px 8px; font-size: 12px; line-height: 16px; }
+.st-media:has(.st-photo) { aspect-ratio: 4 / 5; }
+.st-zoom { position: absolute; right: 6px; bottom: 6px; z-index: 2; width: 28px; height: 28px; border-radius: 50%; background: #000a; color: #fff; display: flex; align-items: center; justify-content: center; }
+.st-zoom:hover { background: #000d; }
 .gen-f select.st-tiled { display: none; }
 .st-photo { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: 50% 30%; display: block; }
 .st-ex-by { position: absolute; left: 6px; bottom: 6px; max-width: calc(100% - 12px); padding: 1px 7px; border-radius: 999px;
@@ -4445,7 +4452,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
 #gen-p-type .pg-toggle, #gen-p-rating .pg-toggle { flex-wrap: wrap; height: auto; width: 360px; align-self: flex-start; box-sizing: border-box; min-height: 38px; max-width: 100%; overflow: visible; }
 #gen-p-type .pg-toggle button, #gen-p-rating .pg-toggle button { flex: 1 1 120px; min-height: 32px; white-space: normal; }
 .gen-chips > .gen-chip, .gen-seg > .gen-chip { flex: 1 1 auto; }
-.gen-form > .gen-f:has(> .st-tiles:not(.st-chips):not(.st-small)), #gen-swap-out > .hint { grid-column: 1 / -1; }
+.gen-form > .gen-f:has(> .st-tiles:not(.st-chips):not(.st-small)), .gen-form > .gen-f:has(> .st-chips-ex), #gen-swap-out > .hint { grid-column: 1 / -1; }
 
 /* Engine and preset tiles. */
 .gen-chips.gen-stack { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(170px, 100%), 1fr)); gap: 8px; }
@@ -4514,6 +4521,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     : `linear-gradient(160deg, hsl(${hue(v || 'x')} 25% 28%), hsl(${hue(v || 'x')} 25% 10%))`; };
   const keyOf = v => (v || '').toLowerCase().replace(/\s+/g, '-');
   const shown = n => !!n && n.offsetParent !== null;
+  let rowEx = false;
 
   const EX_GROUP = { 'gen-shot': 'shot', 'gen-zoom': 'zoom', 'gen-style': 'style', 'gen-scene': 'place',
     'gen-scene-nsfw': 'scene', 'gen-expression': 'expression', 'gen-camera': 'camera', 'gen-lighting': 'light',
@@ -4522,12 +4530,13 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   function media(kind, o, id) {
     const v = keyOf(o.value), t = esc(o.textContent.trim());
     const ex = EX_GROUP[id] && o.value && exampleFor(EX_GROUP[id] + ':' + o.value);
-    if (ex) return `<div class="st-media">${exampleImg(ex)}</div>`;
+    if (ex) return `<div class="st-media">${exampleImg(ex)}<span class="st-zoom" role="button" tabindex="0" data-lb="${esc(ex.url)}" title="View larger">`
+      + '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/></svg></span></div>';
     if (kind === 'frame') return FRAMES[v] ? `<div class="st-media" style="color:var(--text-muted)">${FIG(FRAMES[v])}</div>` : '<div class="st-media"><div class="st-slot">Example photo</div></div>';
     if (kind === 'light') return `<div class="st-media" style="background:${grad(v, LIGHTS)}"></div>`;
     if (kind === 'place') return `<div class="st-media" style="background:${grad(v, PLACES)}"></div>`;
     if (kind === 'small' || kind === 'big') return `<div class="st-media"><div class="st-big">${t}</div></div>`;
-    if (kind === 'chips') return '';
+    if (kind === 'chips') return rowEx ? '<div class="st-media"><div class="st-slot"></div></div>' : '';
     return '<div class="st-media"><div class="st-slot">Example photo</div></div>';
   }
 
@@ -4535,7 +4544,7 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const exKey = window.IS_ADMIN && EX_GROUP[sel.id] && o.value ? EX_GROUP[sel.id] + ':' + o.value : '';
     return `<button type="button" class="st-tile" data-v="${esc(o.value)}" aria-pressed="${o.value === sel.value}"${o.disabled ? ' disabled' : ''}>`
       + (exKey ? `<span class="st-edit" role="button" tabindex="0" data-ex="${esc(exKey)}" title="Edit or remake this example">&#9998;</span>` : '')
-      + media(kind, o, sel.id) + (kind === 'chips' ? esc(o.textContent.trim()) : `<span class="st-lbl">${esc(o.textContent.trim())}</span>`) + '</button>';
+      + media(kind, o, sel.id) + `<span class="st-lbl">${esc(o.textContent.trim())}</span>` + '</button>';
   }
 
   function syncSelect(id) {
@@ -4550,6 +4559,14 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
       box.addEventListener('click', e => {
         const ed = e.target.closest('.st-edit');
         if (ed) { e.preventDefault(); e.stopPropagation(); editExample(ed.dataset.ex); return; }
+        const zoom = e.target.closest('.st-zoom');
+        if (zoom) {
+          e.preventDefault(); e.stopPropagation();
+          lbItems = [...box.querySelectorAll('.st-zoom')];
+          lbIdx = lbItems.indexOf(zoom);
+          showLightbox();
+          return;
+        }
         const b = e.target.closest('.st-tile');
         if (!b || b.disabled) return;
         e.preventDefault();
@@ -4564,6 +4581,8 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
     const sig = sel.value + '|' + (window.IS_ADMIN ? 'a' : '') + (EX_GROUP[id] ? exampleSig() : '') + '|' + [...sel.options].map(o => o.value + ':' + o.textContent + (o.disabled ? '!' : '') + (o.hidden ? 'h' : '')).join(',');
     if (box.dataset.sig === sig) return;
     box.dataset.sig = sig;
+    rowEx = kind === 'chips' && !!EX_GROUP[id] && [...sel.options].some(o => o.value && !o.hidden && exampleFor(EX_GROUP[id] + ':' + o.value));
+    box.classList.toggle('st-chips-ex', rowEx);
     let html = '';
     for (const node of sel.children) {
       if (node.tagName === 'OPTGROUP') {
