@@ -4893,11 +4893,11 @@ PageWizard.pageTour({
   ],
 });
 
-// A refresh puts the studio back exactly where it was, for this tab only.
+// A reload puts the studio back exactly where it was, in any tab.
 const STUDIO_STATE = 'studio-state';
 let studioRestoring = false, studioSaveTimer = null;
 function studioSaved() {
-  try { return JSON.parse(sessionStorage.getItem(STUDIO_STATE) || 'null'); } catch (e) { return null; }
+  try { return JSON.parse(localStorage.getItem(STUDIO_STATE) || sessionStorage.getItem(STUDIO_STATE) || 'null'); } catch (e) { return null; }
 }
 function studioSave() {
   if (!genPrices || studioRestoring) return;
@@ -4907,8 +4907,10 @@ function studioSave() {
     fields[f.id] = f.type === 'checkbox' ? f.checked : f.value;
   });
   try {
-    sessionStorage.setItem(STUDIO_STATE, JSON.stringify({
-      persona: el('persona').value, rating: genRating, job: genJob,
+    localStorage.setItem(STUDIO_STATE, JSON.stringify({
+      persona: el('persona').value, rating: genRating, job: genJob, swapIn: genSwapIn,
+      level: genRating === 'nsfw' && window.StudioNSFW ? StudioNSFW.level() : '',
+      loras: genLoraPick, herLora: genHerLora,
       identity: genIdentityTouched ? genIdentity : '', imageAspect: genImageAspect,
       aspect: genAspect, audio: genAudio, extendMode: genExtendMode,
       scroll: window.scrollY, fields}));
@@ -4926,8 +4928,12 @@ async function studioRestore() {
   }
   studioRestoring = true;
   try {
+    if (s.level && window.StudioNSFW) StudioNSFW.setLevel(s.level);
     if (s.rating) setRating(s.rating);
     if (s.job) setJob(s.job);
+    if (s.swapIn && s.job === 'image') setSwapIn(true);
+    if (s.loras) Object.assign(genLoraPick, s.loras);
+    if (s.herLora) genHerLora = s.herLora;
     if (s.identity) setIdentitySrc(s.identity);
     if (s.imageAspect) genImageAspect = s.imageAspect;
     if (s.aspect) genAspect = s.aspect;
@@ -5379,17 +5385,18 @@ html[data-guest] body.page-dashboard header.site-nav{position:fixed;top:32px;lef
   const eng = () => { const b = document.querySelector('#gen-models [aria-pressed="true"]'); return b ? (b.querySelector('b, span') || b).textContent.trim() : ''; };
   function stepList() {
     const lv = () => (LVL4.find(l => l[0] === lvlNow()) || LVL4[0])[1];
-    const who = { title: 'Who', ids: ['gen-p-type', 'gen-p-character'], sum: () => txt('persona') || 'Pick whose photos' };
+    const kind = { title: 'Photo or video', ids: ['gen-p-type'], sum: () => ({ image: 'Photo', video: 'Video', swap: 'Swap' })[genMake] || '' };
     const lev = { title: 'Content level', ids: ['gen-p-rating'], sum: lv };
+    const who = { title: 'Who', ids: ['gen-p-character'], sum: () => txt('persona') || 'Pick whose photos' };
     const eng6 = { title: 'Engine and size', ids: ['gen-p-engine', 'gen-p-result'], sum: () => [eng(), txt('gen-res')].filter(Boolean).join(' · ') };
-    if (genMake === 'image' && genSwapIn) return [who, lev,
+    if (genMake === 'image' && genSwapIn) return [kind, lev, who,
       { title: 'The photo', ids: ['gen-p-swapin'], sum: () => genSwapInPhoto ? 'Photo picked' : 'Pick a photo' }];
-    if (genMake === 'image') return [who, lev, eng6,
+    if (genMake === 'image') return [kind, lev, who, eng6,
       { title: 'The shot', ids: ['gen-p-prompt'], g: 3, sum: () => [txt('gen-scene'), txt('gen-shot'), txt('gen-pose')].filter(Boolean).join(' · ') },
       { title: 'Her', ids: ['gen-p-prompt'], g: 4, sum: () => [txt('gen-expression'), (el('gen-clothing') || {}).value].filter(Boolean).join(' · ') },
       { title: 'Camera and light', ids: ['gen-p-prompt'], g: 5, sum: () => [txt('gen-lighting'), txt('gen-camera')].filter(Boolean).join(' · ') },
       { title: 'More options', ids: ['gen-p-prompt'], g: 6, sum: () => '' }];
-    return [who, lev,
+    return [kind, lev, who,
       { title: 'Engine and length', ids: ['gen-p-engine', 'gen-p-result'], sum: () => [eng(), txt('gen-vsecs'), txt('gen-vres')].filter(Boolean).join(' · ') },
       { title: 'The clip', ids: ['gen-p-prompt', 'gen-p-vprompt'], sum: motionText },
       { title: 'Sound', ids: ['gen-p-sound'], sum: () => (document.querySelector('#gen-audio-modes [aria-pressed="true"]') || {}).textContent || 'Sound' },
