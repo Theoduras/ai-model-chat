@@ -140,19 +140,20 @@ VIDEO_COST_USD_PER_SECOND = {
     # each burst also pays up to 5 idle minutes (~$0.15) no clip is charged for.
     # The price is set well above that on purpose (raised 1.5x on a full card
     # that cost twice as much). 480p is unmeasured; 1080p is not offered.
-    # Repriced to public Wan 2.2 A14B rates: fal $0.04/s 480p, $0.08/s 720p;
-    # RunPod's public endpoint $0.06/s.
-    'wan-2-2-gv': {'480p': 0.04, '720p': 0.06, '1080p': 0.27},
+    # Measured 15-16 Oct: $5.42 for ~64 clips, about $0.017/s at 720p. Set
+    # near 2x that, which with VIDEO_MARKUP keeps the price it had (8 tokens
+    # for 5s 720p) at well over 3x what it costs.
+    'wan-2-2-gv': {'480p': 0.024, '720p': 0.037, '1080p': 0.165},
     # Her LoRA's clips on the char-lora endpoint (both 14B experts, 20 steps).
     # Unmeasured: set from the first test run's GPU time.
     'wan-2-2-char-video': {'480p': 0.08, '720p': 0.16, '1080p': 0.16},
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
-    # Repriced to MiniMax's own H3 API ($0.08/s 768p, $0.13/s 2K), kept above Wan 2.2.
-    # Raised 25%: RunPod billed $30.71 for ~85 clips on 15-16 Oct, about $0.36 a
-    # clip with idle and failed time, which left a 5s 720p clip ($0.40) at cost.
-    'h3-gv': {'480p': 0.08, '720p': 0.10, '1080p': 0.16},
+    # Measured 15-16 Oct: RunPod billed $30.71 for ~85 clips, about $0.36 a
+    # clip with idle and failed time ($0.072/s for 5s). 720p carries a small
+    # buffer over that; 480p and 1080p are unmeasured.
+    'h3-gv': {'480p': 0.07, '720p': 0.08, '1080p': 0.13},
 }
 
 PROVIDER_COST_MEASURED = {
@@ -190,16 +191,6 @@ def credits_for_cost(usd):
 IMAGE_PRICES = {model: {res: credits_for_cost(cost)
                         for res, cost in rows.items()}
                 for model, rows in PROVIDER_COST_USD.items()}
-
-# Video is priced per second, but **rounded once for the whole job**, not per
-# second. At this scale a per-second integer rate would overcharge badly: Wan
-# 2.5 at 720p is 2.269 tokens a second, and rounding that up to 3 would sell a
-# five-second clip at 15 tokens instead of 12. So the rate stays fractional and
-# `video_price` does the single ceil.
-VIDEO_RATE_PER_SECOND = {
-    model: {res: cost / TOKEN_COST_USD for res, cost in rows.items()}
-    for model, rows in VIDEO_COST_USD_PER_SECOND.items()
-}
 
 # The five video jobs, mirrored from imagegen so the picker and the price table
 # read one list. A job names its own models; a model is never the question a
@@ -254,14 +245,6 @@ GOOGLE_IMAGE_TOKENS = credits_for_cost(0.02)
 # Free while LoRA training is being tested; LORA_TRAIN_FREE=0 restores the real price.
 LORA_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits_for_cost(LORA_TRAIN_COST_USD)
 LORA_H3_TRAIN_PRICE = 0 if os.getenv('LORA_TRAIN_FREE', '1') == '1' else credits_for_cost(LORA_H3_TRAIN_COST_USD)
-
-ADDON_PRICES = {
-    'audio': credits_for_cost(ADDON_COST_USD['audio']),
-    'lipsync': credits_for_cost(ADDON_COST_USD['lipsync']),
-    'lock': credits_for_cost(ADDON_COST_USD['lock']),
-    'still': credits_for_cost(ADDON_COST_USD['still']),
-    'face-lock': credits_for_cost(ADDON_COST_USD['face-lock']),
-}
 
 
 def image_cost_usd(model, resolution, batch=1):
@@ -486,6 +469,40 @@ STRIPE_MIN_CHARGE = {'eur': 0.50, 'usd': 0.50, 'gbp': 0.30}
 TEST_PACK_ID = 'test'
 TEST_PACK_TOKENS = 1000
 TEST_PACK_PRICES = dict(STRIPE_MIN_CHARGE)
+
+# Video earns at least VIDEO_MIN_MULTIPLE times what it costs us, even on the
+# cheapest token we sell: the biggest pack at the deepest Plus discount (about
+# 1.8x the peg). Photos stay on the pack floor so one token is still one photo;
+# video, where the money goes, carries the markup that closes the gap.
+VIDEO_MIN_MULTIPLE = 3.0
+CHEAPEST_TOKEN_USD = min(
+    PACK_PRICES[size][cur] * (100 - max(PACK_DISCOUNT.values(), default=0)) / 100
+    / size * REFERENCE_RATES[cur]
+    for size in PACK_SIZES for cur in CURRENCIES)
+VIDEO_MARKUP = max(1.0, VIDEO_MIN_MULTIPLE * TOKEN_COST_USD / CHEAPEST_TOKEN_USD)
+
+
+def video_credits_for_cost(usd):
+    return credits_for_cost(usd * VIDEO_MARKUP)
+
+
+# Video is priced per second, but **rounded once for the whole job**, not per
+# second. At this scale a per-second integer rate would overcharge badly: Wan
+# 2.5 at 720p is 2.269 tokens a second, and rounding that up to 3 would sell a
+# five-second clip at 15 tokens instead of 12. So the rate stays fractional and
+# `video_price` does the single ceil.
+VIDEO_RATE_PER_SECOND = {
+    model: {res: cost * VIDEO_MARKUP / TOKEN_COST_USD for res, cost in rows.items()}
+    for model, rows in VIDEO_COST_USD_PER_SECOND.items()
+}
+
+ADDON_PRICES = {
+    'audio': video_credits_for_cost(ADDON_COST_USD['audio']),
+    'lipsync': video_credits_for_cost(ADDON_COST_USD['lipsync']),
+    'lock': video_credits_for_cost(ADDON_COST_USD['lock']),
+    'still': credits_for_cost(ADDON_COST_USD['still']),
+    'face-lock': credits_for_cost(ADDON_COST_USD['face-lock']),
+}
 
 
 class PricingError(ValueError):

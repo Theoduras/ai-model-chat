@@ -130,7 +130,7 @@ def test_prices_track_cost():
     # The whole-job rounding is the reason a clip is 12 and not 15. A
     # per-second integer rate would round 2.269 up to 3 and overcharge by 25%.
     check('a 5s 720p clip rounds once for the whole job, not per second',
-          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 17)
+          CR.quote({'kind': 'video', 'resolution': '720p', 'seconds': 5}) == 27)
     check('the per-second rate is fractional, so the client can ceil the same',
           isinstance(CR.VIDEO_RATE_PER_SECOND['wan-2-5']['720p'], float))
     for model in CR.VIDEO_RATE_PER_SECOND:
@@ -148,6 +148,20 @@ def test_prices_track_cost():
             break
     else:
         check('every rung rounds the whole job, never per second', True)
+
+    for model, rows in CR.VIDEO_COST_USD_PER_SECOND.items():
+        for res, cost in rows.items():
+            for secs in (2, 5, 10):
+                earned = CR.video_price(res, secs, (), model) * CR.CHEAPEST_TOKEN_USD
+                if earned + 1e-9 < CR.VIDEO_MIN_MULTIPLE * cost * secs:
+                    check(f'{model} {res} {secs}s earns {CR.VIDEO_MIN_MULTIPLE}x cost '
+                          'on the cheapest token', False, f'${earned:.3f}')
+    check('every clip earns 3x its cost even on the cheapest token sold',
+          CR.VIDEO_MIN_MULTIPLE >= 3)
+    for addon in ('audio', 'lipsync'):
+        check(f'the {addon} add-on earns 3x its cost on the cheapest token',
+              CR.ADDON_PRICES[addon] * CR.CHEAPEST_TOKEN_USD
+              >= 3 * CR.ADDON_COST_USD[addon] - 1e-9)
 
     measured = {'wan-2-5': 0.4538, 'wan-2-7': 0.5038, 'seedance-2-5': 0.60}
     for model, cost in measured.items():
@@ -303,8 +317,8 @@ def test_allowances():
     check('a bigger plan always includes more',
           CR.monthly_tokens('starter') < CR.monthly_tokens('pro')
           < CR.monthly_tokens('agency'))
-    check('starter can make more than a couple of clips a month',
-          CR.monthly_tokens('starter') // clip >= 4)
+    check('starter can make a couple of clips a month',
+          CR.monthly_tokens('starter') // clip >= 2)
     check('an unknown tier falls back rather than crashing',
           CR.monthly_tokens('nonesuch') == CR.DEFAULT_MONTHLY_TOKENS)
 
@@ -368,11 +382,11 @@ def test_equivalents():
     eq = CR.equivalents(350)
     check(f'350 tokens reads as {eq["photos"]} photos or {eq["clips"]} clips',
           eq['photos'] == 350 // CR.image_price(CR.DEFAULT_IMAGE_MODEL, CR.DEFAULT_RESOLUTION)
-          and eq['clips'] == 20)
+          and eq['clips'] == 12)
     check('an empty balance reads as nothing',
           CR.equivalents(0) == {'photos': 0, 'clips': 0})
     check('a plan card counts photos on the cheapest still',
-          CR.plan_equivalents(150) == {'photos': 150, 'clips': 8})
+          CR.plan_equivalents(150) == {'photos': 150, 'clips': 5})
     check('an empty plan reads as nothing',
           CR.plan_equivalents(0) == {'photos': 0, 'clips': 0})
     cash = CR.cash_for_tokens(12, 'eur')

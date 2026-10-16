@@ -431,7 +431,10 @@ Stay completely in character. Never mention being an AI.
   waits until the last one is bought, because each one spends the creator's tokens.
 - **Tokens are pegged to provider cost** — `credits.TOKEN_COST_USD`, one
   number — so margin is identical whatever is generated and a new model is a
-  table entry, not a pricing decision. `credits.py` asserts at import that every
+  table entry, not a pricing decision. Video adds `credits.VIDEO_MARKUP` on top,
+  sized so every clip (and the audio/lip-sync add-ons) earns `VIDEO_MIN_MULTIPLE`
+  (3x) its cost even on the cheapest token sold: the 5,000 pack at the deepest
+  Plus discount. `credits.py` asserts at import that every
   pack clears `MIN_MARGIN_MULTIPLE` times cost and Stripe's own minimum charge,
   and `test_tokens.py` walks the matrix, so a discount that would lose money, or
   a price Stripe would refuse, fails the build. The ledger is append-only
