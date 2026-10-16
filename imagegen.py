@@ -706,6 +706,24 @@ def video_seconds(model_key, seconds):
     return max(lo, min(hi, int(seconds or 0) or lo))
 
 
+# Frames per second a model's clips come out at, where it is not Wan's 16.
+MODEL_FPS = {'h3-gv': 24}
+
+# One lock redraw: Wan 2.2 at 81 frames, the length the char-lora endpoint runs.
+LOCK_WINDOW_FRAMES = MODEL_VIDEO_SECONDS[CHAR_LORA_VIDEO_MODEL][1] * 16 + 1
+
+
+def lock_windows(model_key, seconds):
+    """The (start frame, frames) windows a lock redraws a clip in, at the
+    clip's own frame rate. One window is all the endpoint runs, so a longer
+    clip is redrawn in parts that share their seam frame (join_clips drops it
+    once). Every count is 4n+1, as Wan wants."""
+    total = int(seconds or 0) * MODEL_FPS.get(model_key, 16) + 1
+    step = LOCK_WINDOW_FRAMES - 1
+    return [(start, min(LOCK_WINDOW_FRAMES, total - start))
+            for start in range(0, max(total - 1, 1), step)]
+
+
 RUNWARE_SEARCH_CATEGORIES = ('checkpoint', 'lora', 'lycoris', 'controlnet',
                              'vae', 'embeddings')
 
@@ -1828,6 +1846,31 @@ def join_clips(videos):
         return b''
 
 
+def cut_window(video, start_frame, frames, fps, width, height):
+    """`frames` frames of a clip from `start_frame`, at `fps`, silent, at the
+    size it will be redrawn at (a small body for the endpoint). b'' when the
+    cut fails: the whole clip in its place would redraw its opening again."""
+    if not HAS_FFMPEG:
+        return b''
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'out.mp4')
+        with open(src, 'wb') as f:
+            f.write(video)
+        end = start_frame + frames
+        try:
+            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', src, '-vf',
+                            f'fps={fps},trim=start_frame={start_frame}:end_frame={end},'
+                            f'setpts=PTS-STARTPTS,scale={width}:{height},setsar=1',
+                            '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                            '-pix_fmt', 'yuv420p', '-movflags', '+faststart', out],
+                           check=True, timeout=120, capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('cut failed: %s', str(e)[:200])
+            return b''
+
+
 def _ffmpeg(video, args, audio=None):
     """Run ffmpeg over a clip held in memory; the clip unchanged on failure,
     because it is already paid for and already good."""
@@ -2617,13 +2660,16 @@ class RunPodProvider(Provider):
             width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
             args = {'prompt': spec.get('prompt') or build_video_prompt(),
                     'negative': negative_for(spec), 'width': width, 'height': height,
-                    'frames': video_seconds(CHAR_LORA_VIDEO_MODEL, spec.get('seconds')) * 16 + 1,
+                    'frames': int(spec.get('frames')
+                                  or video_seconds(CHAR_LORA_VIDEO_MODEL, spec.get('seconds')) * 16 + 1),
                     'seed': spec.get('seed'),
                     'loras': [{'high': lora_url(l['high']), 'low': lora_url(l['low']),
                                'scale': float(l['scale'])}
                               for l in (spec.get('loras') or [])[:3] if l.get('high') and l.get('low')]}
             if spec.get('source_url'):
                 args.update(source=spec['source_url'], strength=LOCK_STRENGTH)
+            if spec.get('fps'):
+                args['fps'] = int(spec['fps'])
             return {'input': {'video': args}}
         image = spec.get('reference_url') or (
             _data_uri(spec['reference_b64'], spec.get('reference_mime'))
@@ -2940,7 +2986,7 @@ def h3_payload(spec, image, ref=None):
     w, h = video_px(spec.get('aspect'), spec.get('resolution') or '720p')
     width = max(32, round(w / 32) * 32)
     height = max(32, round(width * h / w / 32) * 32)
-    frames = max(5, video_seconds('h3-gv', spec.get('seconds')) * 24)
+    frames = max(5, video_seconds('h3-gv', spec.get('seconds')) * MODEL_FPS['h3-gv'])
     frames += (5 - frames % 17) % 17
     seed = int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)
     model = ['unet', 0]
@@ -2985,7 +3031,7 @@ def h3_payload(spec, image, ref=None):
         'frames': {'class_type': 'VAEDecode', 'inputs': {'samples': ['sample', 0], 'vae': ['vae', 0]}},
         'audio': {'class_type': 'VAEDecodeAudio', 'inputs': {'samples': ['sample', 0], 'vae': ['avae', 0]}},
         'video': {'class_type': 'CreateVideo', 'inputs': {
-            'images': ['frames', 0], 'audio': ['audio', 0], 'fps': 24}},
+            'images': ['frames', 0], 'audio': ['audio', 0], 'fps': MODEL_FPS['h3-gv']}},
         'save': {'class_type': 'SaveVideo', 'inputs': {
             'video': ['video', 0], 'filename_prefix': 'h3', 'format': 'auto', 'codec': 'auto'}},
     })

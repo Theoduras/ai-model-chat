@@ -168,6 +168,7 @@ ADDON_COST_USD = {
     'lipsync': 0.40,
     # Face-and-body lock: the finished clip redrawn as her with her LoRA on the
     # char-lora endpoint. Unmeasured; priced like a 5s Her LoRA clip plus margin.
+    # Per 81-frame window: a longer clip is several (imagegen.lock_windows).
     'lock': 0.60,
     # Text to Video's first step: one Her LoRA still (the wan-2-2-char price).
     'still': 0.08,

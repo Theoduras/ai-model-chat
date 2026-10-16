@@ -345,7 +345,9 @@ Stay completely in character. Never mention being an AI.
   `imagegen.LOCK_STRENGTH`) or `h3-gv` (the clip's first frame animated on H3, then locked,
   sound kept); safe work stays on Kling. Both need a ready LoRA. Explicit Photo to Video on `wan-2-2-gv` or `h3-gv` (H3's sound copied back) is redrawn the same way after it finishes
   (the `lock` add-on, on by default, `_gen_lock_urls`); a failed lock delivers the clip as
-  it was and refunds the lock.
+  it was and refunds the lock. The endpoint redraws 81 frames, so a longer clip is redrawn in
+  windows at its own frame rate (`imagegen.lock_windows`, H3 at 24 fps) and joined, and the lock
+  is charged once per window.
 - **The video surface is five jobs, not a model picker.** `imagegen.VIDEO_JOBS`
   is the one table that says what each job needs, which models serve it, and
   which prompt clauses are forced on; `credits.JOB_MODELS` mirrors it so the

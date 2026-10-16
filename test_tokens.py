@@ -812,6 +812,78 @@ def test_wan22_on_runpod():
 
 
 
+def test_lock_windows():
+    print('lock windows')
+    import importlib
+    import subprocess
+    import imagegen as IG
+    os.environ['RUNPOD_API_KEY'] = 'test'
+    try:
+        IG2 = importlib.reload(IG)
+        prov = IG2.RunPodProvider()
+        lock = {'model': IG2.CHAR_LORA_VIDEO_MODEL, 'source_url': 'data:video/mp4;base64,AA',
+                'prompt': 'p', 'aspect': '9:16', 'resolution': '480p', 'loras': []}
+        one = prov.payload(dict(lock, seconds=15))['input']['video']
+        check('one redraw is 81 frames at 16 fps, however long the clip',
+              one['frames'] == 81 and 'fps' not in one)
+        part = prov.payload(dict(lock, seconds=15, frames=41, fps=24))['input']['video']
+        check('a window carries its own frame count and rate',
+              part['frames'] == 41 and part['fps'] == 24)
+        check('a 5s Wan clip is one window', IG2.lock_windows('wan-2-2-gv', 5) == [(0, 81)])
+        check('an 8s Wan clip is two', IG2.lock_windows('wan-2-2-gv', 8) == [(0, 81), (80, 49)])
+        check('a 5s H3 clip is two at 24 fps', IG2.lock_windows('h3-gv', 5) == [(0, 81), (80, 41)])
+        check('a 15s H3 clip is five at 24 fps',
+              IG2.lock_windows('h3-gv', 15) == [(0, 81), (80, 81), (160, 81), (240, 81), (320, 41)])
+        whole = True
+        for model in ('wan-2-2-gv', 'h3-gv'):
+            for secs in range(5, 16):
+                w = IG2.lock_windows(model, secs)
+                fps = IG2.MODEL_FPS.get(model, 16)
+                whole &= (all(n % 4 == 1 and n <= 81 for _, n in w)
+                          and all(a + n - 1 == b for (a, n), (b, _) in zip(w, w[1:]))
+                          and w[-1][0] + w[-1][1] == secs * fps + 1)
+        check('windows are 4n+1, share one seam frame and cover the whole clip', whole)
+        base = {'kind': 'video', 'resolution': '720p', 'seconds': 15}
+        check('the lock is charged once per window',
+              CR.quote(dict(base, addons=['lock'] * 5))
+              == CR.quote(base) + 5 * CR.ADDON_PRICES['lock'])
+        if IG2.HAS_FFMPEG:
+            with tempfile.TemporaryDirectory() as d:
+                src = os.path.join(d, 'src.mp4')
+                # H3 at 24 fps runs 17n+5 frames: 362 for 15s.
+                subprocess.run(['ffmpeg', '-y', '-loglevel', 'error',
+                                '-f', 'lavfi', '-i', 'testsrc=size=320x240:rate=24:duration=15.0834',
+                                '-f', 'lavfi', '-i', 'sine=frequency=440:duration=15.0834',
+                                '-c:v', 'libx264', '-pix_fmt', 'yuv420p', '-c:a', 'aac', src],
+                               check=True, capture_output=True)
+                source = open(src, 'rb').read()
+
+                def probe(data, stream, entries):
+                    path = os.path.join(d, 'probe.mp4')
+                    with open(path, 'wb') as f:
+                        f.write(data)
+                    out = subprocess.run(['ffprobe', '-v', 'error', '-count_frames', '-select_streams', stream,
+                                          '-show_entries', entries, '-of', 'csv=p=0', path],
+                                         check=True, capture_output=True, text=True).stdout
+                    return out.strip().split(',')
+
+                windows = IG2.lock_windows('h3-gv', 15)
+                cuts = [IG2.cut_window(source, a, n, 24, 240, 416) for a, n in windows]
+                check('each window is cut to its own frame count at 24 fps',
+                      all(c and int(probe(c, 'v:0', 'stream=nb_read_frames')[-1]) == n
+                          for c, (_, n) in zip(cuts, windows)))
+                joined = IG2.join_clips(cuts)
+                rate, frames = probe(joined, 'v:0', 'stream=r_frame_rate,nb_read_frames')
+                check('the joined redraw runs the whole 15s at 24 fps, not 5s',
+                      int(frames) == 361 and rate == '24/1', f'{frames} frames at {rate}')
+                sound = IG2.copy_audio(joined, source)
+                check('her sound goes back on for the whole clip',
+                      float(probe(sound, 'a:0', 'stream=duration')[0]) > 14.9)
+    finally:
+        os.environ.pop('RUNPOD_API_KEY', None)
+        importlib.reload(IG)
+
+
 def test_plus_tiers():
     import app as A
     for base, plus in A.PLUS_OF.items():
@@ -848,7 +920,7 @@ if __name__ == '__main__':
                test_video_negative_prompt, test_video_prompt_is_not_cut,
                test_swap_identity, test_clip_library_and_places,
                test_character_plus_vault_photos, test_wan22_on_runpod,
-               test_plus_tiers):
+               test_lock_windows, test_plus_tiers):
         fn()
     print()
     if FAILURES:

@@ -35138,11 +35138,15 @@ def _gen_spec(slug, body, user):
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
     # Explicit Photo to Video is redrawn as her afterwards (face and body, from
     # her LoRA), so whoever the photo showed ends up as her. On unless asked off.
+    # A clip longer than one redraw is redrawn in windows and joined, each
+    # window its own redraw, so each is its own lock on the bill.
+    windows = len(imagegen.lock_windows(model, seconds))
     if (job == 'animate' and level != 'sfw' and model in ('wan-2-2-gv', 'h3-gv')
             and not spec.get('chain') and GEN_HAS_WORKER
+            and (windows == 1 or imagegen.HAS_FFMPEG)
             and body.get('lock') is not False and _char_lora_entry(slug)):
         spec['lock'] = True
-        spec['addons'].append('lock')
+        spec['addons'] += ['lock'] * windows
     # Her character replaces whoever the photo shows before it is animated.
     if (job == 'animate' and spec.get('reference_media') and not spec.get('source_path')
             and (body.get('identity') or '').strip().lower() != 'vault'):
@@ -35157,7 +35161,7 @@ def _gen_spec(slug, body, user):
             raise imagegen.GenerationError(
                 'Train her LoRA first — the H3 swap is redrawn as her with it.')
         spec['lock'] = True
-        spec['addons'].append('lock')
+        spec['addons'] += ['lock'] * windows
     if model == imagegen.CHAR_LORA_VIDEO_MODEL and not _char_lora_entry(slug):
         raise imagegen.GenerationError(
             'Train her LoRA first — this clip takes her look from it.')
@@ -39074,13 +39078,41 @@ def _lock_keep_sound(job_id, locked, original):
         return locked
 
 
+def _lock_redraw(job_id, provider, calls):
+    """Run the redraws side by side: their clips in order, or None when any
+    of them gives nothing, since a clip locked only in part is not her."""
+    import time as _t
+    tasks = [provider.submit_video(c) for c in calls]
+    results = [r for _, r in tasks]
+    for _ in range(GEN_LOCK_POLLS):
+        if (all(r.status in ('done', 'failed') for r in results)
+                or any(r.status == 'failed' for r in results)):
+            break
+        _t.sleep(GEN_LOCK_POLL_SECONDS)
+        for i, (task_id, _) in enumerate(tasks):
+            if results[i].status in ('done', 'failed'):
+                continue
+            try:
+                results[i] = provider.poll(task_id)
+            except imagegen.GenerationError as e:
+                logger.warning('generation job=%s lock poll: %s', job_id, e)
+    if all(r.status == 'done' and r.urls for r in results):
+        return [r.urls[0] for r in results]
+    for r in results:
+        if r.status != 'done' or not r.urls:
+            logger.warning('generation job=%s lock gave nothing: %s',
+                           job_id, r.error or r.status)
+    return None
+
+
 def _gen_lock_urls(job_id, slug, spec, workspace, urls):
     """Redraw each finished clip as her with her LoRA (the face-and-body lock).
-    A failed lock hands back the clip as it was and returns the lock's tokens:
-    the clip itself is paid for and already good."""
+    The endpoint redraws 81 frames, so a longer clip goes in windows at its own
+    frame rate and is joined back. A failed lock hands back the clip as it was
+    and returns the lock's tokens: the clip itself is paid for and already good."""
     if not spec.get('lock'):
         return urls
-    import time as _t
+    import base64
     out = []
     for url in urls:
         locked = ''
@@ -39094,29 +39126,41 @@ def _gen_lock_urls(job_id, slug, spec, workspace, urls):
                               + ', ' + (spec.get('prompt_extra') or spec.get('motion') or ''),
                     'aspect': spec.get('aspect'), 'resolution': spec.get('resolution'),
                     'seconds': spec.get('seconds'), 'explicit': True, 'loras': [her]}
-            task_id, result = provider.submit_video(call)
-            for _ in range(GEN_LOCK_POLLS):
-                if result.status in ('done', 'failed'):
-                    break
-                _t.sleep(GEN_LOCK_POLL_SECONDS)
-                try:
-                    result = provider.poll(task_id)
-                except imagegen.GenerationError as e:
-                    logger.warning('generation job=%s lock poll: %s', job_id, e)
-            if result.status == 'done' and result.urls:
-                locked = result.urls[0]
-                if spec.get('model') == 'h3-gv':
-                    locked = _lock_keep_sound(job_id, locked, url)
+            windows = imagegen.lock_windows(spec.get('model'), spec.get('seconds'))
+            if len(windows) == 1:
+                parts = _lock_redraw(job_id, provider, [call])
+                locked = parts[0] if parts else ''
             else:
-                logger.warning('generation job=%s lock gave nothing: %s',
-                               job_id, result.error or result.status)
+                fps = imagegen.MODEL_FPS.get(spec.get('model'), 16)
+                width, height = imagegen.video_px(spec.get('aspect'),
+                                                  spec.get('resolution') or '480p')
+                source, _ = imagegen.fetch_result(url)
+                # One seed for every window, so the seams join the same her.
+                seed = random.randint(0, 2**31 - 1)
+                calls = []
+                for start, frames in windows:
+                    cut = imagegen.cut_window(source, start, frames, fps, width, height)
+                    if not cut:
+                        raise imagegen.GenerationError('the clip could not be cut into windows')
+                    calls.append(dict(call, frames=frames, fps=fps, seed=seed,
+                                      source_url='data:video/mp4;base64,'
+                                                 + base64.b64encode(cut).decode()))
+                parts = _lock_redraw(job_id, provider, calls)
+                if parts:
+                    joined = imagegen.join_clips([imagegen.fetch_result(p)[0] for p in parts])
+                    if not joined:
+                        raise imagegen.GenerationError('the redrawn windows did not join')
+                    locked = 'data:video/mp4;base64,' + base64.b64encode(joined).decode()
+            if locked and spec.get('model') == 'h3-gv':
+                locked = _lock_keep_sound(job_id, locked, url)
         except Exception as e:
             logger.warning('generation job=%s lock failed: %s', job_id, str(e)[:200])
         if not locked:
             from db import SessionLocal, token_refund_part
             s = SessionLocal()
             try:
-                token_refund_part(s, workspace, job_id, CR.ADDON_PRICES['lock'],
+                token_refund_part(s, workspace, job_id,
+                                  CR.ADDON_PRICES['lock'] * max(1, spec.get('addons', []).count('lock')),
                                   note='face and body lock failed')
                 s.commit()
             finally:

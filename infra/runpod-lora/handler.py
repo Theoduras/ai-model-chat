@@ -229,8 +229,8 @@ def image(job, args):
     return {'image': base64.b64encode(buf.getvalue()).decode(), 'seed': seed}
 
 
-def source_frames(url, count, w, h):
-    """The source clip resampled to 16 fps, cut to `count` frames, at the job's size."""
+def source_frames(url, count, w, h, fps=16):
+    """The source clip resampled to `fps`, cut to `count` frames, at the job's size."""
     import imageio.v3 as iio
     from PIL import Image
     path = os.path.join(WORK, 'source.mp4')
@@ -240,9 +240,9 @@ def source_frames(url, count, w, h):
             f.write(base64.b64decode(url.split(',', 1)[1]))
     else:
         get(url, path)
-    fps = float(iio.immeta(path, plugin='pyav').get('fps') or 16)
+    native = float(iio.immeta(path, plugin='pyav').get('fps') or fps)
     frames = list(iio.imiter(path, plugin='pyav'))
-    step = max(fps / 16, 1)
+    step = max(native / fps, 1)
     picked = [frames[int(i * step)] for i in range(count) if int(i * step) < len(frames)]
     while len(picked) % 4 != 1:
         picked.pop()
@@ -263,6 +263,8 @@ def video(job, args):
     w, h = int(args.get('width') or 480), int(args.get('height') or 832)
     w, h = w - w % 16, h - h % 16
     count = int(args.get('frames') or 81)
+    # A lock redraws at its source's own rate (H3 is 24), so it keeps every frame.
+    fps = int(args.get('fps') or 16)
     common = dict(prompt=args['prompt'], negative_prompt=args.get('negative') or '',
                   num_inference_steps=int(args.get('steps') or 20),
                   guidance_scale=float(args.get('guidance') or 3.5),
@@ -274,13 +276,13 @@ def video(job, args):
         v2v = WanVideoToVideoPipeline(tokenizer=pipe.tokenizer, text_encoder=pipe.text_encoder,
                                       transformer=pipe.transformer_2, vae=pipe.vae,
                                       scheduler=pipe.scheduler)
-        frames = v2v(video=source_frames(args['source'], count, w, h), width=w, height=h,
+        frames = v2v(video=source_frames(args['source'], count, w, h, fps), width=w, height=h,
                      strength=strength, **common).frames[0]
     else:
         frames = pipe(width=w, height=h, num_frames=count, **common).frames[0]
     out = os.path.join(WORK, 'out.mp4')
     os.makedirs(WORK, exist_ok=True)
-    export_to_video(frames, out, fps=16)
+    export_to_video(frames, out, fps=fps)
     with open(out, 'rb') as f:
         return {'video': base64.b64encode(f.read()).decode(), 'seed': seed}
 
