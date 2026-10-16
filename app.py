@@ -34843,7 +34843,7 @@ def _gen_spec(slug, body, user):
     if job and level != 'sfw' and 'nsfw' not in imagegen.job_ratings(job):
         raise imagegen.GenerationError('That video job is not offered for explicit work.')
     spec = {'kind': kind, 'slug': slug, 'job': job,
-            'story_id': _story_id(body) if job == 'animate' else '',
+            'story_id': _story_id(body) if job == 'animate' or kind == 'image' else '',
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[
                 :GEN_PROMPT_MAX if kind == 'image' else GEN_VIDEO_PROMPT_MAX],

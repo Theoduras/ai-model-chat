@@ -4193,7 +4193,7 @@ async function makeStoryStill() {
       if (!text) throw new Error('Describe the opening shot');
       story.opening = text;
       const d = await storyPost('/api/generate/job', { persona: story.persona, kind: 'image', model: 'wan-2-2-char',
-        prompt: text, rating: story.rating, aspect: story.aspect, batch: 1 });
+        prompt: text, rating: story.rating, aspect: story.aspect, batch: 1, story: story.id });
       if (old) dropStoryMedia([old.id]);
       story.still = { job: d.job };
       story.sel = 'still';
