@@ -38320,9 +38320,14 @@ def api_generate_swap_in():
         s.close()
     if not ok:
         return jsonify({'ok': False, 'error': 'Pick a photo to swap her into.'}), 400
+    res = body.get('resolution') if body.get('resolution') in CR.IMAGE_PRICES['seedream-4-5'] else '2k'
+    try:
+        batch = min(4, max(1, int(body.get('batch') or 1)))
+    except (TypeError, ValueError):
+        batch = 1
     spec = {'kind': 'image', 'slug': slug, 'job': '', 'swap_in': True, 'face_lock': True,
             'model': imagegen.EXPLICIT_MODEL if explicit else 'seedream-4-5',
-            'resolution': '2k', 'aspect': size, 'batch': 1, 'explicit': explicit,
+            'resolution': res, 'aspect': size, 'batch': batch, 'explicit': explicit,
             'reference_media': media_id, 'parent_media': media_id,
             'prompt_extra': (body.get('prompt_extra') or '').strip()[:500],
             'character': char, 'character_id': char['id'],
@@ -38765,11 +38770,12 @@ def _text_still_call(slug, spec):
 
 SWAP_IN_PROMPT = (
     'Replace only the person in the last image with the woman shown in the other reference '
-    'images. Use her exact face and facial features, hair colour, length and style, skin tone, '
-    'body shape and proportions, tattoos and piercings. Keep everything else in the last image '
-    'exactly as it is: the pose and hand positions, {clothing}, accessories, objects, '
-    'background, lighting direction and colour, shadows, camera angle, framing, crop and photo '
-    'quality. Do not add, remove or move anything. Seamless, photorealistic, natural skin '
+    'images. Change only her body, face and hair to match her exactly: facial features, hair '
+    'colour, length and style, skin tone, body shape and proportions, tattoos and piercings. '
+    'Keep the exact same pose, movement, body position, hand placement and head angle. Keep '
+    'everything else in the last image exactly as it is: {clothing}, accessories, objects, '
+    'background, lighting, shadows, camera angle, framing and crop. Change nothing else. '
+    'Amateur phone photo quality: natural, unretouched, slightly imperfect, realistic skin '
     'texture, adult woman.')
 
 
@@ -38786,7 +38792,8 @@ def _swap_still_call(slug, spec):
     if spec.get('swap_in') and spec.get('prompt_extra'):
         prompt += ' ' + spec['prompt_extra']
     return {'model': imagegen.EXPLICIT_MODEL if spec.get('explicit') else 'seedream-4-5',
-            'resolution': '2k', 'aspect': spec.get('aspect') or '', 'batch': 1,
+            'resolution': spec.get('resolution') if spec.get('swap_in') else '2k',
+            'aspect': spec.get('aspect') or '', 'batch': spec.get('batch', 1) if spec.get('swap_in') else 1,
             'explicit': spec.get('explicit'), 'reference_urls': refs + photo,
             'async_delivery': True, 'prompt': prompt}
 
