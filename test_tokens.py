@@ -1014,6 +1014,8 @@ def test_frame_loras():
     os.environ.setdefault('GEMINI_API_KEY', 'test')
     import app as A
     ids = A._content_lora_ids
+    check('squirting picks the squirt LoRA and HMPussy with it',
+          ids('she squirts', 'h3') == ['squirt-h3', 'hmpussy-h3'])
     check('a toy close-up on Wan picks the close-up pair',
           ids('close-up of her dildo', 'wan') == ['dildo-22-v2-closeup'])
     check('a caption picks what it names on H3',

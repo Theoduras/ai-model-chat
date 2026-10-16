@@ -35308,6 +35308,11 @@ _DEFAULT_VIDEO_LORAS = [{
     'id': 'fingering-h3', 'name': 'H3 Fingering', 'scale': 0.9, 'family': 'h3',
     'trigger': 'fingering', 'examples': '',
     'high': 'https://civitai.com/api/download/models/3264127', 'low': ''}, {
+    # Civitai model 2893742, v2.0: no trigger, no published strength. Its author
+    # says it still needs the vagina LoRA, so a pick pulls hmpussy-h3 in too.
+    'id': 'squirt-h3', 'name': 'HMMasturbation / Squirting v2 (H3)', 'scale': 0.8, 'family': 'h3',
+    'trigger': '', 'examples': '',
+    'high': 'https://civitai.com/api/download/models/3310312', 'low': ''}, {
     # Civitai model 2846342, v0.5 (stills + motion). The version's download is
     # its video file, which its author runs at 0.35 under a stills file at 1.0;
     # alone it gets a little more.
@@ -35336,6 +35341,7 @@ _MASTURBATION_WORDS = re.compile(r'\b(masturbat\w*|orgasm\w*|wand|massager)\b', 
 _ORAL_WORDS = re.compile(r'\b(deepthroat\w*|blowjob|throat|sucks?|sucking|oral)\b', re.I)
 _BREAST_WORDS = re.compile(r'\b(breasts?|boobs?|tits?|nipples?|jiggl\w*|bounc\w*)\b', re.I)
 _PUSSY_WORDS = re.compile(r'\b(pussy|vagina|labia)\b', re.I)
+_SQUIRT_WORDS = re.compile(r'\b(squirt\w*|gush\w*)\b', re.I)
 _FINGERING_WORDS = re.compile(r'\b(fingering|fingered|fingers?\s+(deep\s+)?(in|into|inside|herself))\b', re.I)
 
 
@@ -35351,14 +35357,19 @@ def _content_lora_ids(text, family):
               (_ORAL_WORDS, 'deepthroat-h3'), (_BREAST_WORDS, 'boobs-h3'),
               (_MASTURBATION_WORDS, 'masturbation-h3')) if family == 'h3' else (
               (_BREAST_WORDS, 'boobs-22'),)
-    return ids + [want for words, want in wanted if words.search(text)]
+    if family == 'h3' and _SQUIRT_WORDS.search(text):
+        wanted += ((_SQUIRT_WORDS, 'squirt-h3'), (_SQUIRT_WORDS, 'hmpussy-h3'))
+    for want in (want for words, want in wanted if words.search(text)):
+        if want not in ids:
+            ids.append(want)
+    return ids
 
 
 def _content_words(text):
     """What in `text` matched a content LoRA, for the studio to show."""
     seen = []
     for words in (_TOY_WORDS, _PUSSY_WORDS, _FINGERING_WORDS, _ORAL_WORDS,
-                  _BREAST_WORDS, _MASTURBATION_WORDS):
+                  _BREAST_WORDS, _MASTURBATION_WORDS, _SQUIRT_WORDS):
         m = words.search(text)
         if m and m.group(0).lower() not in seen:
             seen.append(m.group(0).lower())
