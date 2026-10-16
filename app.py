@@ -5279,7 +5279,10 @@ document.getElementById('q').oninput=renderList;
 var p=new URLSearchParams(location.search);
 if(p.get('user'))current=p.get('user'); else if(p.get('visitor'))current='v:'+p.get('visitor');
 loadAlerts(); loadList(); if(current)loadConvo(true);
-setInterval(function(){if(document.hidden)return;loadList();loadConvo();},5000);
+var lastActive=Date.now();
+['mousemove','keydown','touchstart','scroll','focus'].forEach(function(ev){window.addEventListener(ev,function(){
+  var was=Date.now()-lastActive>600000;lastActive=Date.now();if(was){loadList();loadConvo();}},{passive:true});});
+setInterval(function(){if(document.hidden||Date.now()-lastActive>600000)return;loadList();loadConvo();},5000);
 var watchKey=null, watchHv='', watchTimer=null, watchChatTimer=null, watchScroll={x:0,y:0};
 function watchScreen(k){
   if(watchKey){stopWatch();return;}
