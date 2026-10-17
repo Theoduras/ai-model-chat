@@ -3300,7 +3300,7 @@ function videoPromptEdited() {
   return !!(ta && ta.value.trim() && !(genVWritten && ta.value === genVWritten.prompt));
 }
 
-let genVPromptForcing = false, genVAutoTimer = null;
+let genVPromptForcing = false, genVAutoTimer = null, genVWritePromise = null;
 function setPromptStatus(text) {
   ['gen-vwrite-note', 'gen-motion-status'].forEach(id => { const n = el(id); if (n) n.textContent = text; });
 }
@@ -3314,7 +3314,16 @@ function queueWrittenPrompt() {
   genVAutoTimer = setTimeout(() => { genVAutoTimer = null; autoWriteVideoPrompt(true); }, 1200);
 }
 
-async function autoWriteVideoPrompt(force) {
+function autoWriteVideoPrompt(force) {
+  const run = writeVideoPrompt(force);
+  if (force) {
+    const done = run.finally(() => { if (genVWritePromise === done) genVWritePromise = null; });
+    genVWritePromise = done;
+  }
+  return run;
+}
+
+async function writeVideoPrompt(force) {
   const ta = el('gen-vprompt');
   if (!ta || !slug() || genMake === 'image') return;
   // A pressed write asks the LLM and takes seconds; an automatic rebuild in the
@@ -3688,7 +3697,7 @@ async function jobPayload() {
     aspect: currentAspect(),
     audio: audioPayload(),
     prompt_extend: !!(el('gen-prompt-extend') || {}).checked,
-    video_prompt: videoPromptEdited() ? el('gen-vprompt').value.trim() : '',
+    video_prompt: genMake === 'image' ? '' : el('gen-vprompt').value.trim(),
     negative: el('gen-vnegative').value.trim(),
     loras: Object.entries(genLoraPick).map(([id, scale]) => ({ id, scale })),
     her_lora: genHerLora,
@@ -3757,6 +3766,9 @@ async function runVideoJob() {
   btn.disabled = true;
   setGenStatus('Sending…', null);
   try {
+    // The job runs on exactly the prompt shown, so a write still under way finishes first.
+    if (genVAutoTimer) { clearTimeout(genVAutoTimer); genVAutoTimer = null; await autoWriteVideoPrompt(true); }
+    else if (genVWritePromise) await genVWritePromise;
     const body = await jobPayload();
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
