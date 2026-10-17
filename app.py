@@ -38516,14 +38516,15 @@ def api_generate_swap_in():
         batch = min(4, max(1, int(body.get('batch') or 1)))
     except (TypeError, ValueError):
         batch = 1
-    spec = {'kind': 'image', 'slug': slug, 'job': '', 'swap_in': True, 'face_lock': True,
+    lock = body.get('face_lock') is not False
+    spec = {'kind': 'image', 'slug': slug, 'job': '', 'swap_in': True, 'face_lock': lock,
             'model': imagegen.EXPLICIT_MODEL if explicit else 'seedream-4-5',
             'resolution': res, 'aspect': size, 'batch': batch, 'explicit': explicit,
             'reference_media': media_id, 'parent_media': media_id,
             'story_id': _story_id(body),
             'prompt_extra': (body.get('prompt_extra') or '').strip()[:500],
             'character': char, 'character_id': char['id'],
-            'character_version': char['version'], 'addons': ['face-lock']}
+            'character_version': char['version'], 'addons': ['face-lock'] if lock else []}
     try:
         price = CR.quote(spec)
     except CR.PricingError as e:
@@ -39239,11 +39240,12 @@ def _swap_still_call(slug, spec):
 
 
 FACE_LOCK_PROMPT = (
-    'Edit the second image. Replace only the face with the exact face from the first image: '
-    'same facial features, eyes, nose, lips, jawline, skin tone and hairline. Keep the '
-    'expression direction, head angle, hair, body, clothing, lighting, background and framing '
-    'of the second image exactly. Amateur phone photo quality: natural, unretouched, slightly '
-    'imperfect, realistic skin texture, adult woman.')
+    'Edit the second image. The first image is only an identity reference: take her facial '
+    'features from it (eyes, nose, lips, jawline, skin tone) and nothing else. Do not copy its '
+    'neutral expression, flat lighting, size or angle. The face keeps the size, position, head '
+    'angle, expression, gaze, emotion and lighting of the second image, blended naturally into '
+    'it. Keep hair, body, clothing, background and framing of the second image exactly. Amateur '
+    'phone photo quality: natural, unretouched, realistic skin texture, adult woman.')
 
 
 def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
