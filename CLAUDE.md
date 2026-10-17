@@ -528,6 +528,10 @@ be set on Vercel.
 - Explicit video with sound, "Explicit Video + Sound (H3)" (`h3-gv`), runs on our RunPod endpoint
   `fgt7mgn43o4lfg`, set up by `infra/runpod-h3/deploy.py` (the code default for
   `RUNPOD_H3_ENDPOINT`). Its weights are nvfp4/w6a8, so it must stay on Blackwell (RTX PRO 6000), RO.
+- "Explicit Video Pro (Wan 3.0)" (`mr-wan-3-0-pro`) is MuleRouter's CarrotHub Wan 3.0 Video Pro
+  (`imagegen.MuleRouterProvider`, $0.18/s at 1080p, sound included) for Photo to Video, Text to Video
+  and Multi-reference, explicit included. Hidden until `MULEROUTER_API_KEY` is set. The poll URL
+  (`{MULEROUTER_URL}/{task_id}`) is a guess, since the docs don't show one: confirm it on the first live job.
 - Both explicit video models run on RunPod. `infra/vast` can host the same workers on Vast
   Serverless, but only `VAST_ENABLED=1` (with `VAST_API_KEY`) routes jobs there; the key alone
   does not, because it once sent every explicit clip to Vast endpoints that had been deleted.

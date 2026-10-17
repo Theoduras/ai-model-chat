@@ -195,6 +195,14 @@ for _m in VAST_MODELS:
     if _m != CHAR_LORA_IMAGE_MODEL or LORA_ENABLED:
         RUNPOD_ENDPOINTS.setdefault(_m, 'vast')
 RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
+# MuleRouter's CarrotHub Wan 3.0 Video Pro: still, prompt or references to a
+# clip with its own sound. Offered only once MULEROUTER_API_KEY is set.
+MULEROUTER_API_KEY = (os.getenv('MULEROUTER_API_KEY') or '').strip()
+MULEROUTER_URL = os.getenv(
+    'MULEROUTER_URL',
+    'https://api.mulerouter.ai/vendors/carrothub/v1/w3.0-video-pro/generation').rstrip('/')
+MULEROUTER_MODEL = 'mr-wan-3-0-pro'
+MULEROUTER_MODELS = (MULEROUTER_MODEL,) if MULEROUTER_API_KEY else ()
 # Vast has no queue: a submit waits here while a cold worker boots.
 VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '3600'))
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
@@ -274,7 +282,7 @@ VIDEO_JOBS = {
                           + (tuple(m for m in RUNPOD_MODELS
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL))
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
-                          + ('p-video-animate',),
+                          + ('p-video-animate',) + MULEROUTER_MODELS,
                 'needs': ('first_frame',),
                 'kind': 'video',
                 # Every plan may run it at these ratings; Extend and
@@ -285,14 +293,16 @@ VIDEO_JOBS = {
     # Her trained LoRA is the identity here: no photo behind the clip.
     # A photo of her from her LoRA first, then that photo animated on the
     # engine picked here with her LoRA attached: the first frame is already her.
-    'text': {'models': ('wan-2-2-gv', 'h3-gv'), 'needs': (), 'kind': 'video',
+    'text': {'models': ('wan-2-2-gv', 'h3-gv') + MULEROUTER_MODELS, 'needs': (), 'kind': 'video',
              'open': ('sfw', 'nsfw'), 'label': 'Text to Video',
              'note': 'Her LoRA and your prompt — no photo needed.'},
     'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
                'kind': 'video', 'ratings': ('sfw',), 'modes': ('continue', 'longer', 'loop'),
                'label': 'Extend',
                'note': 'Carry on from a clip you already have.'},
-    'multiref': {'models': ('wan-2-7',), 'needs': ('refs',), 'kind': 'video', 'ratings': ('sfw',),
+    # Explicit only on Wan 3.0 Pro (MuleRouter), the one multi-reference model that serves it.
+    'multiref': {'models': ('wan-2-7',) + MULEROUTER_MODELS, 'needs': ('refs',), 'kind': 'video',
+                 'ratings': ('sfw', 'nsfw') if MULEROUTER_MODELS else ('sfw',),
                  'label': 'Multi-reference',
                  'note': 'Her identity refs plus a separate scene or outfit.'},
 }
@@ -437,6 +447,8 @@ MODEL_RESOLUTION_VALUES = {
     'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
     'h3-gv': (('480p', '480p'), ('720p', '720p')),
     'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
+    # 1080p is its lowest rung and the cheapest; nothing asks it for more.
+    MULEROUTER_MODEL: (('1080p', '1080p'),),
 }
 
 
@@ -680,6 +692,7 @@ MODEL_VIDEO_SECONDS = {
     'p-video-animate': (1, 60),
     'kling-3-0-mc': (1, 60),
     'kling-3-0-omni': (3, 15),
+    MULEROUTER_MODEL: (2, 15),
 }
 
 
@@ -710,7 +723,7 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'p-video-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+MODEL_REF_CAP = {MULEROUTER_MODEL: 10, 'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'p-video-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
                  'kling-3-0-omni': 4}
 
 # The studio offers a handful of her views, not thirty, so a model that takes
@@ -2913,6 +2926,92 @@ class RunPodProvider(Provider):
         return self._read(resp.json())
 
 
+
+# ── MuleRouter ────────────────────────────────────────────────────────────────
+
+def _video_link(out):
+    """The first http link in a MuleRouter task, wherever the response nests it."""
+    if isinstance(out, str):
+        return out if out.startswith('http') else ''
+    items = out.values() if isinstance(out, dict) else out if isinstance(out, list) else ()
+    for item in items:
+        url = _video_link(item)
+        if url:
+            return url
+    return ''
+
+
+class MuleRouterProvider(Provider):
+    name = 'mulerouter'
+    _RATIOS = {'9:16': '9:16', '4:5': '3:4', '1:1': '1:1', '16:9': '16:9'}
+
+    def __init__(self):
+        if not MULEROUTER_API_KEY:
+            raise GenerationError('MULEROUTER_API_KEY is not set', fatal=True)
+
+    def _headers(self):
+        return {'Authorization': f'Bearer {MULEROUTER_API_KEY}',
+                'Content-Type': 'application/json'}
+
+    def submit_video(self, spec):
+        payload = {'prompt': spec.get('prompt') or build_video_prompt(),
+                   'resolution': '1080p',
+                   'duration': video_seconds(MULEROUTER_MODEL, spec.get('seconds') or 5),
+                   'audio': True, 'prompt_extend': False}
+        if spec.get('seed') is not None:
+            payload['seed'] = int(spec['seed']) % 2147483648
+        frame = (_data_uri(spec['reference_b64'], spec.get('reference_mime'))
+                 if spec.get('reference_b64') else spec.get('reference_url'))
+        if spec.get('job') == 'multiref':
+            refs = list(spec.get('reference_urls') or [])
+            scenes = list(spec.get('scene_urls') or [])
+            if frame:
+                refs = [frame] + refs
+            if not refs:
+                raise GenerationError('a multi-reference clip needs at least one photo of her')
+            payload['reference_images'] = (refs[:max(1, 10 - len(scenes))] + scenes)[:10]
+            payload['ratio'] = self._RATIOS.get(spec.get('aspect'), 'adaptive')
+        elif frame:
+            payload['first_frame'] = frame
+            payload['ratio'] = 'adaptive'
+        else:
+            raise GenerationError('a video needs an approved still as its first frame')
+        body = _post(MULEROUTER_URL, payload, self._headers(), timeout=VIDEO_TIMEOUT)
+        task = body.get('task_info') or {}
+        job = str(task.get('id') or '')
+        if not job:
+            raise GenerationError(_error_text(body) or 'MuleRouter returned no task id')
+        return job, self._read(body)
+
+    def _read(self, body):
+        task = body.get('task_info') or {}
+        state = (task.get('status') or '').lower()
+        if state in ('failed', 'error', 'cancelled', 'canceled'):
+            err = task.get('error') or body.get('error') or {}
+            return Result('failed', error=(err.get('detail') or err.get('title') or str(err))
+                          if isinstance(err, dict) else str(err) or 'MuleRouter failed the clip')
+        if state in ('completed', 'succeeded', 'success', 'done'):
+            rest = {k: v for k, v in body.items() if k != 'task_info'}
+            url = _video_link(rest)
+            return Result('done', [url]) if url else Result(
+                'failed', error='MuleRouter finished with no video')
+        return Result('running')
+
+    def poll(self, job_id, expect=1):
+        import requests
+        try:
+            resp = requests.get(f'{MULEROUTER_URL}/{job_id}', headers=self._headers(),
+                                timeout=TIMEOUT)
+        except Exception as e:
+            raise ProviderUnreachable(f'MuleRouter unreachable: {e}', fatal=False)
+        if resp.status_code == 404:
+            return Result('failed', error='MuleRouter no longer knows this job')
+        if resp.status_code >= 400:
+            raise GenerationError(f'MuleRouter status {resp.status_code}',
+                                  fatal=resp.status_code in (401, 403))
+        return self._read(resp.json())
+
+
 class VastProvider(RunPodProvider):
     """Our RunPod workers on Vast Serverless. A job id is a JSON handle on
     the one worker it runs on: its URL, the session pinning it, the job."""
@@ -3418,7 +3517,8 @@ def write_h3_prompt(idea, spec, chained=False, why=None):
 # ── Selection ─────────────────────────────────────────────────────────────────
 
 PROVIDERS = {'runware': RunwareProvider, 'modelslab': ModelsLabProvider,
-             'runpod': RunPodProvider, 'vast': VastProvider}
+             'runpod': RunPodProvider, 'vast': VastProvider,
+             'mulerouter': MuleRouterProvider}
 
 
 def provider_name():
@@ -3440,6 +3540,8 @@ def provider_name_for(spec):
     if ((spec.get('job') == 'swap' or spec.get('kind') == 'swap')
             and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
         return 'modelslab'
+    if spec.get('model') == MULEROUTER_MODEL:
+        return 'mulerouter'
     if spec.get('model') in VAST_MODELS:
         return 'vast'
     if spec.get('model') in RUNPOD_MODELS:

@@ -62,7 +62,7 @@ DEFAULT_VIDEO_DURATION = 5
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
                 'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv',
-                'h3-gv', 'wan-2-2-char-video')
+                'h3-gv', 'wan-2-2-char-video', 'mr-wan-3-0-pro')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -118,6 +118,8 @@ VIDEO_COST_USD_PER_SECOND = {
     'minimax-h3': {'480p': 0.13, '720p': 0.08, '1080p': 0.13},
     'minimax-h3-fast': {'480p': 0.046, '720p': 0.046, '1080p': 0.046},
     'wan-3-0': {'480p': 0.05, '720p': 0.10, '1080p': 0.20},
+    # MuleRouter's page: $0.18/s at 1080p, its lowest rung, which every rung snaps to.
+    'mr-wan-3-0-pro': {'480p': 0.18, '720p': 0.18, '1080p': 0.18},
     # Kling motion control runs at 1080p only; every rung snaps there.
     'kling-2-6-mc': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
     # Wan 2.7's rows until Runware's own price is read off search_models().
@@ -286,6 +288,7 @@ MODEL_LABELS = {
     'minimax-h3': 'MiniMax H3',
     'minimax-h3-fast': 'MiniMax H3 Fast',
     'wan-3-0': 'Wan 3.0',
+    'mr-wan-3-0-pro': 'Explicit Video Pro (Wan 3.0)',
     'kling-2-6-mc': 'Kling 2.6 motion control',
     'wan-2-2-animate': 'Wan 2.2 Animate',
     'wan-2-2': 'Wan 2.2',
@@ -351,6 +354,7 @@ VIDEO_MODEL_RATINGS = {
     'minimax-h3': ('sfw',),
     'minimax-h3-fast': ('sfw',),
     'wan-3-0': ('sfw',),
+    'mr-wan-3-0-pro': ('sfw', 'nsfw'),
     'kling-2-6-mc': ('sfw',),
     'kling-3-0-mc': ('sfw',),
     'kling-3-0-omni': ('sfw',),
