@@ -530,8 +530,9 @@ be set on Vercel.
   `RUNPOD_H3_ENDPOINT`). Its weights are nvfp4/w6a8, so it must stay on Blackwell (RTX PRO 6000), RO.
 - "Explicit Video Pro (Wan 3.0)" (`mr-wan-3-0-pro`) is MuleRouter's CarrotHub Wan 3.0 Video Pro
   (`imagegen.MuleRouterProvider`, $0.18/s at 1080p, sound included) for Photo to Video, Text to Video
-  and Multi-reference, explicit included. Hidden until `MULEROUTER_API_KEY` is set. The poll URL
-  (`{MULEROUTER_URL}/{task_id}`) is a guess, since the docs don't show one: confirm it on the first live job.
+  and Multi-reference, explicit included; Multi-reference is open to every plan on this model only
+  (Wan 2.7 stays admin). Sound is a studio toggle (`sound: 'original'` sends `audio: true`). Hidden until
+  `MULEROUTER_API_KEY` is set (set on Vercel). Polled at `GET {MULEROUTER_URL}/{task_id}`; result in `videos`.
 - Both explicit video models run on RunPod. `infra/vast` can host the same workers on Vast
   Serverless, but only `VAST_ENABLED=1` (with `VAST_API_KEY`) routes jobs there; the key alone
   does not, because it once sent every explicit clip to Vast endpoints that had been deleted.

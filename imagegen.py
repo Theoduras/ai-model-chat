@@ -301,8 +301,10 @@ VIDEO_JOBS = {
                'label': 'Extend',
                'note': 'Carry on from a clip you already have.'},
     # Explicit only on Wan 3.0 Pro (MuleRouter), the one multi-reference model that serves it.
-    'multiref': {'models': ('wan-2-7',) + MULEROUTER_MODELS, 'needs': ('refs',), 'kind': 'video',
+    # Open to every plan on Wan 3.0 Pro only; Wan 2.7 stays admin-only (app.py's job gate).
+    'multiref': {'models': MULEROUTER_MODELS + ('wan-2-7',), 'needs': ('refs',), 'kind': 'video',
                  'ratings': ('sfw', 'nsfw') if MULEROUTER_MODELS else ('sfw',),
+                 'open': ('sfw', 'nsfw') if MULEROUTER_MODELS else (),
                  'label': 'Multi-reference',
                  'note': 'Her identity refs plus a separate scene or outfit.'},
 }
@@ -2957,7 +2959,7 @@ class MuleRouterProvider(Provider):
         payload = {'prompt': spec.get('prompt') or build_video_prompt(),
                    'resolution': '1080p',
                    'duration': video_seconds(MULEROUTER_MODEL, spec.get('seconds') or 5),
-                   'audio': True, 'prompt_extend': False}
+                   'audio': spec.get('sound') == 'original', 'prompt_extend': False}
         if spec.get('seed') is not None:
             payload['seed'] = int(spec['seed']) % 2147483648
         frame = (_data_uri(spec['reference_b64'], spec.get('reference_mime'))

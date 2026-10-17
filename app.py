@@ -38368,7 +38368,8 @@ def api_generate_job():
         return jsonify({'ok': False, 'guest': True,
                         'error': 'Register to generate explicit content.'}), 403
     if (spec['kind'] != 'image' and not user.get('is_admin')
-            and not imagegen.job_open(spec.get('job'), 'explicit' if spec.get('explicit') else 'sfw')):
+            and (not imagegen.job_open(spec.get('job'), 'explicit' if spec.get('explicit') else 'sfw')
+                 or (spec.get('job') == 'multiref' and spec.get('model') != imagegen.MULEROUTER_MODEL))):
         return jsonify({'ok': False, 'error': 'Video generation is coming soon.'}), 403
     return _gen_submit(user, slug, spec, price)
 

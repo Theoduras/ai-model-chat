@@ -2497,6 +2497,7 @@ function hasSourceClip() {
 }
 
 function audioModes() {
+  if (engineModel() === 'mr-wan-3-0-pro') return ['original', 'none', 'upload'];
   if ((genPrices.silent_models || []).includes(engineModel())) return ['none', 'upload'];
   const gen = soundOffered() ? (genPrices.audio_modes || []).filter(m => m !== 'speech'
     && (m !== 'moaning' || genRating !== 'sfw')) : ['lipsync'];
@@ -2505,7 +2506,7 @@ function audioModes() {
 
 // The engines that make sound themselves; the rest get no Sound row.
 const SOUND_MODELS = ['seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5', 'kling-3-0-omni',
-  'minimax-h3', 'minimax-h3-fast', 'wan-3-0'];
+  'minimax-h3', 'minimax-h3-fast', 'wan-3-0', 'mr-wan-3-0-pro'];
 
 function renderAudioModes() {
   const box = el('gen-audio-modes');
@@ -2522,7 +2523,8 @@ function renderAudioModes() {
   if (!modes.includes(genAudio.mode)) genAudio = { mode: modes[0] };
   box.innerHTML = modes.map(m =>
     `<button type="button" class="gen-chip" aria-pressed="${m === genAudio.mode}"
-       onclick="pickAudio('${m}')">${esc(AUDIO_LABELS[m] || m)}</button>`).join('');
+       onclick="pickAudio('${m}')">${esc(m === 'original' && engineModel() === 'mr-wan-3-0-pro'
+         ? 'With sound' : AUDIO_LABELS[m] || m)}</button>`).join('');
   const typed = ['speech', 'custom', 'lipsync', 'music'].includes(genAudio.mode);
   field.style.display = typed ? '' : 'none';
   if (typed) field.placeholder = AUDIO_PLACEHOLDERS[genAudio.mode] || '';
