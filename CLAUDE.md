@@ -329,9 +329,8 @@ Stay completely in character. Never mention being an AI.
   negative input (`takes_negative`), a short positive keep line instead. Swap, Extend and Multi-reference, and the Wan 2.2, Wan 2.6, Wan 2.2 + LoRA and
   P-Video models, are hidden from explicit work by their ratings, not removed. What follows is how
   the hidden paths worked. An explicit
-  Animate with a motion clip runs on P-Video-Animate (`imagegen.EXPLICIT_MOTION_MODEL`): Wan 2.2
-  Animate is not in Runware's catalogue, and P-Video-Animate's safety check has crashed the provider
-  worker before, which fails and refunds the job. An explicit Animate from a still runs on
+  Animate with a motion clip is refused: P-Video-Animate, its only model, was removed (priced still,
+  for past jobs), and Wan 2.2 Animate is not in Runware's catalogue. An explicit Animate from a still runs on
   **Wan 2.2 via RunPod's public endpoint** (`imagegen.RunPodProvider`, safety checker off,
   pay per video) when `RUNPOD_API_KEY` is set, else on Wan 2.7. RunPod fetches the still
   through a 15-minute signed `/wish-file/` link (needs `PUBLIC_BASE_URL`), else a data URI. Seedance 2.0 (+Fast), MiniMax H3 (+Fast), Wan 3.0 and

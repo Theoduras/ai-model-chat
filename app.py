@@ -35204,8 +35204,10 @@ def _gen_spec(slug, body, user):
             # conditioning on her photo, which is what this job needs -- a
             # true replace takes no motion guidance. Alibaba's filter refuses
             # an explicit clip, so explicit work goes to Runware's own Wan.
-            model = (CR.VIDEO_EDIT_MODEL if level == 'sfw'
-                     else imagegen.EXPLICIT_MOTION_MODEL)
+            if level != 'sfw':
+                raise imagegen.GenerationError(
+                    'Explicit motion-clip animate is not offered.')
+            model = CR.VIDEO_EDIT_MODEL
             spec['source_path'] = src['path']
             spec['source_id'] = drive_id
             spec['source_width'] = src['width']
@@ -39151,13 +39153,6 @@ def _gen_start(job_id, slug, spec, workspace):
                         call['prompt'] = written
                 if spec.get('story_id'):
                     call['prompt'] = (call.get('prompt') or '') + ' ' + imagegen.CONTINUITY_CLAUSE
-                # Her views ride beside the opening frame where the model takes both,
-                # so she looks the same however far the clip moves from the photo.
-                if (spec.get('job') == 'animate' and spec.get('character')
-                        and call.get('model') in imagegen.W3_ENDPOINTS
-                        and not call.get('reference_urls') and not spec.get('continue_from')
-                        and not spec.get('story_upload')):
-                    call['reference_urls'] = _character_urls(spec['character'], 'portrait', '')[:4]
                 _fit_video_call(call, spec)
                 spec['sent'] = [dict(_video_sent(call, provider.name),
                                      start='frame' if spec.get('continue_from') or spec.get('story_upload')

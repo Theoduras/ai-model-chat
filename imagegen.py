@@ -133,7 +133,7 @@ REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
 # Models whose allow-list has no `negativePrompt`. Sending it costs a refused
 # round trip carrying every reference photo before `_send` strips it.
 NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5',
-                      'minimax-h3', 'minimax-h3-fast', 'p-video-animate')
+                      'minimax-h3', 'minimax-h3-fast')
 # How each video model wants its prompt written, from each one's own prompt
 # guide. Wan 2.x follows one continuous beat of motion; the others read a
 # shot brief and can follow time ranges ("0-3s: ...").
@@ -303,7 +303,7 @@ VIDEO_JOBS = {
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL,
                                                 HIDDEN_VIDEO_MODEL))
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
-                          + ('p-video-animate',) + MULEROUTER_MODELS + SPICY_MODELS,
+                          + MULEROUTER_MODELS + SPICY_MODELS,
                 'needs': ('first_frame',),
                 'kind': 'video',
                 # Every plan may run it at these ratings; Extend and
@@ -1484,9 +1484,6 @@ def fit_prompt(prompt, spec):
         if keep not in text:
             text = f'{text} {keep}'.strip()
         text = f'{text} {_creator_avoid(spec)}'.strip()
-    if (model in ('minimax-h3', 'minimax-h3-fast') and not text.startswith('[')
-            and re.search(r'camera (stays )?(fixed|locked)|no zoom', text, re.I)):
-        text = '[Static shot] ' + text
     return text
 
 
@@ -3126,8 +3123,7 @@ class MuleRouterProvider(Provider):
                  if spec.get('reference_b64') else spec.get('reference_url'))
         refs = list(spec.get('reference_urls') or [])
         clip, voice = spec.get('source_url'), spec.get('voice_url')
-        if (spec.get('job') == 'multiref' or clip or voice
-                or (refs and spec.get('job') == 'animate')):
+        if spec.get('job') == 'multiref' or clip or voice:
             images = ([frame] if frame else []) + refs
             scenes = list(spec.get('scene_urls') or [])
             images = (images[:max(1, 10 - len(scenes))] + scenes)[:10]
