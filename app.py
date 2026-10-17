@@ -35081,8 +35081,8 @@ def _gen_spec(slug, body, user):
         # A prompt-only start claims to be nobody: a generic woman's still,
         # animated without her LoRA.
         if body.get('start') == 'prompt':
-            spec['generic'] = True
-        elif not _char_lora_entry(slug):
+            raise imagegen.GenerationError('Start from a photo or her LoRA.')
+        if not _char_lora_entry(slug):
             raise imagegen.GenerationError(
                 'Train her LoRA first — the clip starts from a photo made with it.')
         # Wan 3.0 makes a prompt-only clip itself, so it needs no still first.

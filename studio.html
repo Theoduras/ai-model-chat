@@ -1805,11 +1805,10 @@ function setJob(v) {
   renderGenForm();
 }
 
-// Photo to Video can start from a vault photo, a still from her LoRA, or a
-// prompt alone (a generic woman, not her); the last two run as Text to Video.
+// Photo to Video starts from a vault photo or a still from her LoRA (run as Text to Video).
 let genTextStart = 'lora';
 function startOptions() {
-  return [['photo', 'A photo'], ['lora', 'Her LoRA'], ['prompt', 'Prompt only']]
+  return [['photo', 'A photo'], ['lora', 'Her LoRA']]
     .filter(o => o[0] !== 'lora' || herLoraReady());
 }
 function renderStartSeg() {
@@ -5033,7 +5032,7 @@ async function studioRestore() {
   try {
     if (s.level && window.StudioNSFW) StudioNSFW.setLevel(s.level);
     if (s.rating) setRating(s.rating);
-    if (s.textStart) genTextStart = s.textStart;
+    if (s.textStart === 'lora') genTextStart = s.textStart;
     if (s.job) setJob(s.job);
     if (s.swapIn && s.job === 'image') setSwapIn(true);
     if (s.loras) Object.assign(genLoraPick, s.loras);
