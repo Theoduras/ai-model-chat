@@ -64,7 +64,8 @@ DEFAULT_VIDEO_DURATION = 5
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
                 'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv',
-                'h3-gv', 'wan-2-2-char-video', 'mr-wan-3-0-pro', 'mr-wan-3-0')
+                'h3-gv', 'wan-2-2-char-video', 'mr-wan-3-0-pro', 'mr-wan-3-0',
+                'mr-wan-2-7-spicy', 'mr-wan-2-2-spicy')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
 # Wan 2.7 is the only video model that takes an input clip, so a face swap into
@@ -124,6 +125,9 @@ VIDEO_COST_USD_PER_SECOND = {
     # It serves 1080p up; a lower rung asked for runs, and is billed, at 1080p.
     'mr-wan-3-0-pro': {'480p': 0.18, '720p': 0.18, '1080p': 0.18, '2k': 0.20, '4k': 0.23},
     'mr-wan-3-0': {'480p': 0.05, '720p': 0.10, '1080p': 0.20},
+    # CarrotHub's spicy models; a rung each does not serve runs at its nearest.
+    'mr-wan-2-7-spicy': {'480p': 0.13, '720p': 0.13, '1080p': 0.20},
+    'mr-wan-2-2-spicy': {'480p': 0.02, '720p': 0.04, '1080p': 0.04},
     # Kling motion control runs at 1080p only; every rung snaps there.
     'kling-2-6-mc': {'480p': 0.07, '720p': 0.07, '1080p': 0.07},
     # Wan 2.7's rows until Runware's own price is read off search_models().
@@ -294,6 +298,8 @@ MODEL_LABELS = {
     'wan-3-0': 'Wan 3.0',
     'mr-wan-3-0-pro': 'Explicit Video Pro (Wan 3.0)',
     'mr-wan-3-0': 'Explicit Video (Wan 3.0)',
+    'mr-wan-2-7-spicy': 'Explicit Spicy (Wan 2.7)',
+    'mr-wan-2-2-spicy': 'Explicit Spicy Lite (Wan 2.2)',
     'kling-2-6-mc': 'Kling 2.6 motion control',
     'wan-2-2-animate': 'Wan 2.2 Animate',
     'wan-2-2': 'Wan 2.2',
@@ -361,6 +367,8 @@ VIDEO_MODEL_RATINGS = {
     'wan-3-0': ('sfw',),
     'mr-wan-3-0-pro': ('sfw', 'nsfw'),
     'mr-wan-3-0': ('sfw', 'nsfw'),
+    'mr-wan-2-7-spicy': ('sfw', 'nsfw'),
+    'mr-wan-2-2-spicy': ('sfw', 'nsfw'),
     'kling-2-6-mc': ('sfw',),
     'kling-3-0-mc': ('sfw',),
     'kling-3-0-omni': ('sfw',),
@@ -542,7 +550,8 @@ def video_price(resolution, seconds, addons=(), model=None):
     except (ValueError, TypeError):
         secs = 0
     top = (CHAIN_MAX_SECONDS if model in CHAIN_MODELS
-           else _IG.MULEROUTER_LONGEST if model in _IG.MULEROUTER_ENDPOINTS else VIDEO_MAX_SECONDS)
+           else max(VIDEO_MAX_SECONDS, _IG.MODEL_VIDEO_SECONDS[model][1])
+           if model in _IG.MULEROUTER_ENDPOINTS else VIDEO_MAX_SECONDS)
     if not rate or not VIDEO_SECONDS_MIN <= secs <= top:
         raise PricingError(
             f'no price for video {model!r} {resolution!r} at {seconds!r}s')

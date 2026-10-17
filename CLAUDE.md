@@ -535,7 +535,10 @@ be set on Vercel.
   `reference_videos`, billed in + out seconds, so priced at double) and Extend (loop sets `last_frame`).
   Up to 30s in one pass. Sound is a toggle; `voice` sends an uploaded track as `reference_audios`.
   Clips and voices go by URL only, through signed `/gen-file/` links where storage has no signed URL.
-  Hidden until `MULEROUTER_API_KEY` is set (on Vercel).
+  Hidden until `MULEROUTER_API_KEY` is set (on Vercel). Wan 3.0 is not one of CarrotHub's "spicy"
+  models, so its explicit rating is unproven until a live run; the spicy ones are Photo to Video only:
+  "Explicit Spicy" (`mr-wan-2-7-spicy`, 720p/1080p, 2-15s, sound and voice) and "Explicit Spicy Lite"
+  (`mr-wan-2-2-spicy`, 480p/720p, 5 or 8s, silent, $0.02-0.04/s).
 - Both explicit video models run on RunPod. `infra/vast` can host the same workers on Vast
   Serverless, but only `VAST_ENABLED=1` (with `VAST_API_KEY`) routes jobs there; the key alone
   does not, because it once sent every explicit clip to Vast endpoints that had been deleted.

@@ -2501,8 +2501,9 @@ function hasSourceClip() {
 }
 
 // MuleRouter's Wan 3.0: its own sound on or off, a track laid over, or a voice to match.
-const MULE_MODELS = ['mr-wan-3-0-pro', 'mr-wan-3-0'];
+const MULE_MODELS = ['mr-wan-3-0-pro', 'mr-wan-3-0', 'mr-wan-2-7-spicy', 'mr-wan-2-2-spicy'];
 function audioModes() {
+  if (engineModel() === 'mr-wan-2-2-spicy') return ['none', 'upload'];
   if (MULE_MODELS.includes(engineModel())) return ['original', 'none', 'upload', 'voice'];
   if ((genPrices.silent_models || []).includes(engineModel())) return ['none', 'upload'];
   const gen = soundOffered() ? (genPrices.audio_modes || []).filter(m => m !== 'speech'
@@ -2512,7 +2513,8 @@ function audioModes() {
 
 // The engines that make sound themselves; the rest get no Sound row.
 const SOUND_MODELS = ['seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5', 'kling-3-0-omni',
-  'minimax-h3', 'minimax-h3-fast', 'wan-3-0', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+  'minimax-h3', 'minimax-h3-fast', 'wan-3-0', 'mr-wan-3-0-pro', 'mr-wan-3-0', 'mr-wan-2-7-spicy',
+  'mr-wan-2-2-spicy'];
 
 function renderAudioModes() {
   const box = el('gen-audio-modes');

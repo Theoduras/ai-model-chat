@@ -201,9 +201,14 @@ MULEROUTER_API_KEY = (os.getenv('MULEROUTER_API_KEY') or '').strip()
 _MR_BASE = os.getenv('MULEROUTER_BASE', 'https://api.mulerouter.ai/vendors/carrothub/v1').rstrip('/')
 MULEROUTER_MODEL = 'mr-wan-3-0-pro'
 # The non-Pro model serves 480p/720p (cheaper); the Pro one 1080p/2k/4k.
-MULEROUTER_ENDPOINTS = {MULEROUTER_MODEL: f'{_MR_BASE}/w3.0-video-pro/generation',
-                        'mr-wan-3-0': f'{_MR_BASE}/w3.0-video/generation'}
-MULEROUTER_MODELS = tuple(MULEROUTER_ENDPOINTS) if MULEROUTER_API_KEY else ()
+W3_ENDPOINTS = {MULEROUTER_MODEL: f'{_MR_BASE}/w3.0-video-pro/generation',
+                'mr-wan-3-0': f'{_MR_BASE}/w3.0-video/generation'}
+# CarrotHub's explicit ("spicy") image-to-video models: a still and a prompt only.
+SPICY_ENDPOINTS = {'mr-wan-2-7-spicy': f'{_MR_BASE}/wan2.7-i2v-spicy/generation',
+                   'mr-wan-2-2-spicy': f'{_MR_BASE}/wan2.2-i2v-spicy/generation'}
+MULEROUTER_ENDPOINTS = {**W3_ENDPOINTS, **SPICY_ENDPOINTS}
+MULEROUTER_MODELS = tuple(W3_ENDPOINTS) if MULEROUTER_API_KEY else ()
+SPICY_MODELS = tuple(SPICY_ENDPOINTS) if MULEROUTER_API_KEY else ()
 MULEROUTER_LONGEST = 30
 # Vast has no queue: a submit waits here while a cold worker boots.
 VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '3600'))
@@ -284,7 +289,7 @@ VIDEO_JOBS = {
                           + (tuple(m for m in RUNPOD_MODELS
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL))
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
-                          + ('p-video-animate',) + MULEROUTER_MODELS,
+                          + ('p-video-animate',) + MULEROUTER_MODELS + SPICY_MODELS,
                 'needs': ('first_frame',),
                 'kind': 'video',
                 # Every plan may run it at these ratings; Extend and
@@ -454,6 +459,8 @@ MODEL_RESOLUTION_VALUES = {
     # 1080p is its lowest rung and the cheapest; nothing asks it for more.
     MULEROUTER_MODEL: (('1080p', '1080p'), ('2k', '2k'), ('4k', '4k')),
     'mr-wan-3-0': (('480p', '480p'), ('720p', '720p'), ('1080p', '1080p')),
+    'mr-wan-2-7-spicy': (('720p', '720p'), ('1080p', '1080p')),
+    'mr-wan-2-2-spicy': (('480p', '480p'), ('720p', '720p')),
 }
 
 
@@ -471,6 +478,16 @@ def rung_for(model_key, resolution):
     if not rungs:
         return resolution
     return resolution if resolution in rungs else rungs[0]
+
+
+def mule_rung(model_key, resolution):
+    """A MuleRouter model's rung for the one asked: the highest it serves at
+    or below it, else its lowest. Above its top it runs its top, not its bottom."""
+    rungs = model_rungs(model_key) or [resolution]
+    order = ('480p', '720p', '1080p', '2k', '4k')
+    want = order.index(resolution) if resolution in order else 0
+    fits = [r for r in rungs if order.index(r) <= want]
+    return fits[-1] if fits else rungs[0]
 
 
 def _video_fields(model_key):
@@ -639,7 +656,9 @@ MODEL_VIDEO_DURATIONS = {
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
-    **{m: tuple(range(2, MULEROUTER_LONGEST + 1)) for m in MULEROUTER_ENDPOINTS},
+    **{m: tuple(range(2, MULEROUTER_LONGEST + 1)) for m in W3_ENDPOINTS},
+    'mr-wan-2-7-spicy': tuple(range(2, 16)),
+    'mr-wan-2-2-spicy': (5, 8),
 }
 
 
@@ -698,7 +717,9 @@ MODEL_VIDEO_SECONDS = {
     'p-video-animate': (1, 60),
     'kling-3-0-mc': (1, 60),
     'kling-3-0-omni': (3, 15),
-    **{m: (2, MULEROUTER_LONGEST) for m in MULEROUTER_ENDPOINTS},
+    **{m: (2, MULEROUTER_LONGEST) for m in W3_ENDPOINTS},
+    'mr-wan-2-7-spicy': (2, 15),
+    'mr-wan-2-2-spicy': (5, 8),
 }
 
 
@@ -2962,10 +2983,32 @@ class MuleRouterProvider(Provider):
         return {'Authorization': f'Bearer {MULEROUTER_API_KEY}',
                 'Content-Type': 'application/json'}
 
+    def _spicy(self, model, spec, prompt, frame):
+        if not frame:
+            raise GenerationError('a video needs an approved still as its first frame')
+        body = {'image': frame, 'prompt': prompt,
+                'resolution': mule_rung(model, spec.get('resolution')),
+                'duration': video_seconds(model, spec.get('seconds') or 5),
+                'prompt_extend': bool(spec.get('prompt_extend'))}
+        if spec.get('seed') is not None:
+            body['seed'] = int(spec['seed']) % 2147483648
+        if model == 'mr-wan-2-7-spicy':
+            body['negative_prompt'] = negative_for(spec)
+            body['audio'] = spec.get('sound') in ('original', 'voice')
+            if spec.get('voice_url'):
+                body['audio_url'] = spec['voice_url']
+        elif spec.get('closing_b64'):
+            body['last_image'] = _data_uri(spec['closing_b64'], spec.get('closing_mime'))
+        return model, body
+
     def payload(self, spec):
         model = spec.get('model') if spec.get('model') in MULEROUTER_ENDPOINTS else MULEROUTER_MODEL
         prompt = spec.get('prompt') or build_video_prompt()
-        body = {'resolution': rung_for(model, spec.get('resolution')),
+        if model in SPICY_ENDPOINTS:
+            return self._spicy(model, spec, prompt,
+                               _data_uri(spec['reference_b64'], spec.get('reference_mime'))
+                               if spec.get('reference_b64') else spec.get('reference_url'))
+        body = {'resolution': mule_rung(model, spec.get('resolution')),
                 'duration': video_seconds(model, spec.get('seconds') or 5),
                 'audio': spec.get('sound') in ('original', 'voice'),
                 'prompt_extend': bool(spec.get('prompt_extend')),

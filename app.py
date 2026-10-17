@@ -35001,7 +35001,7 @@ def _gen_spec(slug, body, user):
     model = _gen_video_model(job, level, body.get('model'))
     mule = model in imagegen.MULEROUTER_ENDPOINTS
     if mule:
-        resolution = imagegen.rung_for(model, resolution)
+        resolution = imagegen.mule_rung(model, resolution)
         spec['prompt_extend'] = body.get('prompt_extend') is True
         # Its own sound is on unless asked off; _gen_audio reads "none" as no ask at all.
         spec['sound'] = str((body.get('audio') or {}).get('mode') or 'original').strip().lower()
@@ -35254,7 +35254,7 @@ def _gen_spec(slug, body, user):
         spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions,
                          'prompts': (prompts + [''] * len(motions))[:len(motions)],
                          'plain': body.get('chain_identity') is False}
-    elif seconds > (imagegen.MULEROUTER_LONGEST if mule else CR.VIDEO_MAX_SECONDS):
+    elif seconds > (imagegen.MODEL_VIDEO_SECONDS[model][1] if mule else CR.VIDEO_MAX_SECONDS):
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
     # Explicit Photo to Video is redrawn as her afterwards (face and body, from
