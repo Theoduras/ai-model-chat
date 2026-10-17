@@ -34820,6 +34820,23 @@ def _gen_own_video_prompt(spec):
     return text
 
 
+def _video_look(spec):
+    """Her chosen character's safe-work features as one short line, so every
+    model keeps the same look; a clip on her LoRA already carries it."""
+    snap = spec.get('character')
+    if not snap or (imagegen.lora_style(spec) or {}).get('her'):
+        return ''
+    frags = [f for f in CH.describe(snap.get('sheet') or {}, 'sfw',
+                                    snap.get('body_type') or 'female').split(', ') if f][:6]
+    return ('She has ' + ', '.join(frags) + '.') if frags else ''
+
+
+def _fit_video_call(call, spec):
+    call['prompt'] = imagegen.fit_prompt(call.get('prompt') or '', dict(
+        spec, model=call.get('model') or spec.get('model'),
+        seconds=call.get('seconds') or spec.get('seconds'), look=_video_look(spec)))
+
+
 def _story_id(body):
     """A storyboard's id, made by the studio when it opens one; '' if absent."""
     sid = str(body.get('story') or '').strip().lower()
@@ -35236,7 +35253,9 @@ def _gen_spec(slug, body, user):
         resolution = _video_rung(snapped_h, snapped_w)
     spec.update({'resolution': resolution, 'seconds': seconds,
                  'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
-                 'motion': (body.get('motion') or '')[:300]})
+                 'motion': (body.get('motion') or '')[:300],
+                 'beats': [{'t': b.get('t'), 'action': str(b.get('action') or '')[:200]}
+                           for b in (body.get('beats') or [])[:8] if isinstance(b, dict)]})
     if (level == 'sfw' and job not in CR.SFW_ANY_MODEL_JOBS
             and model not in CR.SFW_VIDEO_MODELS):
         raise imagegen.GenerationError('That model is not offered for safe-for-work video.')
@@ -38276,16 +38295,19 @@ def api_generate_video_prompt():
         if body.get('write') and spec.get('model') == 'h3-gv':
             prompt = imagegen.write_h3_prompt(
                 motion, spec, chained=part >= 2 and body.get('chain_identity') is not False)
-        elif body.get('write') and spec.get('model') in imagegen.RUNPOD_MODELS:
+        elif body.get('write') and imagegen.writes_motion(spec.get('model')):
             why = {}
             written = imagegen.write_motion_prompt(
-                motion, prompt, spec.get('explicit'), style=imagegen.lora_style(spec), why=why)
+                motion, prompt, spec.get('explicit'), style=imagegen.lora_style(spec), why=why,
+                model=spec.get('model'), seconds=spec.get('seconds'))
             if written:
                 logger.info('motion prompt written: %s', written)
                 prompt = written
             else:
                 note = f"Qwen did not write it — {why.get('reason', 'no answer')}. Kept the template."
                 logger.warning('motion prompt: %s', note)
+        prompt = imagegen.fit_prompt(prompt, dict(spec, look=_video_look(spec),
+                                                  beats=None if part >= 2 else spec.get('beats')))
         return jsonify({'ok': True, 'prompt': prompt, 'note': note})
     except (imagegen.GenerationError, CR.PricingError) as e:
         return jsonify({'ok': False, 'error': str(e)[:300]}), 400
@@ -39119,15 +39141,24 @@ def _gen_start(job_id, slug, spec, workspace):
                     call['prompt'] = imagegen.write_h3_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), spec)
                     logger.info('h3 prompt job=%s: %s', job_id, call['prompt'])
-                elif spec.get('model') in imagegen.RUNPOD_MODELS and not spec.get('video_prompt'):
+                elif imagegen.writes_motion(spec.get('model')) and not spec.get('video_prompt'):
                     written = imagegen.write_motion_prompt(
                         spec.get('prompt_extra') or spec.get('motion', ''), call.get('prompt', ''),
-                        spec.get('explicit'), style=imagegen.lora_style(spec))
+                        spec.get('explicit'), style=imagegen.lora_style(spec),
+                        model=spec.get('model'), seconds=call.get('seconds'))
                     if written:
                         logger.info('motion prompt job=%s: %s', job_id, written)
                         call['prompt'] = written
                 if spec.get('story_id'):
                     call['prompt'] = (call.get('prompt') or '') + ' ' + imagegen.CONTINUITY_CLAUSE
+                # Her views ride beside the opening frame where the model takes both,
+                # so she looks the same however far the clip moves from the photo.
+                if (spec.get('job') == 'animate' and spec.get('character')
+                        and call.get('model') in imagegen.W3_ENDPOINTS
+                        and not call.get('reference_urls') and not spec.get('continue_from')
+                        and not spec.get('story_upload')):
+                    call['reference_urls'] = _character_urls(spec['character'], 'portrait', '')[:4]
+                _fit_video_call(call, spec)
                 spec['sent'] = [dict(_video_sent(call, provider.name),
                                      start='frame' if spec.get('continue_from') or spec.get('story_upload')
                                      else 'ref' if spec.get('reference_media') else '',
@@ -39814,6 +39845,7 @@ def _gen_chain_submit(job_id, slug, spec, provider_name, done, frame):
                        stored[done - 1] if done - 1 < len(stored) else '')
     logger.info('chain job=%s part %d/%d: %s', job_id, done + 1,
                 len(chain['plan']), call['prompt'])
+    _fit_video_call(call, spec)
     spec.setdefault('sent', []).append(dict(
         _video_sent(call, provider_name), ref_paths=_ref_paths(slug, call),
         start='frame%d' % (done - 1) if done - 1 < len(chain.get('frames') or []) else '',

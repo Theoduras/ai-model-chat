@@ -627,6 +627,10 @@
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
                  placeholder="she turns towards the camera and smiles"></label>
+        <label class="gen-f"><span>Timed beats <em class="hint">optional</em></span>
+          <input type="text" id="gen-beats" maxlength="400"
+                 placeholder="0s she walks in; 3s turns to the camera; 6s smiles">
+          <span class="hint">Times longer than the clip are scaled to fit.</span></label>
         <div class="gen-f" id="gen-presets" style="display:none"><span>Presets</span><div></div></div>
         <div id="gen-chain-motions"></div>
         <div class="gen-f" id="gen-anim-story-row" style="display:none"><span>Longer than one clip?</span>
@@ -3656,9 +3660,17 @@ async function runGeneration() {
 
 // One submit for all five video jobs. The job decides what the payload
 // carries; the server validates the same table this read its options from.
+// "3s she turns; 6s smiles" -> [{t: 3, action: 'she turns'}, ...]
+function beatsPayload() {
+  return ((el('gen-beats') || {}).value || '').split(/[;\n]/).map(part => {
+    const m = part.trim().match(/^(?:at\s*)?(\d+(?:\.\d+)?)\s*s(?:ec(?:onds?)?)?[:,]?\s+(.+)$/i);
+    return m ? { t: parseFloat(m[1]), action: m[2].trim() } : null;
+  }).filter(Boolean).slice(0, 8);
+}
+
 async function jobPayload() {
   const base = {
-    persona: slug(), job: genJob, rating: genRating,
+    persona: slug(), job: genJob, rating: genRating, beats: beatsPayload(),
     model: genMake === 'swap' ? swapModel() : videoModel(),
     aspect: currentAspect(),
     audio: audioPayload(),
@@ -3831,7 +3843,7 @@ function renderGenStaging() {
 // Each step is its own job, so a finished job is the review gate. The server
 // holds what matters (seed, anchor, which clip a part carries on from); this
 // only remembers which jobs belong to the board and which were accepted.
-const STORY_MODELS = ['h3-gv', 'wan-2-2-gv'];
+const STORY_MODELS = ['h3-gv'];
 const STORY_SECONDS = { 'h3-gv': [5, 10, 15], 'wan-2-2-gv': [5, 8] };
 let story = null;
 
@@ -4510,7 +4522,7 @@ function renderPresets() {
 async function applyPreset(i) {
   const p = MOTION_PRESETS[i];
   if (p.model && videoModel() !== p.model) pickVideoModel(p.model);
-  else if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('wan-2-2-gv');
+  else if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('mr-wan-2-2-spicy');
   el('gen-video-motion').value = p.motion;
   const secs = el('gen-vsecs');
   if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);

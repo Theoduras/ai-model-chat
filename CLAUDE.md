@@ -322,8 +322,11 @@ Stay completely in character. Never mention being an AI.
   only) or the vault references, and it then runs on a model in
   `imagegen.REFERENCE_VIDEO_MODELS`. An uploaded video makes it a replace —
   Kling 3.0 Omni edit by default (`p-video-replace` is no longer offered). An explicit
-  **Explicit video is Photo to Video alone, on "Explicit Video Realism Pro" (`wan-2-2-gv`, no
-  motion clip).** Swap, Extend and Multi-reference, and the Wan 2.2, Wan 2.6, Wan 2.2 + LoRA and
+  **Explicit video is Photo to Video alone, defaulting to "Explicit Spicy Lite" (`mr-wan-2-2-spicy`);
+  "Explicit Video Realism Pro" (`wan-2-2-gv`) is hidden (`imagegen.HIDDEN_VIDEO_MODEL`), its code kept.**
+  Every clip prompt goes through `imagegen.fit_prompt` for its model's family (`PROMPT_FAMILY`): timed
+  beats as ranges (Wan 2.x gets one beat), her character's look in words, and, on a model with no
+  negative input (`takes_negative`), a short positive keep line instead. Swap, Extend and Multi-reference, and the Wan 2.2, Wan 2.6, Wan 2.2 + LoRA and
   P-Video models, are hidden from explicit work by their ratings, not removed. What follows is how
   the hidden paths worked. An explicit
   Animate with a motion clip runs on P-Video-Animate (`imagegen.EXPLICIT_MOTION_MODEL`): Wan 2.2

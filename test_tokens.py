@@ -1095,13 +1095,35 @@ def test_frame_loras():
         (A._story_request, IG.read_frame, IG.suggest_motions, A._media_row, A._media_bytes) = real
 
 
+def test_prompt_per_model():
+    print('prompt per model')
+    import imagegen as IG
+    for m in ('seedance-2-0', 'minimax-h3', 'wan-3-0', 'mr-wan-3-0', 'mr-wan-2-2-spicy'):
+        check(f'{m} takes no negative', not IG.takes_negative(m))
+        check(f'{m} holds the look in words',
+              'Avoid:' in IG.fit_prompt('x', {'model': m, 'negative_extra': 'hats'}))
+    for m in ('wan-2-7', 'wan-2-2', 'mr-wan-2-7-spicy'):
+        check(f'{m} takes a negative', IG.takes_negative(m))
+        check(f'{m} keeps the prompt clean', IG.fit_prompt('x', {'model': m}) == 'x')
+    check('kid words never in a positive',
+          'teen' not in IG.fit_prompt('x', {'model': 'seedance-2-0', 'negative_extra': 'teen'}))
+    beats = [{'t': 9, 'action': 'she smiles'}, {'t': 0, 'action': 'she walks in'}]
+    check('beats scaled into a 5s clip',
+          IG.timeline(beats, 5, 'seedance-2-0') == '0-4s: she walks in. 4-5s: she smiles.')
+    check('Wan 2.x gets one beat, no timestamps',
+          's:' not in IG.timeline(beats, 5, 'mr-wan-2-2-spicy'))
+    once = IG.fit_prompt('x', {'model': 'minimax-h3', 'beats': beats, 'seconds': 5})
+    check('fitting twice changes nothing',
+          IG.fit_prompt(once, {'model': 'minimax-h3', 'beats': beats, 'seconds': 5}) == once)
+
+
 if __name__ == '__main__':
     for fn in (test_margin_floor, test_currency_ladder,
                test_quote_covers_everything, test_prices_track_cost,
                test_nothing_is_free, test_job_quotes, test_allowances,
                test_ledger, test_equivalents,
                test_stripe_minimums, test_test_pack_is_not_for_sale,
-               test_video_negative_prompt, test_video_prompt_is_not_cut,
+               test_video_negative_prompt, test_video_prompt_is_not_cut, test_prompt_per_model,
                test_swap_identity, test_clip_library_and_places,
                test_character_plus_vault_photos, test_wan22_on_runpod,
                test_lock_windows, test_plus_tiers, test_storyboard, test_frame_loras, test_story_drafts):

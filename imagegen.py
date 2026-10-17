@@ -132,7 +132,18 @@ REFERENCE_VIDEO_MODELS = ('wan-2-7', 'seedance-2-0', 'seedance-2-0-fast',
                           'minimax-h3', 'minimax-h3-fast', 'wan-3-0')
 # Models whose allow-list has no `negativePrompt`. Sending it costs a refused
 # round trip carrying every reference photo before `_send` strips it.
-NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast')
+NO_NEGATIVE_MODELS = ('wan-3-0', 'seedance-2-0', 'seedance-2-0-fast', 'seedance-2-5',
+                      'minimax-h3', 'minimax-h3-fast', 'p-video-animate')
+# How each video model wants its prompt written, from each one's own prompt
+# guide. Wan 2.x follows one continuous beat of motion; the others read a
+# shot brief and can follow time ranges ("0-3s: ...").
+PROMPT_FAMILY = {
+    'wan-3-0': 'wan3', 'mr-wan-3-0-pro': 'wan3', 'mr-wan-3-0': 'wan3',
+    'seedance-2-5': 'seedance', 'seedance-2-0': 'seedance', 'seedance-2-0-fast': 'seedance',
+    'minimax-h3': 'hailuo', 'minimax-h3-fast': 'hailuo', 'h3-gv': 'hailuo',
+    'kling-2-6-mc': 'kling', 'kling-3-0-mc': 'kling', 'kling-3-0-omni': 'kling',
+}
+TIMELINE_FAMILIES = ('wan3', 'seedance', 'hailuo', 'kling')
 # Models that only work on a clip the creator uploaded.
 # p-video-replace stays priced for past jobs but is no longer offered.
 CLIP_ONLY_MODELS = ('p-video-replace', 'kling-3-0-omni')
@@ -266,6 +277,8 @@ VIDEO_EDIT_MODEL = 'wan-2-7'
 # Wan generation models (3.0, 2.7, 2.6, ...), confirmed by querying its own
 # model list. A true, explicit-capable replace instead goes to ModelsLab, whose
 # face-swap endpoint is uncensored and swaps rather than regenerates.
+# Replaced by Spicy 2.2 (MuleRouter); kept so past jobs and the chain code resolve.
+HIDDEN_VIDEO_MODEL = 'wan-2-2-gv'
 VIDEO_JOBS = {
     'reel': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0',
                         'kling-3-0-mc', 'kling-3-0-omni'), 'needs': (),
@@ -287,7 +300,8 @@ VIDEO_JOBS = {
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
                           + (tuple(m for m in RUNPOD_MODELS
-                                   if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL))
+                                   if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL,
+                                                HIDDEN_VIDEO_MODEL))
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
                           + ('p-video-animate',) + MULEROUTER_MODELS + SPICY_MODELS,
                 'needs': ('first_frame',),
@@ -300,7 +314,7 @@ VIDEO_JOBS = {
     # Her trained LoRA is the identity here: no photo behind the clip.
     # A photo of her from her LoRA first, then that photo animated on the
     # engine picked here with her LoRA attached: the first frame is already her.
-    'text': {'models': ('wan-2-2-gv', 'h3-gv') + MULEROUTER_MODELS, 'needs': (), 'kind': 'video',
+    'text': {'models': ('h3-gv',) + MULEROUTER_MODELS, 'needs': (), 'kind': 'video',
              'open': ('sfw', 'nsfw'), 'label': 'Text to Video',
              'note': 'Her LoRA and your prompt — no photo needed.'},
     'extend': {'models': ('wan-2-7',) + MULEROUTER_MODELS, 'needs': ('first_frame',),
@@ -373,7 +387,7 @@ PRESERVE_CLAUSE = (
 
 # The engines a storyboard runs on: both take a start frame and a seed, and
 # H3 also takes her still as an identity image.
-STORY_MODELS = ('h3-gv', 'wan-2-2-gv')
+STORY_MODELS = ('h3-gv',)
 
 # A storyboard part carries on from the frame the last one ended on. Every
 # part is a fresh generation, so without this it re-imagines the room.
@@ -1381,6 +1395,99 @@ def merge_negative(extra='', video=False):
     base = NEGATIVE_PROMPT + (', ' + VIDEO_NEGATIVE if video else '')
     extra = (extra or '').strip().strip(',')
     return (base + ', ' + extra) if extra else base
+
+
+def prompt_family(model):
+    return PROMPT_FAMILY.get(model, 'wan')
+
+
+def takes_negative(model):
+    """Whether the model has a negative prompt input at all. MuleRouter's only
+    one is Spicy 2.7's; Kling's motion and edit shapes refuse it."""
+    if (model or '').startswith('mr-'):
+        return model == 'mr-wan-2-7-spicy'
+    return model not in NO_NEGATIVE_MODELS and prompt_family(model) != 'kling'
+
+
+# Written positively: on a model with no negative input every word is
+# something to draw, so "no tattoos" draws tattoos.
+_KEEP_LINE = {
+    'seedance': 'Constraints: one woman, the same face, hair and body throughout, stable '
+                'proportions, smooth natural motion, no on-screen text.',
+    'wan3': 'Preserve her face identity, hair and body exactly; stable proportions, smooth '
+            'natural motion, no subtitles.',
+    'hailuo': 'She keeps the same face, hair and body throughout; smooth natural motion.',
+    'kling': 'Keep her face, hair and body identical throughout; smooth natural motion.',
+    'wan': 'Same face, hair and body throughout; smooth natural motion.',
+}
+
+
+def _creator_avoid(spec):
+    """The creator's own keep-out words, short: hers are the only negatives
+    worth the prompt space on a model that cannot take a negative."""
+    terms = [t.strip() for t in (spec.get('negative_extra') or '').split(',')]
+    terms = [t for t in terms if t and t.lower() not in _H3_NO_AVOID
+             and not any(w in t.lower() for w in _H3_NO_AVOID_WORDS)][:5]
+    return ('Avoid: ' + ', '.join(terms) + '.') if terms else ''
+
+
+def _secs(value):
+    return f'{value:.1f}'.rstrip('0').rstrip('.')
+
+
+def timeline(beats, seconds, model):
+    """Timed beats ([{t, action}]) as the model can follow them: time ranges
+    for the shot-brief models, one flowing sentence for Wan 2.x, which loses
+    the plot on timestamps. Times past the clip are scaled to fit it."""
+    rows = []
+    for b in beats or []:
+        try:
+            t = max(0.0, float(b.get('t') or 0))
+        except (TypeError, ValueError, AttributeError):
+            continue
+        action = str(b.get('action') or '').strip().rstrip('.')[:200]
+        if action:
+            rows.append((t, action))
+    if not rows:
+        return ''
+    rows.sort(key=lambda r: r[0])
+    seconds = float(seconds or 5)
+    last = rows[-1][0]
+    scale = (seconds - 1) / last if last > seconds - 1 and last > 0 else 1.0
+    starts = [0.0] + [round(t * scale, 1) for t, _ in rows[1:]]
+    if prompt_family(model) not in TIMELINE_FAMILIES:
+        acts = [a for _, a in rows]
+        acts = [acts[0][0].upper() + acts[0][1:]] + [a[0].lower() + a[1:] for a in acts[1:]]
+        if len(acts) == 1:
+            return acts[0] + '.'
+        return ', then '.join(acts[:-1]) + f', and finally {acts[-1]}, in one continuous motion.'
+    ends = starts[1:] + [seconds]
+    return ' '.join(f'{_secs(a)}-{_secs(b)}s: {act}.' for a, b, (_, act)
+                    in zip(starts, ends, rows))
+
+
+def fit_prompt(prompt, spec):
+    """A clip's prompt shaped for the model it runs on: the timed beats, her
+    look in words, and, where the model has no negative input, what it must
+    hold written into the prompt. Safe to run twice."""
+    model = spec.get('model')
+    family = prompt_family(model)
+    text = (prompt or '').strip()
+    beats = timeline(spec.get('beats'), spec.get('seconds'), model)
+    if beats and beats not in text and not re.search(r'\d-[\d.]+s:', text):
+        text = f'{text} {beats}'.strip()
+    look = (spec.get('look') or '').strip()
+    if look and look not in text:
+        text = f'{text} {look}'.strip()
+    if not takes_negative(model) and 'Avoid:' not in text:
+        keep = _KEEP_LINE[family]
+        if keep not in text:
+            text = f'{text} {keep}'.strip()
+        text = f'{text} {_creator_avoid(spec)}'.strip()
+    if (model in ('minimax-h3', 'minimax-h3-fast') and not text.startswith('[')
+            and re.search(r'camera (stays )?(fixed|locked)|no zoom', text, re.I)):
+        text = '[Static shot] ' + text
+    return text
 
 
 def _norm(text):
@@ -2466,7 +2573,7 @@ class RunwareProvider(Provider):
             if spec.get('fps'):
                 task['fps'] = int(spec['fps'])
         else:
-            if model_key not in NO_NEGATIVE_MODELS:
+            if takes_negative(model_key):
                 task[_RW['negative']] = negative_for(spec)
             task['width'] = width
             task['height'] = height
@@ -3019,7 +3126,8 @@ class MuleRouterProvider(Provider):
                  if spec.get('reference_b64') else spec.get('reference_url'))
         refs = list(spec.get('reference_urls') or [])
         clip, voice = spec.get('source_url'), spec.get('voice_url')
-        if spec.get('job') == 'multiref' or clip or voice:
+        if (spec.get('job') == 'multiref' or clip or voice
+                or (refs and spec.get('job') == 'animate')):
             images = ([frame] if frame else []) + refs
             scenes = list(spec.get('scene_urls') or [])
             images = (images[:max(1, 10 - len(scenes))] + scenes)[:10]
@@ -3515,7 +3623,7 @@ def her_lead(style, text):
     return lead + ' ' + text.replace(lead, '').strip()
 
 
-def _styled_prompt(idea, base, explicit, style, why=None):
+def _styled_prompt(idea, base, explicit, style, why=None, rule=''):
     examples = style.get('examples') or ''
     triggers = style.get('triggers') or []
     text = _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
@@ -3529,7 +3637,8 @@ def _styled_prompt(idea, base, explicit, style, why=None):
             'photo: keep it photorealistic, never a drawing, animation or anime. Do not copy '
             'objects, creatures or effects that belong only to the examples. End with a short '
             'clause: same woman, same face, hair, tattoos and piercings, camera fixed, same '
-            'background. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
+            'background. ' + rule + _level_words(explicit)
+            + ' Under 120 words. Output only the prompt.'},
         {'role': 'user', 'content': (f'Examples:\n{examples}\n\n' if examples else '')
             + f'Action: {idea.strip()}\n\nBase prompt, for the fixed details: {base} /no_think'},
     ], max_tokens=600, why=why)
@@ -3537,7 +3646,31 @@ def _styled_prompt(idea, base, explicit, style, why=None):
     return her_lead(style, (', '.join(missing) + ', ' + text) if text and missing else text)
 
 
-def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
+def writes_motion(model):
+    return model in RUNPOD_MODELS or (model or '').startswith('mr-')
+
+
+# One sentence per family, from each model's own prompt guide.
+FAMILY_RULE = {
+    'wan': 'Describe the motion, not the photo: the action, then the camera, then the pace, as '
+           'one continuous beat with no timestamps.',
+    'wan3': 'Write it as a shot brief: subject, action, setting, camera. If the action has '
+            'steps, give them as time ranges across {s}s, like "0-2s: ...".',
+    'seedance': 'Order: shot, subject, action, camera, scene, lighting; one main motion. If the '
+                'action has steps, give them as time ranges across {s}s, like "0-2s: ...".',
+    'hailuo': 'Write the action as a short timeline across {s}s, like "0-2s: ...", in plain '
+              'sentences.',
+    'kling': 'Order: subject, motion, camera, environment. If the action has steps, give them '
+             'as time ranges across {s}s, like "0-2s: ...".',
+}
+
+
+def family_rule(model, seconds=None):
+    return FAMILY_RULE[prompt_family(model)].replace('{s}', _secs(float(seconds or 5))) + ' '
+
+
+def write_motion_prompt(idea, base='', explicit=False, style=None, why=None, model=None,
+                        seconds=None):
     """The clip's prompt with the chosen action written out: the template's
     fixed clauses kept, its generic movement replaced by what she does. With
     a LoRA's style, written the way that LoRA's prompts are written."""
@@ -3546,7 +3679,7 @@ def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
             why['reason'] = 'no motion typed'
         return ''
     if style:
-        return _styled_prompt(idea, base, explicit, style, why)
+        return _styled_prompt(idea, base, explicit, style, why, family_rule(model, seconds))
     return _runpod_chat(RUNPOD_QWEN_ENDPOINT, 'Qwen/Qwen3-32B-AWQ', [
         {'role': 'system', 'content':
             'You rewrite prompts for an image-to-video model that animates an existing photo. '
@@ -3555,7 +3688,8 @@ def write_motion_prompt(idea, base='', explicit=False, style=None, why=None):
             'background. Replace any generic movement in it with the requested action, written '
             'out: the main action first, which hand or body part does it, its pace, that it '
             'repeats through the clip, then her expression. Do not add new details about how she '
-            'looks. ' + _level_words(explicit) + ' Under 120 words. Output only the prompt.'},
+            'looks. ' + family_rule(model, seconds) + _level_words(explicit)
+            + ' Under 120 words. Output only the prompt.'},
         {'role': 'user', 'content': f'Action: {idea.strip()}\n\nBase prompt: {base} /no_think'},
     ], max_tokens=600, why=why)
 
