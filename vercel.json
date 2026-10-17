@@ -1,6 +1,9 @@
 {
   "git": {
-    "deploymentEnabled": true
+    "deploymentEnabled": {
+      "**": false,
+      "develop": true
+    }
   },
   "framework": null,
   "functions": {
