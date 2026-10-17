@@ -39288,7 +39288,8 @@ def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
                 s.commit()
             finally:
                 s.close()
-        out.append(locked or url)
+        # Both are kept so she can pick: the lock is not always the better face.
+        out += [locked, url] if locked else [url]
     return out
 
 
