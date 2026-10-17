@@ -1947,7 +1947,21 @@ RW_MODEL_AUDIO = os.getenv('RW_MODEL_AUDIO', 'runware:400@1')
 RW_LIPSYNC_TASK = os.getenv('RW_LIPSYNC_TASK', 'videoInference')
 RW_MODEL_LIPSYNC = os.getenv('RW_MODEL_LIPSYNC', 'sync:lipsync-2@1')
 
-HAS_FFMPEG = bool(shutil.which('ffmpeg'))
+def _ffmpeg_path():
+    """The system ffmpeg, else the static one imageio-ffmpeg ships: Vercel has
+    no ffmpeg of its own, and storyboards need it to read a part's last frame."""
+    found = shutil.which('ffmpeg')
+    if found:
+        return found
+    try:
+        import imageio_ffmpeg
+        return imageio_ffmpeg.get_ffmpeg_exe()
+    except Exception:
+        return ''
+
+
+FFMPEG = _ffmpeg_path()
+HAS_FFMPEG = bool(FFMPEG)
 
 
 def last_frame(video):
@@ -1960,7 +1974,7 @@ def last_frame(video):
         with open(src, 'wb') as f:
             f.write(video)
         try:
-            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-sseof', '-0.5', '-i', src,
+            subprocess.run([FFMPEG, '-y', '-loglevel', 'error', '-sseof', '-0.5', '-i', src,
                             '-update', '1', '-q:v', '2', out],
                            check=True, timeout=60, capture_output=True)
             with open(out, 'rb') as f:
@@ -1979,7 +1993,7 @@ def first_frame(video):
         with open(src, 'wb') as f:
             f.write(video)
         try:
-            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', src, '-frames:v', '1',
+            subprocess.run([FFMPEG, '-y', '-loglevel', 'error', '-i', src, '-frames:v', '1',
                             '-q:v', '2', out], check=True, timeout=60, capture_output=True)
             with open(out, 'rb') as f:
                 return f.read()
@@ -2041,7 +2055,7 @@ def join_clips(videos, grades=None):
         return b''
     grades = list(grades or []) + [None] * len(videos)
     with tempfile.TemporaryDirectory(dir='/tmp') as d:
-        cmd = ['ffmpeg', '-y', '-loglevel', 'error']
+        cmd = [FFMPEG, '-y', '-loglevel', 'error']
         for i, v in enumerate(videos):
             p = os.path.join(d, f'{i}.mp4')
             with open(p, 'wb') as f:
@@ -2089,7 +2103,7 @@ def cut_window(video, start_frame, frames, fps, width, height):
             f.write(video)
         end = start_frame + frames
         try:
-            subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-i', src, '-vf',
+            subprocess.run([FFMPEG, '-y', '-loglevel', 'error', '-i', src, '-vf',
                             f'fps={fps},trim=start_frame={start_frame}:end_frame={end},'
                             f'setpts=PTS-STARTPTS,scale={width}:{height},setsar=1',
                             '-an', '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
@@ -2152,7 +2166,7 @@ def _ffmpeg(video, args, audio=None):
         src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'out.mp4')
         with open(src, 'wb') as f:
             f.write(video)
-        cmd = ['ffmpeg', '-y', '-loglevel', 'error', '-i', src]
+        cmd = [FFMPEG, '-y', '-loglevel', 'error', '-i', src]
         if audio is not None:
             snd = os.path.join(d, 'track')
             with open(snd, 'wb') as f:
