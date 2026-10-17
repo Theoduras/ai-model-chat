@@ -57,6 +57,7 @@ SITES = {
                 'prefix': 'thc_'},
     'reddit': {'url': 'https://www.reddit.com/login', 'origin': 'https://www.reddit.com',
                'prefix': 'rdc_'},
+    'x': {'url': 'https://x.com/i/flow/login', 'origin': 'https://x.com', 'prefix': 'xc_'},
 }
 # How long to let a single-page app draw before reading what it landed on.
 # Reddit renders nothing at domcontentloaded, so without this every sign-in
@@ -585,7 +586,7 @@ class Attempt:
             self._watch_instagram(page)
         elif self.site == 'reddit':
             self._watch_reddit(page)
-        elif self.site == 'threads':
+        elif self.site in ('threads', 'x'):
             pass
         else:
             self._watch_signing(page)
@@ -979,6 +980,49 @@ class Attempt:
         self.state = 'connected'
         self._done.set()
 
+    def _capture_x(self, page, context):
+        """Finished once x.com has issued auth_token and ct0: the cookie pair
+        every x.com web call authenticates with (ct0 doubles as the CSRF
+        header). Used by MassHype; nothing in this app posts to X this way."""
+        self.probes += 1
+        try:
+            self.page_url = page.url
+        except Exception:
+            pass
+        cookies = context.cookies(self._site['origin'])
+        names = {c['name'] for c in cookies}
+        self.cookie_names = sorted(names)
+        if 'auth_token' not in names or 'ct0' not in names:
+            self.capture_note = 'awaiting_cookies'
+            return
+        val = {c['name']: c['value'] for c in cookies}
+        twid = urllib.parse.unquote(val.get('twid', ''))
+        user_id = twid.split('=', 1)[1] if '=' in twid else ''
+        try:
+            agent = page.evaluate('() => navigator.userAgent')
+        except Exception:
+            agent = self.user_agent
+        username = ''
+        try:
+            href = page.evaluate("""() => {
+                const a = document.querySelector('a[data-testid="AppTabBar_Profile_Link"]');
+                return a ? a.getAttribute('href') : '';
+            }""") or ''
+            username = href.strip('/').split('/')[0]
+        except Exception:
+            pass
+        self.capture_note = 'captured'
+        session = {'user_id': user_id, 'username': username,
+                   'cookie': '; '.join(f"{c['name']}={c['value']}" for c in cookies),
+                   'ct0': val['ct0'], 'user_agent': agent or self.user_agent, 'proxy': self.proxy}
+        self.result = {'user_id': user_id, 'username': username}
+        if _sink:
+            _sink(self.account, session)
+        else:
+            self._pending_session = session
+        self.state = 'connected'
+        self._done.set()
+
     def _capture_threads(self, page, context):
         """threads.com issues its own sessionid, and its write calls refuse
         instagram.com's cookies, so Threads is signed in on its own."""
@@ -1145,6 +1189,8 @@ class Attempt:
             return self._capture_reddit(page, context)
         if self.site == 'threads':
             return self._capture_threads(page, context)
+        if self.site == 'x':
+            return self._capture_x(page, context)
         self.probes += 1
         try:
             self.page_url = page.url
