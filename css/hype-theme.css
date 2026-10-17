@@ -1,0 +1,29 @@
+@import url('https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Space+Grotesk:wght@400;500;600&display=swap');
+:root{
+  --accent:#ff2f92;
+  --lime:#baff29;
+  --amber:#ffb23d;
+  --grad:linear-gradient(110deg,#baff29,#ffb23d 50%,#ff2f92);
+  --bg:#0d0c12;
+  --panel:#141219;
+  --panel-2:#17151d;
+  --surface:#1b1822;
+  --surface-2:#232030;
+  --field:#1b1822;
+  --border:#ffffff1a;
+  --border-soft:#ffffff10;
+  --field-border:#ffffff24;
+  --glow:0 0 60px -10px #baff2999;
+}
+:root[data-theme="light"]{--accent:#e0147a;--grad:linear-gradient(110deg,#6fb000,#e08a00 50%,#e0147a)}
+body{font-family:'Space Grotesk',system-ui,sans-serif}
+h1,h2,h3,h4,.brand{font-family:'Bricolage Grotesque','Sora',system-ui,sans-serif!important;letter-spacing:-.03em}
+:root:not([data-theme="light"]) body{background-image:linear-gradient(to right,#ffffff0d 1px,transparent 1px),linear-gradient(to bottom,#ffffff0d 1px,transparent 1px);background-size:56px 56px;background-attachment:fixed}
+h1 u{background:var(--grad)!important;background-size:100% 100%!important;-webkit-background-clip:text!important;background-clip:text!important;animation:none!important}
+.flow-cta,.auth-btn,.features-cta a{background:var(--lime)!important;color:#12150a!important;border-color:var(--lime)!important;border-radius:9999px!important;box-shadow:var(--glow)!important;font-weight:600}
+.right{background:radial-gradient(70% 60% at 100% 0%,#ff2f9240,transparent 60%),radial-gradient(70% 60% at 0% 100%,#baff2926,transparent 60%),#100e16!important}
+.hype-marquee{overflow:hidden;padding:28px 0;border-block:1px solid var(--border)}
+.hype-marquee div{display:flex;gap:16px;width:max-content;animation:hype-marquee 40s linear infinite}
+.hype-marquee img{height:260px;width:auto;border-radius:18px;border:1px solid var(--border);display:block}
+@keyframes hype-marquee{to{transform:translateX(-50%)}}
+@media(prefers-reduced-motion:reduce){.hype-marquee div{animation:none}}

@@ -1,3 +1,4 @@
+(function(){if(document.querySelector('link[href*="hype-theme"]'))return;var l=document.createElement('link');l.rel='stylesheet';l.href='/css/hype-theme.css';document.head.appendChild(l);})();
 // Token spend watcher. Spending happens on half a dozen pages (studio, the
 // character builder, the dashboard and the consoles' image buttons), so it is
 // caught here from fetch instead of every page remembering to report it. It
