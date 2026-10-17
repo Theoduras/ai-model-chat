@@ -387,7 +387,7 @@ PRESERVE_CLAUSE = (
 
 # The engines a storyboard runs on: both take a start frame and a seed, and
 # H3 also takes her still as an identity image.
-STORY_MODELS = ('h3-gv',)
+STORY_MODELS = ('h3-gv', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0')
 
 # A storyboard part carries on from the frame the last one ended on. Every
 # part is a fresh generation, so without this it re-imagines the room.
