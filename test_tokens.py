@@ -172,7 +172,9 @@ def test_prices_track_cost():
     check('a swap is priced on the model it will actually run on',
           all(CR.quote({'kind': 'swap', 'model': m,
                         'resolution': '720p', 'seconds': 5}) ==
-              math.ceil(CR.VIDEO_RATE_PER_SECOND[m]['720p'] * 5)
+              # MuleRouter bills the clip it was handed as well as the one it makes.
+              math.ceil(CR.VIDEO_RATE_PER_SECOND[m]['720p'] * 5
+                        * (2 if m in IG.MULEROUTER_ENDPOINTS else 1))
               for m in CR.SWAP_MODELS))
     check('a swap on no model named is priced on the default one',
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}) ==

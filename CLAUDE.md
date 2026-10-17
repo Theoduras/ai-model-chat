@@ -528,11 +528,14 @@ be set on Vercel.
 - Explicit video with sound, "Explicit Video + Sound (H3)" (`h3-gv`), runs on our RunPod endpoint
   `fgt7mgn43o4lfg`, set up by `infra/runpod-h3/deploy.py` (the code default for
   `RUNPOD_H3_ENDPOINT`). Its weights are nvfp4/w6a8, so it must stay on Blackwell (RTX PRO 6000), RO.
-- "Explicit Video Pro (Wan 3.0)" (`mr-wan-3-0-pro`) is MuleRouter's CarrotHub Wan 3.0 Video Pro
-  (`imagegen.MuleRouterProvider`, $0.18/s at 1080p, sound included) for Photo to Video, Text to Video
-  and Multi-reference, explicit included; Multi-reference is open to every plan on this model only
-  (Wan 2.7 stays admin). Sound is a studio toggle (`sound: 'original'` sends `audio: true`). Hidden until
-  `MULEROUTER_API_KEY` is set (set on Vercel). Polled at `GET {MULEROUTER_URL}/{task_id}`; result in `videos`.
+- Wan 3.0 on MuleRouter (`imagegen.MuleRouterProvider`, `MULEROUTER_ENDPOINTS`): "Explicit Video Pro"
+  (`mr-wan-3-0-pro`, 1080p/2k/4k, $0.18-0.23/s) and "Explicit Video" (`mr-wan-3-0`, 480p-1080p,
+  $0.05-0.20/s), explicit included, for Photo to Video, Text to Video (prompt-only skips the still),
+  Multi-reference (open to every plan on these models only), Swap (her photos + the clip as
+  `reference_videos`, billed in + out seconds, so priced at double) and Extend (loop sets `last_frame`).
+  Up to 30s in one pass. Sound is a toggle; `voice` sends an uploaded track as `reference_audios`.
+  Clips and voices go by URL only, through signed `/gen-file/` links where storage has no signed URL.
+  Hidden until `MULEROUTER_API_KEY` is set (on Vercel).
 - Both explicit video models run on RunPod. `infra/vast` can host the same workers on Vast
   Serverless, but only `VAST_ENABLED=1` (with `VAST_API_KEY`) routes jobs there; the key alone
   does not, because it once sent every explicit clip to Vast endpoints that had been deleted.

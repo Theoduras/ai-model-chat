@@ -198,11 +198,13 @@ RUNPOD_MODELS = tuple(RUNPOD_ENDPOINTS)
 # MuleRouter's CarrotHub Wan 3.0 Video Pro: still, prompt or references to a
 # clip with its own sound. Offered only once MULEROUTER_API_KEY is set.
 MULEROUTER_API_KEY = (os.getenv('MULEROUTER_API_KEY') or '').strip()
-MULEROUTER_URL = os.getenv(
-    'MULEROUTER_URL',
-    'https://api.mulerouter.ai/vendors/carrothub/v1/w3.0-video-pro/generation').rstrip('/')
+_MR_BASE = os.getenv('MULEROUTER_BASE', 'https://api.mulerouter.ai/vendors/carrothub/v1').rstrip('/')
 MULEROUTER_MODEL = 'mr-wan-3-0-pro'
-MULEROUTER_MODELS = (MULEROUTER_MODEL,) if MULEROUTER_API_KEY else ()
+# The non-Pro model serves 480p/720p (cheaper); the Pro one 1080p/2k/4k.
+MULEROUTER_ENDPOINTS = {MULEROUTER_MODEL: f'{_MR_BASE}/w3.0-video-pro/generation',
+                        'mr-wan-3-0': f'{_MR_BASE}/w3.0-video/generation'}
+MULEROUTER_MODELS = tuple(MULEROUTER_ENDPOINTS) if MULEROUTER_API_KEY else ()
+MULEROUTER_LONGEST = 30
 # Vast has no queue: a submit waits here while a cold worker boots.
 VAST_ROUTE_WAIT = int(os.getenv('VAST_ROUTE_WAIT', '3600'))
 # RunPod's Wan workers return silent clips and nothing follows up on them, so
@@ -272,7 +274,7 @@ VIDEO_JOBS = {
     # H3 takes no video: its swap starts from the clip's first frame and is
     # then redrawn as her by the lock, keeping H3's sound.
     'swap': {'models': ('kling-3-0-mc', CHAR_LORA_VIDEO_MODEL, 'h3-gv', 'ml-face-swap',
-                        'kling-3-0-omni'),
+                        'kling-3-0-omni') + MULEROUTER_MODELS,
              'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw', 'nsfw'),
              'open': ('sfw', 'nsfw'), 'clause': 'preserve',
              'label': 'Swap',
@@ -296,8 +298,8 @@ VIDEO_JOBS = {
     'text': {'models': ('wan-2-2-gv', 'h3-gv') + MULEROUTER_MODELS, 'needs': (), 'kind': 'video',
              'open': ('sfw', 'nsfw'), 'label': 'Text to Video',
              'note': 'Her LoRA and your prompt — no photo needed.'},
-    'extend': {'models': ('wan-2-7',), 'needs': ('first_frame',),
-               'kind': 'video', 'ratings': ('sfw',), 'modes': ('continue', 'longer', 'loop'),
+    'extend': {'models': ('wan-2-7',) + MULEROUTER_MODELS, 'needs': ('first_frame',),
+               'kind': 'video', 'ratings': ('sfw', 'nsfw') if MULEROUTER_MODELS else ('sfw',), 'modes': ('continue', 'longer', 'loop'),
                'label': 'Extend',
                'note': 'Carry on from a clip you already have.'},
     # Explicit only on Wan 3.0 Pro (MuleRouter), the one multi-reference model that serves it.
@@ -450,7 +452,8 @@ MODEL_RESOLUTION_VALUES = {
     'h3-gv': (('480p', '480p'), ('720p', '720p')),
     'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
     # 1080p is its lowest rung and the cheapest; nothing asks it for more.
-    MULEROUTER_MODEL: (('1080p', '1080p'),),
+    MULEROUTER_MODEL: (('1080p', '1080p'), ('2k', '2k'), ('4k', '4k')),
+    'mr-wan-3-0': (('480p', '480p'), ('720p', '720p'), ('1080p', '1080p')),
 }
 
 
@@ -636,6 +639,7 @@ MODEL_VIDEO_DURATIONS = {
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
+    **{m: tuple(range(2, MULEROUTER_LONGEST + 1)) for m in MULEROUTER_ENDPOINTS},
 }
 
 
@@ -694,7 +698,7 @@ MODEL_VIDEO_SECONDS = {
     'p-video-animate': (1, 60),
     'kling-3-0-mc': (1, 60),
     'kling-3-0-omni': (3, 15),
-    MULEROUTER_MODEL: (2, 15),
+    **{m: (2, MULEROUTER_LONGEST) for m in MULEROUTER_ENDPOINTS},
 }
 
 
@@ -725,7 +729,7 @@ def wants_body_only(model_key):
 
 # A model asking for a clean portrait is not helped by thirty of them, and each
 # extra one is another chance to pull her face towards an average.
-MODEL_REF_CAP = {MULEROUTER_MODEL: 10, 'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'p-video-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
+MODEL_REF_CAP = {MULEROUTER_MODEL: 10, 'mr-wan-3-0': 10, 'kling-2-6-mc': 1, 'wan-2-2-animate': 1, 'p-video-animate': 1, 'kling-3-0-mc': 1, 'p-video-replace': 4, 'wan-2-7': 3, 'minimax-h3': 5, 'minimax-h3-fast': 5,
                  'kling-3-0-omni': 4}
 
 # The studio offers a handful of her views, not thirty, so a model that takes
@@ -1770,7 +1774,8 @@ def build_extend_prompt(mode='continue', motion=''):
 AUDIO_MODES = ('ambience', 'moaning', 'speech', 'custom', 'music', 'lipsync')
 
 # Sound a clip gets without a provider pass, so no add-on is charged.
-TRACK_MODES = ('original', 'none', 'upload')
+# `voice` is MuleRouter's audio reference: the clip is made to that voice, not muxed.
+TRACK_MODES = ('original', 'none', 'upload', 'voice')
 
 AUDIO_PROMPTS = {
     'ambience': ('natural room tone for this scene — the quiet of the room, '
@@ -2944,6 +2949,8 @@ def _video_link(out):
 
 
 class MuleRouterProvider(Provider):
+    """One endpoint per model; the media sent picks the mode. Keyframe mode
+    (first/last frame) and reference mode (images, a clip, a voice) cannot mix."""
     name = 'mulerouter'
     _RATIOS = {'9:16': '9:16', '4:5': '3:4', '1:1': '1:1', '16:9': '16:9'}
 
@@ -2955,35 +2962,51 @@ class MuleRouterProvider(Provider):
         return {'Authorization': f'Bearer {MULEROUTER_API_KEY}',
                 'Content-Type': 'application/json'}
 
-    def submit_video(self, spec):
-        payload = {'prompt': spec.get('prompt') or build_video_prompt(),
-                   'resolution': '1080p',
-                   'duration': video_seconds(MULEROUTER_MODEL, spec.get('seconds') or 5),
-                   'audio': spec.get('sound') == 'original', 'prompt_extend': False}
+    def payload(self, spec):
+        model = spec.get('model') if spec.get('model') in MULEROUTER_ENDPOINTS else MULEROUTER_MODEL
+        prompt = spec.get('prompt') or build_video_prompt()
+        body = {'resolution': rung_for(model, spec.get('resolution')),
+                'duration': video_seconds(model, spec.get('seconds') or 5),
+                'audio': spec.get('sound') in ('original', 'voice'),
+                'prompt_extend': bool(spec.get('prompt_extend')),
+                'ratio': self._RATIOS.get(spec.get('aspect'), 'adaptive')}
         if spec.get('seed') is not None:
-            payload['seed'] = int(spec['seed']) % 2147483648
+            body['seed'] = int(spec['seed']) % 2147483648
         frame = (_data_uri(spec['reference_b64'], spec.get('reference_mime'))
                  if spec.get('reference_b64') else spec.get('reference_url'))
-        if spec.get('job') == 'multiref':
-            refs = list(spec.get('reference_urls') or [])
+        refs = list(spec.get('reference_urls') or [])
+        clip, voice = spec.get('source_url'), spec.get('voice_url')
+        if spec.get('job') == 'multiref' or clip or voice:
+            images = ([frame] if frame else []) + refs
             scenes = list(spec.get('scene_urls') or [])
-            if frame:
-                refs = [frame] + refs
-            if not refs:
-                raise GenerationError('a multi-reference clip needs at least one photo of her')
-            payload['reference_images'] = (refs[:max(1, 10 - len(scenes))] + scenes)[:10]
-            payload['ratio'] = self._RATIOS.get(spec.get('aspect'), 'adaptive')
+            images = (images[:max(1, 10 - len(scenes))] + scenes)[:10]
+            if spec.get('job') in ('multiref', 'swap') and not images:
+                raise GenerationError('this clip needs at least one photo of her')
+            if images:
+                body['reference_images'] = images
+            if clip:
+                body['reference_videos'] = [clip]
+            if voice:
+                body['reference_audios'] = [voice]
+            if frame and not clip and spec.get('job') != 'multiref':
+                prompt = f'Image 1 is the opening frame. {prompt}'
         elif frame:
-            payload['first_frame'] = frame
-            payload['ratio'] = 'adaptive'
-        else:
+            body['first_frame'] = frame
+            body['ratio'] = 'adaptive'
+            if spec.get('closing_b64'):
+                body['last_frame'] = _data_uri(spec['closing_b64'], spec.get('closing_mime'))
+        elif not spec.get('generic'):
             raise GenerationError('a video needs an approved still as its first frame')
-        body = _post(MULEROUTER_URL, payload, self._headers(), timeout=VIDEO_TIMEOUT)
-        task = body.get('task_info') or {}
-        job = str(task.get('id') or '')
+        body['prompt'] = prompt
+        return model, body
+
+    def submit_video(self, spec):
+        model, body = self.payload(spec)
+        out = _post(MULEROUTER_ENDPOINTS[model], body, self._headers(), timeout=VIDEO_TIMEOUT)
+        job = str((out.get('task_info') or {}).get('id') or '')
         if not job:
-            raise GenerationError(_error_text(body) or 'MuleRouter returned no task id')
-        return job, self._read(body)
+            raise GenerationError(_error_text(out) or 'MuleRouter returned no task id')
+        return f'{model}|{job}', self._read(out)
 
     def _read(self, body):
         task = body.get('task_info') or {}
@@ -2993,17 +3016,18 @@ class MuleRouterProvider(Provider):
             return Result('failed', error=(err.get('detail') or err.get('title') or str(err))
                           if isinstance(err, dict) else str(err) or 'MuleRouter failed the clip')
         if state in ('completed', 'succeeded', 'success', 'done'):
-            rest = {k: v for k, v in body.items() if k != 'task_info'}
-            url = _video_link(rest)
+            url = _video_link(body.get('videos') or {k: v for k, v in body.items()
+                                                     if k != 'task_info'})
             return Result('done', [url]) if url else Result(
                 'failed', error='MuleRouter finished with no video')
         return Result('running')
 
     def poll(self, job_id, expect=1):
         import requests
+        model, _, job = job_id.rpartition('|')
+        url = MULEROUTER_ENDPOINTS.get(model, MULEROUTER_ENDPOINTS[MULEROUTER_MODEL])
         try:
-            resp = requests.get(f'{MULEROUTER_URL}/{job_id}', headers=self._headers(),
-                                timeout=TIMEOUT)
+            resp = requests.get(f'{url}/{job}', headers=self._headers(), timeout=TIMEOUT)
         except Exception as e:
             raise ProviderUnreachable(f'MuleRouter unreachable: {e}', fatal=False)
         if resp.status_code == 404:
@@ -3542,7 +3566,7 @@ def provider_name_for(spec):
     if ((spec.get('job') == 'swap' or spec.get('kind') == 'swap')
             and (spec.get('model') or DEFAULT_SWAP_MODEL) == EXPLICIT_SWAP_MODEL):
         return 'modelslab'
-    if spec.get('model') == MULEROUTER_MODEL:
+    if spec.get('model') in MULEROUTER_ENDPOINTS:
         return 'mulerouter'
     if spec.get('model') in VAST_MODELS:
         return 'vast'

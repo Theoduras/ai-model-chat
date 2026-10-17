@@ -2645,7 +2645,7 @@ _OPEN_PATHS = (
                '/api/threads/webhook', '/api/threads/uninstall',
                '/api/threads/delete', '/api/threads/deletion-status',
                # The fan chat polls its wish link here; fans have no session.
-               '/api/wish/', '/wish-file/',
+               '/api/wish/', '/wish-file/', '/gen-file/',
                # The creator's Zap calls back here; it carries the persona's secret.
                '/api/wishes/hook/'))
 
@@ -11705,6 +11705,27 @@ def api_wish_job(job):
     if not re.fullmatch(r'[A-Za-z0-9_-]{8,40}', job or ''):
         return jsonify({'error': 'bad id'}), 400
     return jsonify({'text': _get_setting(f'wishjob_{job}') or ''})
+
+
+def _gen_file_link(path, ttl=3600):
+    """A signed public link to one stored file, for a provider that only
+    fetches by URL (MuleRouter's clip and voice references)."""
+    import base64
+    key = base64.urlsafe_b64encode(path.encode()).decode().rstrip('=')
+    return f'{_callback_origin()}/gen-file/{_wish_file_token(key, ttl=ttl)}'
+
+
+@app.route('/gen-file/<token>')
+def gen_file(token):
+    key = _wish_file_check(token or '')
+    if not key:
+        return ('Not found', 404)
+    import base64
+    path = base64.urlsafe_b64decode(key + '=' * (-len(key) % 4)).decode()
+    data = storage.get(path)
+    if not data:
+        return ('Not found', 404)
+    return Response(data, mimetype=storage.mime_of(path))
 
 
 @app.route('/wish-file/<token>')
@@ -34971,21 +34992,29 @@ def _gen_spec(slug, body, user):
     seconds = int(body.get('seconds') or CR.DEFAULT_VIDEO_DURATION)
     # Any whole number in range, not only the three presets: the price is
     # per second, so a length the picker does not list still has one.
-    if resolution not in CR.VIDEO_RESOLUTIONS or not (
+    if resolution not in CR.VIDEO_RESOLUTIONS + CR.HIGH_RESOLUTIONS or not (
             CR.VIDEO_SECONDS_MIN <= seconds <= CR.CHAIN_MAX_SECONDS):
         raise imagegen.GenerationError('Unknown video resolution or duration.')
     aspect = (body.get('aspect') or imagegen.DEFAULT_ASPECT).strip()
     if aspect not in imagegen.ASPECTS:
         raise imagegen.GenerationError('Unknown frame shape.')
     model = _gen_video_model(job, level, body.get('model'))
+    mule = model in imagegen.MULEROUTER_ENDPOINTS
+    if mule:
+        resolution = imagegen.rung_for(model, resolution)
+        spec['prompt_extend'] = body.get('prompt_extend') is True
+        # Its own sound is on unless asked off; _gen_audio reads "none" as no ask at all.
+        spec['sound'] = str((body.get('audio') or {}).get('mode') or 'original').strip().lower()
     audio = _gen_audio(body, cfg)
     if audio and audio['mode'] in imagegen.TRACK_MODES:
         spec['sound'] = audio['mode']
-        if audio['mode'] == 'upload':
+        if audio['mode'] == 'voice' and not mule:
+            raise imagegen.GenerationError('A voice reference needs a Wan 3.0 engine.')
+        if audio['mode'] in ('upload', 'voice'):
             track = _video_source_row(slug, audio['audio_id'])
             if not track or not track['mime'].startswith('audio/'):
                 raise imagegen.GenerationError('Upload the audio first.')
-            spec['audio_path'] = track['path']
+            spec['audio_path' if audio['mode'] == 'upload' else 'voice_path'] = track['path']
     elif audio and model in imagegen.SILENT_MODELS:
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} makes silent clips. Upload a track for its sound.')
@@ -35039,8 +35068,10 @@ def _gen_spec(slug, body, user):
         elif not _char_lora_entry(slug):
             raise imagegen.GenerationError(
                 'Train her LoRA first — the clip starts from a photo made with it.')
-        spec['text_stage'] = 'still'
-        spec['addons'].append('still')
+        # Wan 3.0 makes a prompt-only clip itself, so it needs no still first.
+        if not (spec.get('generic') and mule):
+            spec['text_stage'] = 'still'
+            spec['addons'].append('still')
     elif job == 'reel':
         # The one video path that may run from a prompt alone, and therefore
         # the one that claims to be nobody. It still lands unapproved in
@@ -35201,7 +35232,8 @@ def _gen_spec(slug, body, user):
     snapped_w, snapped_h = imagegen.video_size(
         model, spec.get('source_width'), spec.get('source_height'), resolution,
         aspect)
-    resolution = _video_rung(snapped_h, snapped_w)
+    if not mule:
+        resolution = _video_rung(snapped_h, snapped_w)
     spec.update({'resolution': resolution, 'seconds': seconds,
                  'aspect': aspect, 'model': model, 'explicit': level != 'sfw',
                  'motion': (body.get('motion') or '')[:300]})
@@ -35222,7 +35254,7 @@ def _gen_spec(slug, body, user):
         spec['chain'] = {'plan': plan, 'parts': [], 'motions': motions,
                          'prompts': (prompts + [''] * len(motions))[:len(motions)],
                          'plain': body.get('chain_identity') is False}
-    elif seconds > CR.VIDEO_MAX_SECONDS:
+    elif seconds > (imagegen.MULEROUTER_LONGEST if mule else CR.VIDEO_MAX_SECONDS):
         raise imagegen.GenerationError(
             f'{CR.MODEL_LABELS.get(model, model)} cannot make a clip that long.')
     # Explicit Photo to Video is redrawn as her afterwards (face and body, from
@@ -38369,7 +38401,8 @@ def api_generate_job():
                         'error': 'Register to generate explicit content.'}), 403
     if (spec['kind'] != 'image' and not user.get('is_admin')
             and (not imagegen.job_open(spec.get('job'), 'explicit' if spec.get('explicit') else 'sfw')
-                 or (spec.get('job') == 'multiref' and spec.get('model') != imagegen.MULEROUTER_MODEL))):
+                 or (spec.get('job') == 'multiref'
+                     and spec.get('model') not in imagegen.MULEROUTER_ENDPOINTS))):
         return jsonify({'ok': False, 'error': 'Video generation is coming soon.'}), 403
     return _gen_submit(user, slug, spec, price)
 
@@ -38882,7 +38915,11 @@ def _gen_start(job_id, slug, spec, workspace):
         from db import update_generation
         try:
             swap_first = spec.get('swap_still') and spec.get('text_stage') == 'still'
-            provider = imagegen.get_provider() if swap_first else imagegen.provider_for(spec)
+            provider = (imagegen.get_provider() if swap_first
+                        else imagegen.provider_for(_text_still_call(slug, spec))
+                        if spec.get('text_stage') == 'still'
+                        and spec.get('model') in imagegen.MULEROUTER_ENDPOINTS
+                        else imagegen.provider_for(spec))
             call = dict(spec)
             if spec.get('chain'):
                 call['seconds'] = spec['chain']['plan'][0]
@@ -39028,6 +39065,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 if spec.get('source_path'):
                     _fix_stored_m4v(spec['source_path'])
                     url = storage.signed_url(spec['source_path'])
+                    if not url and spec.get('model') in imagegen.MULEROUTER_ENDPOINTS:
+                        url = _gen_file_link(spec['source_path'])
                     if not url:
                         url = _gen_source_data_uri(spec['source_path'])
                     if not url:
@@ -39052,6 +39091,9 @@ def _gen_start(job_id, slug, spec, workspace):
                             at_images=imagegen.uses_at_images(spec.get('model')))
                         if refs:
                             call['reference_urls'] = refs
+                if spec.get('voice_path'):
+                    call['voice_url'] = (storage.signed_url(spec['voice_path'])
+                                         or _gen_file_link(spec['voice_path']))
                 if spec.get('video_prompt'):
                     call['prompt'] = _gen_own_video_prompt(spec)
                 # Off by default: a worker fetching from our own domain failed
