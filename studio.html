@@ -626,7 +626,8 @@
           <span>Lock her face and body — redraw the finished clip as her, from her LoRA</span></label>
         <label class="gen-f"><span>Motion</span>
           <input type="text" id="gen-video-motion" maxlength="300"
-                 placeholder="she turns towards the camera and smiles"></label>
+                 placeholder="she turns towards the camera and smiles">
+          <span class="hint" id="gen-motion-status"></span></label>
         <label class="gen-f"><span>Timed beats <em class="hint">optional</em></span>
           <input type="text" id="gen-beats" maxlength="400"
                  placeholder="0s she walks in; 3s turns to the camera; 6s smiles">
@@ -849,11 +850,7 @@
     <div class="gen-panel st-sec" id="gen-p-vprompt" data-title="Prompt"><div class="gen-head"><h2>Prompt</h2></div>
       <details class="gen-group gen-adv" id="gen-vadvanced" style="display:none" open>
         <summary><h3>Advanced — see or edit the prompt</h3></summary>
-        <div class="gen-go">
-          <button type="button" class="btn-ai btn-ai-secondary" onclick="autoWriteVideoPrompt(true)">
-            Write the prompt</button>
-          <span class="hint" id="gen-vwrite-note"></span>
-        </div>
+        <div class="gen-go"><span class="hint" id="gen-vwrite-note"></span></div>
         <label class="gen-f"><span>Prompt</span>
           <textarea id="gen-vprompt" rows="6" maxlength="2000" oninput="checkVideoPromptStale()"
                     placeholder="Built from your choices above"></textarea></label>
@@ -3303,7 +3300,20 @@ function videoPromptEdited() {
   return !!(ta && ta.value.trim() && !(genVWritten && ta.value === genVWritten.prompt));
 }
 
-let genVPromptForcing = false;
+let genVPromptForcing = false, genVAutoTimer = null;
+function setPromptStatus(text) {
+  ['gen-vwrite-note', 'gen-motion-status'].forEach(id => { const n = el(id); if (n) n.textContent = text; });
+}
+
+// Typing a motion writes the prompt on its own once she stops typing.
+function queueWrittenPrompt() {
+  clearTimeout(genVAutoTimer);
+  genVAutoTimer = null;
+  if (!((el('gen-video-motion') || {}).value || '').trim() || videoPromptEdited()) return;
+  setPromptStatus('Writing the prompt…');
+  genVAutoTimer = setTimeout(() => { genVAutoTimer = null; autoWriteVideoPrompt(true); }, 1200);
+}
+
 async function autoWriteVideoPrompt(force) {
   const ta = el('gen-vprompt');
   if (!ta || !slug() || genMake === 'image') return;
@@ -3312,11 +3322,13 @@ async function autoWriteVideoPrompt(force) {
   if (!force && genVPromptForcing) return;
   if (!force && videoPromptEdited()) { checkVideoPromptStale(); return; }
   const seq = ++genVPromptSeq;
-  const note = el('gen-vwrite-note');
   let payload;
   try { payload = await videoPromptChoices(); } catch (e) { return; }
   const choices = JSON.stringify(payload);
-  if (force) { payload.write = true; genVPromptForcing = true; }
+  if (force) {
+    payload.write = true; genVPromptForcing = true;
+    setPromptStatus('Writing the prompt… (the first one after a pause can take up to a minute)');
+  }
   try {
     const d = await (await fetch('/api/generate/video-prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -3324,13 +3336,13 @@ async function autoWriteVideoPrompt(force) {
     })).json();
     if (force) genVPromptForcing = false;
     if (seq !== genVPromptSeq) return;
-    if (!d.ok) { if (force) note.textContent = '✗ ' + (d.error || 'could not write it'); return; }
-    if (!force && videoPromptEdited()) return;
+    if (!d.ok) { if (force) setPromptStatus('✗ ' + (d.error || 'could not write it')); return; }
+    if (videoPromptEdited()) return;
     ta.value = d.prompt;
     genVWritten = { choices, prompt: d.prompt };
-    note.textContent = (force && d.note) ? '✗ ' + d.note
-      : 'Follows your choices. Edit it and it stays as you wrote it.';
-  } catch (e) { if (force) { genVPromptForcing = false; note.textContent = '✗ could not write it'; } }
+    if (force) setPromptStatus(d.note ? '✗ ' + d.note : '✓ Prompt written. Edit it and it stays as you wrote it.');
+    else if (!genVAutoTimer && !genVPromptForcing) setPromptStatus('✓ Prompt ready.');
+  } catch (e) { if (force) { genVPromptForcing = false; setPromptStatus('✗ could not write it'); } }
 }
 
 // The payload without the heavy parts: the preview needs no frame grab.
@@ -3359,6 +3371,7 @@ document.addEventListener('input', e => {
   if (e.target.id !== 'gen-vprompt' && e.target.closest
       && e.target.closest('#gen-reel-form, #gen-swap-form, #gen-video-form, #gen-extend-form, #gen-multiref-form')) {
     queueVideoPrompt();
+    if (e.target.id === 'gen-video-motion' || e.target.id === 'gen-beats') queueWrittenPrompt();
   }
 });
 
@@ -4748,7 +4761,6 @@ function removeLora(id) {
 function writeFromMotion() {
   if (!el('gen-video-motion').value.trim()) { el('gen-video-motion').focus(); return; }
   el('gen-vadvanced').open = true;
-  el('gen-vwrite-note').textContent = 'Writing… (the first try after a pause can take up to a minute)';
   autoWriteVideoPrompt(true);
 }
 

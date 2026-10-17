@@ -1466,6 +1466,15 @@ def timeline(beats, seconds, model):
                     in zip(starts, ends, rows))
 
 
+_IDLE_LINE = ('She moves naturally and subtly — a slow breath, a small shift of weight, '
+              'hair settling.')
+_REPEAT_LINE = ', a steady motion repeated through the whole clip, her expression matching it'
+_HOLD_LINE = 'The camera stays fixed: no zoom, no pan. Same lighting, same background.'
+_MOVES = re.compile(r'\b(walk|enter|leav|run|step|stand|sit|lie|crawl|turns? around|camera|'
+                    r'zoom|pan|dolly|orbit|tilt|track|close-?up|wide shot|cut to|room|outside)',
+                    re.I)
+
+
 def fit_prompt(prompt, spec):
     """A clip's prompt shaped for the model it runs on: the timed beats, her
     look in words, and, where the model has no negative input, what it must
@@ -1474,6 +1483,13 @@ def fit_prompt(prompt, spec):
     family = prompt_family(model)
     text = (prompt or '').strip()
     beats = timeline(spec.get('beats'), spec.get('seconds'), model)
+    if beats:
+        # The beats are the action: the template's idle line says the
+        # opposite, and a beat that moves her or the camera breaks its hold.
+        text = text.replace(_IDLE_LINE, '').replace(_REPEAT_LINE, '')
+        if _MOVES.search(beats):
+            text = text.replace(_HOLD_LINE, '')
+        text = re.sub(r'\s{2,}', ' ', text).strip()
     if beats and beats not in text and not re.search(r'\d-[\d.]+s:', text):
         text = f'{text} {beats}'.strip()
     look = (spec.get('look') or '').strip()
