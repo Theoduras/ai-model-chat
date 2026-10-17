@@ -403,7 +403,8 @@
     else if (img) acts = `${d === 'approved' ? '<span class="pill ok">Approved</span>' : ''}<button type="button" class="btn btn-ghost btn-sm" onclick="CC.redo(${attr(k)})">Redo</button><button type="button" class="btn btn-primary btn-sm" onclick="CC.approve(${attr(img.id)})">Approve</button>`;
     else if (waiting.length) acts = '<span class="pill">Waiting</span>';
     else acts = `<button type="button" class="btn btn-primary btn-sm" onclick="CC.redo(${attr(k)})">Generate</button>`;
-    return `<div class="view">${th}<div class="nm">${esc(label(k))}${img && !run ? wearTag(k, img) : ''}${waiting.length && !img ? `<small>Waits for ${esc(waiting.join(' and '))}</small>` : ''}</div><div class="acts">${acts}</div></div>`;
+    const own = !run && !waiting.length ? `<label class="btn btn-ghost btn-sm up">Upload<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upPhoto(${attr(k)},this)"></label><button type="button" class="btn btn-ghost btn-sm" onclick="CC.vaultPhoto(${attr(k)})">Vault</button>${img && img.role === 'canonical' && d !== 'outdated' ? `<button type="button" class="btn btn-ghost btn-sm" onclick="CC.unapprove(${attr(img.id)})">Remove</button>` : ''}` : '';
+    return `<div class="view">${th}<div class="nm">${esc(label(k))}${img && !run ? wearTag(k, img) : ''}${waiting.length && !img ? `<small>Waits for ${esc(waiting.join(' and '))}</small>` : ''}</div><div class="acts">${acts}${own}</div></div>`;
   }
   function groupLeft(vs) {
     const ss = vs.filter(v => RUN[v]).map(v => Math.ceil(left(v)));
@@ -451,7 +452,7 @@
       <div class="acts">${run ? (views.map(v => RUN[v] ? bar(v) : '').join('') || '<span class="pill">Generating</span>') : all ? `<span class="pill ok">Approved</span>${canon(k) ? `<button type="button" class="btn btn-ghost btn-sm" onclick="CC.unapprove(${attr(canon(k).id)})">Remove</button>` : ''}` : ''}
       <select class="qty" aria-label="How many of ${esc(label(k))}" onchange="CC.advSet(${attr(k)},'qty',+this.value)">${[1, 2, 4, 8].map(n => `<option ${q === n ? 'selected' : ''}>${n}</option>`).join('')}</select>
       <button type="button" class="btn btn-sm ${img ? 'btn-ghost' : 'btn-primary'}" ${locked || run ? 'disabled' : ''} onclick="CC.advGen(${attr(k)})">${img ? 'Generate again' : 'Generate'}</button></div>
-      <div class="refs">${upBtn(k)}</div>
+      <div class="refs">${upBtn(k)}${PAIRS[k] ? '' : `<button type="button" class="btn btn-ghost btn-sm" onclick="CC.vaultPhoto(${attr(k)})">From vault</button>`}</div>
       ${wear}${PAIRS[k] ? `<div class="pairs">${views.map(v => strip(v, SIDE[v])).join('')}</div>`
         : optsOf(k).length > 1 ? `<div class="pairs">${strip(k, '', img && img.id)}</div>` : ''}</div>`;
   }
@@ -758,7 +759,7 @@
     async upPhoto(k, input) {
       const f = input.files[0];
       if (!f) return;
-      if (!S.attest) { input.value = ''; return say('Tick the rights and consent box first.'); }
+      if (!S.attest && !(S.attest = confirm('Do you have the rights to this image, and is anyone shown 18+ and agreed?'))) { input.value = ''; return; }
       try {
         const up = await api(`/api/characters/${C.id}/images`, {body: {view: k, image: await fileData(f), attest: true, import: true}});
         const id = (up.image || {}).id;
@@ -766,6 +767,21 @@
         if (id) await approveImage(id);
       } catch (e) { return fail(e); }
       render();
+    },
+    vaultPhoto(k) {
+      VaultPicker.open({persona: C.persona || undefined, personas: true, kind: 'image', title: 'Pick a photo for ' + label(k),
+        async onDone(ids, items) {
+          const m = (items || [])[0];
+          if (!m) return;
+          if (!S.attest && !(S.attest = confirm('Do you have the rights to this image, and is anyone shown 18+ and agreed?'))) return;
+          try {
+            const blob = await (await fetch(m.url || m.thumb)).blob();
+            const up = await api(`/api/characters/${C.id}/images`, {body: {view: k, image: await fileData(blob), attest: true, import: true}});
+            await refresh();
+            if (up.image && up.image.id) await approveImage(up.image.id);
+          } catch (e) { return fail(e); }
+          render();
+        }});
     },
     async unref(id) {
       try { C = (await api(`/api/characters/${C.id}/images/${id}`, {method: 'DELETE'})).character; } catch (e) { return fail(e); }
