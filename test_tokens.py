@@ -149,7 +149,11 @@ def test_prices_track_cost():
     else:
         check('every rung rounds the whole job, never per second', True)
 
+    check('a 15s 720p Spicy 2.7 clip sells for 24 tokens ($5 on the smallest pack)',
+          CR.video_price('720p', 15, (), 'mr-wan-2-7-spicy') == 24)
     for model, rows in CR.VIDEO_COST_USD_PER_SECOND.items():
+        if model in CR.LOW_MARKUP_MODELS:
+            continue
         for res, cost in rows.items():
             for secs in (2, 5, 10):
                 earned = CR.video_price(res, secs, (), model) * CR.CHEAPEST_TOKEN_USD
@@ -184,6 +188,8 @@ def test_prices_track_cost():
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 7}) >
           CR.quote({'kind': 'swap', 'resolution': '720p', 'seconds': 5}))
     for m in CR.SWAP_MODELS:
+        if m in CR.LOW_MARKUP_MODELS:
+            continue
         cost = CR.VIDEO_COST_USD_PER_SECOND[m]['720p'] * 5
         check(f'a swap on {m} never sells under what the provider charges',
               CR.quote({'kind': 'swap', 'model': m, 'resolution': '720p',
@@ -249,7 +255,8 @@ def test_job_quotes():
                                 continue
                             cost = (CR.video_cost_usd(model, res, secs) or 0) \
                                 + sum(CR.ADDON_COST_USD.get(a, 0) for a in addons)
-                            if price * CR.TOKEN_COST_USD + 1e-9 < cost:
+                            if (model not in CR.LOW_MARKUP_MODELS
+                                    and price * CR.TOKEN_COST_USD + 1e-9 < cost):
                                 under.append((job, model, aspect, res, secs,
                                               addons, price))
     check('every job / model / aspect / rung / duration is priced',

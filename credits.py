@@ -509,8 +509,18 @@ def video_credits_for_cost(usd):
 # 2.5 at 720p is 2.269 tokens a second, and rounding that up to 3 would sell a
 # five-second clip at 15 tokens instead of 12. So the rate stays fractional and
 # `video_price` does the single ceil.
+# MuleRouter clips are priced by the owner's choice at ~2.56x cost on the
+# smallest pack's token ($5 for a 15s Spicy 2.7 clip), not at VIDEO_MARKUP. On
+# the deepest pack discount that sells them at about cost, so they are exempt
+# from the 3x floor rather than protected by it.
+LOW_MARKUP_MODELS = tuple(_IG.MULEROUTER_ENDPOINTS)
+LOW_MARKUP_MULTIPLE = 5 / 1.95
+SMALL_TOKEN_USD = PACK_PRICES[min(PACK_SIZES)]['usd'] / min(PACK_SIZES)
+
 VIDEO_RATE_PER_SECOND = {
-    model: {res: cost * VIDEO_MARKUP / TOKEN_COST_USD for res, cost in rows.items()}
+    model: {res: cost * (LOW_MARKUP_MULTIPLE / SMALL_TOKEN_USD if model in LOW_MARKUP_MODELS
+                         else VIDEO_MARKUP / TOKEN_COST_USD)
+            for res, cost in rows.items()}
     for model, rows in VIDEO_COST_USD_PER_SECOND.items()
 }
 
@@ -923,6 +933,8 @@ def _assert_generation_floor():
     this is a 1x test, not a margin one: the margin is taken when the tokens are
     bought, and taking it twice would price us out of our own table."""
     for row in generation_margin_report():
+        if row['model'] in LOW_MARKUP_MODELS:
+            continue
         if row['sells_for'] + 1e-9 < row['cost_usd']:
             raise AssertionError(
                 f"{row['job']} on {row['model']} at {row['resolution']} for "
