@@ -3300,7 +3300,7 @@ function videoPromptEdited() {
   return !!(ta && ta.value.trim() && !(genVWritten && ta.value === genVWritten.prompt));
 }
 
-let genVPromptForcing = false, genVAutoTimer = null, genVWritePromise = null;
+let genVForceSeq = 0, genVPromptForcing = false, genVAutoTimer = null, genVWritePromise = null;
 function setPromptStatus(text) {
   ['gen-vwrite-note', 'gen-motion-status'].forEach(id => { const n = el(id); if (n) n.textContent = text; });
 }
@@ -3330,9 +3330,12 @@ async function writeVideoPrompt(force) {
   // meantime would answer first and throw the written prompt away.
   if (!force && genVPromptForcing) return;
   if (!force && videoPromptEdited()) { checkVideoPromptStale(); return; }
-  const seq = ++genVPromptSeq;
+  // A write has its own counter: a template rebuild must not throw its answer away.
+  const seq = force ? ++genVForceSeq : ++genVPromptSeq;
+  const stale = () => force ? seq !== genVForceSeq : seq !== genVPromptSeq;
   let payload;
-  try { payload = await videoPromptChoices(); } catch (e) { return; }
+  try { payload = await videoPromptChoices(); }
+  catch (e) { if (force) setPromptStatus('✗ could not write it — type again to retry'); return; }
   const choices = JSON.stringify(payload);
   if (force) {
     payload.write = true; genVPromptForcing = true;
@@ -3341,17 +3344,22 @@ async function writeVideoPrompt(force) {
   try {
     const d = await (await fetch('/api/generate/video-prompt', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
+      body: JSON.stringify(payload), signal: AbortSignal.timeout(force ? 90000 : 20000),
     })).json();
     if (force) genVPromptForcing = false;
-    if (seq !== genVPromptSeq) return;
+    if (stale()) return;
     if (!d.ok) { if (force) setPromptStatus('✗ ' + (d.error || 'could not write it')); return; }
     if (videoPromptEdited()) return;
     ta.value = d.prompt;
     genVWritten = { choices, prompt: d.prompt };
     if (force) setPromptStatus(d.note ? '✗ ' + d.note : '✓ Prompt written. Edit it and it stays as you wrote it.');
     else if (!genVAutoTimer && !genVPromptForcing) setPromptStatus('✓ Prompt ready.');
-  } catch (e) { if (force) { genVPromptForcing = false; setPromptStatus('✗ could not write it'); } }
+  } catch (e) {
+    if (force && !stale()) {
+      genVPromptForcing = false;
+      setPromptStatus(e.name === 'TimeoutError' ? '✗ took too long — type again to retry' : '✗ could not write it');
+    }
+  }
 }
 
 // The payload without the heavy parts: the preview needs no frame grab.
@@ -4549,6 +4557,7 @@ async function applyPreset(i) {
   if (p.model && videoModel() !== p.model) pickVideoModel(p.model);
   else if (p.nsfw && !LORA_VIDEO_MODELS.includes(videoModel())) pickVideoModel('mr-wan-2-2-spicy');
   el('gen-video-motion').value = p.motion;
+  queueWrittenPrompt();
   const secs = el('gen-vsecs');
   if (secs && [...secs.options].some(o => o.value === String(p.seconds))) secs.value = String(p.seconds);
   genChainMotions.length = 0;
@@ -4645,9 +4654,7 @@ async function loadMotionIdeas() {
     box.style.display = '';
     list.innerHTML = (ideas.length ? '' : `<span class="hint">${esc(motionIdeaNote[key] || '')}</span> `) + ideas.map((t, i) =>
       `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
-        onclick="useMotionIdea(${i})">${esc(t)}</button>`).join('')
-      + `<button type="button" class="btn-ai btn-ai-secondary" style="margin:0 6px 6px 0"
-        onclick="writeFromMotion()">Write the prompt from my motion</button>`;
+        onclick="useMotionIdea(${i})">${esc(t)}</button>`).join('');
   };
   if (motionIdeaCache[key]) { show(motionIdeaCache[key]); return; }
   motionIdeaCache[key] = [];
@@ -4666,7 +4673,7 @@ async function loadMotionIdeas() {
 
 function useMotionIdea(i) {
   const ideas = motionIdeaCache[animPhoto() + '|' + genRating] || [];
-  if (ideas[i]) { el('gen-video-motion').value = ideas[i]; writeFromMotion(); }
+  if (ideas[i]) { el('gen-video-motion').value = ideas[i]; queueWrittenPrompt(); }
 }
 
 // Wan 2.2 + LoRA: the library is the server's; what is ticked, and how
@@ -4768,12 +4775,6 @@ function editLora(id) {
 function removeLora(id) {
   delete genLoraPick[id];
   saveLoras({ remove: id });
-}
-
-function writeFromMotion() {
-  if (!el('gen-video-motion').value.trim()) { el('gen-video-motion').focus(); return; }
-  el('gen-vadvanced').open = true;
-  autoWriteVideoPrompt(true);
 }
 
 function animPhoto() {
