@@ -3954,7 +3954,17 @@ function storyMedia(step) {
   if (!step) return null;
   if (step.media && !step.job) return { id: step.media, url: step.url, kind: step.kind || 'image' };
   const j = storyJob(step.job);
-  return j && j.status === 'done' ? (j.media || [])[0] || null : null;
+  if (!j || j.status !== 'done') return null;
+  return (j.media || [])[step.pick || 0] || (j.media || [])[0] || null;
+}
+function storyStillChoices() {
+  const j = story.still && story.still.job && storyJob(story.still.job);
+  return j && j.status === 'done' ? (j.media || []) : [];
+}
+function pickStoryStill(i) {
+  story.still.pick = i;
+  saveStory();
+  renderStory();
 }
 function storyState(step) {
   if (!step || (!step.job && !step.media)) return 'empty';
@@ -4243,7 +4253,12 @@ function renderStoryReview() {
     } else if (st === 'wait') {
       box.innerHTML = '<p class="hint">Putting her into the frame… this takes a minute.</p>';
     } else {
+      const choices = st === 'review' ? storyStillChoices() : [];
       box.innerHTML = `<div class="story-pair">${storyFigure(m, 'The starting point of every part')}</div>
+        ${choices.length > 1 ? `<p class="hint">Pick the one to use:</p><div style="display:flex;gap:8px;flex-wrap:wrap">${choices.map((c, i) =>
+          `<img src="${c.url}" alt="" onclick="pickStoryStill(${i})" style="width:96px;cursor:pointer;border-radius:6px;border:2px solid ${i === (story.still.pick || 0) ? 'var(--accent, #e5533d)' : 'transparent'}">`).join('')}</div>` : ''}
+        ${story.still.job ? `<label class="gen-f"><span>Small changes for a redo <em class="hint">optional</em></span>
+          <input type="text" id="story-tweak" maxlength="300" value="${esc(story.tweak || '')}" placeholder="hair down, smiling, softer light"></label>` : ''}
         <div class="story-acts">${st === 'review' ? `<button type="button" class="btn btn-primary" onclick="acceptStory('still')">Accept as the starting point</button>` : ''}
         ${story.still.job ? `<button type="button" class="btn btn-ghost btn-sm" onclick="makeStoryStill()">Redo${tokensLabel(storyStillPrice())}</button>` : ''}</div>`;
     }
@@ -4308,14 +4323,16 @@ async function makeStoryStill() {
   setStoryStatus('Sending…');
   try {
     const old = storyMedia(story.still);
+    const tweak = ((el('story-tweak') || {}).value || '').trim();
+    story.tweak = tweak;
     let photo = story.photo;
     if (story.from === 'text') {
       const text = ((el('story-opening') || {}).value || '').trim();
       if (!text) throw new Error('Describe the opening shot');
       story.opening = text;
       const d = await storyPost('/api/generate/job', { persona: story.persona, kind: 'image', model: 'wan-2-2-char',
-        prompt: 'Photo of her at the start of this moment: ' + text, rating: story.rating, aspect: story.aspect, batch: 1, story: story.id });
-      if (old) dropStoryMedia([old.id]);
+        prompt: 'Photo of her at the start of this moment: ' + text + (tweak ? '. ' + tweak : ''), rating: story.rating, aspect: story.aspect, batch: 1, story: story.id });
+      if (old) dropStoryMedia(storyStillChoices().map(c => c.id));
       story.still = { job: d.job };
       story.sel = 'still';
       saveStory();
@@ -4331,8 +4348,8 @@ async function makeStoryStill() {
       }
     }
     const d = await storyPost('/api/generate/swap-in', { persona: story.persona, reference_media: photo, rating: story.rating,
-      batch: 1, story: story.id });
-    if (old && old.id !== story.photo) dropStoryMedia([old.id]);
+      batch: 1, story: story.id, prompt_extra: tweak });
+    if (old && old.id !== story.photo) dropStoryMedia(storyStillChoices().map(c => c.id).filter(id => id !== story.photo));
     story.still = { job: d.job };
     story.sel = 'still';
     saveStory();
@@ -4388,7 +4405,11 @@ async function redoStoryPart(i) {
 }
 
 function acceptStory(key) {
-  if (key === 'still') story.still.accepted = true;
+  if (key === 'still') {
+    story.still.accepted = true;
+    const keep = storyMedia(story.still);
+    dropStoryMedia(storyStillChoices().filter(c => !keep || c.id !== keep.id).map(c => c.id));
+  }
   else story.parts[key].accepted = true;
   story.sel = 'next';
   saveStory();
