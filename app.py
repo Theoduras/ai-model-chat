@@ -39992,7 +39992,7 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
     _gen_finish(job_id, slug, spec, workspace, ['storage:' + path])
 
 
-def _gen_advance_open(workspace_id=None, job_id=None):
+def _gen_advance_open(workspace_id=None, job_id=None, limit=12):
     """Advance the open jobs a reader is about to look at. On a host with no
     background worker this is what moves a generation along at all: the studio
     polls every few seconds, so the browser drives its own jobs. Scoped to one
@@ -40007,20 +40007,12 @@ def _gen_advance_open(workspace_id=None, job_id=None):
             q = q.filter(GenerationJob.id == job_id)
         if workspace_id:
             q = q.filter(GenerationJob.workspace_id == workspace_id)
-        rows = [_gen_row(j) for j in q.order_by(GenerationJob.created_at).limit(12)]
+        rows = [_gen_row(j) for j in q.order_by(GenerationJob.created_at).limit(limit)]
     finally:
         s.close()
-    # A lambda answering past its limit is a 504 and an empty studio, so stop
-    # advancing once the budget is spent; the next poll picks up the rest.
-    start = time.monotonic()
     for row in rows:
-        if time.monotonic() - start > GEN_ADVANCE_BUDGET:
-            break
         _gen_advance(row)
     return len(rows)
-
-
-GEN_ADVANCE_BUDGET = float(os.getenv('GEN_ADVANCE_BUDGET', '6'))
 
 
 GEN_FAILED_TTL = int(os.getenv('GEN_FAILED_TTL', '21600'))
@@ -40650,6 +40642,20 @@ def api_generate_job_status(job_id):
         s.close()
 
 
+@app.route('/api/generate/advance', methods=['POST'])
+def api_generate_advance():
+    # Its own call, one job at a time: finishing a job downloads and stores its
+    # media, and doing that inside the list read ran it past Vercel's limit.
+    blocked = _require_active()
+    if blocked:
+        return blocked
+    if GEN_HAS_WORKER:
+        return jsonify({'ok': True, 'advanced': 0})
+    n = _gen_advance_open(workspace_id=_workspace_id(_current_user()), limit=1)
+    _gen_purge_finished()
+    return jsonify({'ok': True, 'advanced': n})
+
+
 @app.route('/api/generate/jobs')
 def api_generate_jobs():
     blocked = _require_active()
@@ -40658,9 +40664,6 @@ def api_generate_jobs():
     user = _current_user()
     slug = (request.args.get('persona') or '').strip().lower()
     from db import list_generations
-    if not GEN_HAS_WORKER:
-        _gen_advance_open(workspace_id=_workspace_id(user))
-        _gen_purge_finished()
     s = _db_session()
     try:
         rows = list_generations(s, _workspace_id(user), slug or None)

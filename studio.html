@@ -3816,6 +3816,9 @@ function showGenJob(job) {
 
 async function pollGenJobs() {
   if (!slug()) return;
+  if (!genJobs.length || genJobs.some(j => j.status === 'queued' || j.status === 'running')) {
+    fetch('/api/generate/advance', {method: 'POST'}).catch(() => {});
+  }
   try {
     const res = await fetch('/api/generate/jobs?persona=' + encodeURIComponent(slug()));
     if (!res.ok) throw new Error('HTTP ' + res.status);
