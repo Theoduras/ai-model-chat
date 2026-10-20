@@ -971,7 +971,7 @@ async function studioSlugFor() {
   if (v === 'own:') {
     try {
       const d = await (await fetch('/api/studio/own-vault', {method: 'POST'})).json();
-      if (d.slug) { sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
+      if (d.slug) { sel.selectedOptions[0].dataset.key = v; sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
     } catch (e) {}
     return;
   }
@@ -979,7 +979,7 @@ async function studioSlugFor() {
   try {
     const d = await (await fetch('/api/characters/' + encodeURIComponent(v.slice(5)) + '/studio',
       {method: 'POST'})).json();
-    if (d.slug) { sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
+    if (d.slug) { sel.selectedOptions[0].dataset.key = v; sel.selectedOptions[0].value = d.slug; sel.value = d.slug; }
   } catch (e) {}
 }
 
@@ -1082,7 +1082,7 @@ async function init() {
     // Nothing is picked for her unless she picked it before: the default is
     // her own content, with no character's look forced on it.
     const want = new URLSearchParams(location.search).get('persona')
-      || (studioSaved() || {}).persona;
+      || (studioSaved() || {}).pick || (studioSaved() || {}).persona;
     if (want && [...el('persona').options].some(o => o.value === want)) el('persona').value = want;
     else el('persona').value = 'own:';
     renderCharPic();
@@ -1613,10 +1613,13 @@ function pickSwapInPhoto() {
     picked: genSwapInPhoto ? [genSwapInPhoto] : [], onUpload: syncVault,
     onDone: ids => {
       genSwapInPhoto = ids[0] || '';
-      el('gen-swapin-photo').innerHTML = genSwapInPhoto
-        ? `<img src="/api/personas/${encodeURIComponent(slug())}/media/${encodeURIComponent(genSwapInPhoto)}/image" alt="" style="max-width:220px;max-height:280px;border-radius:10px;display:block;margin-bottom:8px">` : '';
+      renderSwapInPhoto();
       genQuote();
     } });
+}
+function renderSwapInPhoto() {
+  el('gen-swapin-photo').innerHTML = genSwapInPhoto
+    ? `<img src="/api/personas/${encodeURIComponent(slug())}/media/${encodeURIComponent(genSwapInPhoto)}/image" alt="" style="max-width:220px;max-height:280px;border-radius:10px;display:block;margin-bottom:8px">` : '';
 }
 
 function swapInPrice() {
@@ -1637,6 +1640,7 @@ async function runSwapIn() {
     if (!d.ok) throw new Error(d.error || 'Swap failed');
     setGenStatus(`Swapping her in — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It lands in your generations.`, null);
     loadCredits();
+    showGenJob(d.result);
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
   finally { btn.disabled = false; genQuote(); }
@@ -3682,6 +3686,7 @@ async function runGeneration() {
     if (!d.ok) throw new Error(d.error || 'Generation failed');
     setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}`, null);
     loadCredits();
+    showGenJob(d.result);
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
   finally { btn.disabled = false; }
@@ -3786,6 +3791,7 @@ async function runVideoJob() {
     if (!d.ok) throw new Error(d.error || 'Generation failed');
     setGenStatus(`Running — ${d.tokens} token${d.tokens === 1 ? '' : 's'}. It takes a few minutes.`, null);
     loadCredits();
+    showGenJob(d.result);
     pollGenJobs();
   } catch (e) { setGenStatus('✗ ' + e.message, false); }
   finally { btn.disabled = false; genQuote(); }
@@ -3799,6 +3805,13 @@ function animateMedia(id) {
   setJob('animate');
   setGenStatus('Ready — check the price and press Make the video.', null);
   el('gen-run-btn').scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// The submit answers with the job, so its card shows before the list catches up.
+function showGenJob(job) {
+  if (!job || !job.id || genJobs.some(j => j.id === job.id)) return;
+  genJobs.unshift(job);
+  renderGenStaging();
 }
 
 async function pollGenJobs() {
@@ -5035,7 +5048,8 @@ function studioSave() {
   });
   try {
     localStorage.setItem(STUDIO_STATE, JSON.stringify({
-      persona: el('persona').value, rating: genRating, job: genJob, swapIn: genSwapIn, textStart: genTextStart,
+      persona: el('persona').value, pick: (el('persona').selectedOptions[0] || {dataset: {}}).dataset.key || el('persona').value,
+      swapInPhoto: genSwapInPhoto, swapInRes: genSwapInRes, swapInN: genSwapInN, rating: genRating, job: genJob, swapIn: genSwapIn, textStart: genTextStart,
       level: genRating === 'nsfw' && window.StudioNSFW ? StudioNSFW.level() : '',
       loras: genLoraPick, herLora: genHerLora,
       identity: genIdentityTouched ? genIdentity : '', imageAspect: genImageAspect,
@@ -5059,6 +5073,9 @@ async function studioRestore() {
     if (s.rating) setRating(s.rating);
     if (s.textStart === 'lora') genTextStart = s.textStart;
     if (s.job) setJob(s.job);
+    if (s.swapInPhoto) genSwapInPhoto = s.swapInPhoto;
+    if (s.swapInRes) genSwapInRes = s.swapInRes;
+    if (s.swapInN) genSwapInN = s.swapInN;
     if (s.swapIn && s.job === 'image') setSwapIn(true);
     if (s.loras) Object.assign(genLoraPick, s.loras);
     if (s.herLora) genHerLora = s.herLora;
@@ -5078,6 +5095,7 @@ async function studioRestore() {
     });
     renderPhoneSeg();
     renderGenForm();
+    if (s.swapInPhoto) renderSwapInPhoto();
     genQuote();
     if (s.scroll) requestAnimationFrame(() => window.scrollTo(0, s.scroll));
   } catch (e) {}
