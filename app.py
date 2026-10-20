@@ -40656,7 +40656,15 @@ def api_generate_jobs():
     s = _db_session()
     try:
         rows = list_generations(s, _workspace_id(user), slug or None)
-        return jsonify({'jobs': [_job_json(j, s) for j in rows]})
+        jobs = []
+        # One broken job must not empty the whole list.
+        for j in rows:
+            try:
+                jobs.append(_job_json(j, s))
+            except Exception:
+                s.rollback()
+                logger.exception('job %s unreadable', j.id)
+        return jsonify({'jobs': jobs})
     finally:
         s.close()
 

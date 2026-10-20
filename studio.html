@@ -3818,9 +3818,13 @@ async function pollGenJobs() {
   if (!slug()) return;
   try {
     const res = await fetch('/api/generate/jobs?persona=' + encodeURIComponent(slug()));
-    if (!res.ok) return;
+    if (!res.ok) throw new Error('HTTP ' + res.status);
     genJobs = (await res.json()).jobs || [];
-  } catch (e) { return; }
+  } catch (e) {
+    const box = el('gen-staging');
+    if (box) box.innerHTML = `<p class="hint gen-empty">Could not load your generations (${esc(e.message)}).</p>`;
+    return;
+  }
   renderGenStaging();
   renderStory();
 
