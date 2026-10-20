@@ -4181,6 +4181,36 @@ n.textContent='Last online '+new Date(t*1000).toLocaleString([], {day:'numeric',
 {% for d, n in u.bans.domains.items() %}<form method="post" action="/admin/users/{{ u.id }}" style="margin-top:8px"><input type="hidden" name="action" value="unbanlist"><input type="hidden" name="dom" value="{{ d }}"><span class="sub">@{{ d }} ({{ n }})</span> <button type="submit" style="width:auto;padding:4px 10px">Remove</button></form>{% endfor %}
 </div>
 
+<div class="card" id="media" style="margin-top:16px"><h2>Media</h2>
+<p class="sub" id="mstat">Loading…</p>
+<div id="mgrid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));gap:6px"></div></div>
+<div id="lb" onclick="if(event.target===this)this.style.display='none'" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:50;align-items:center;justify-content:center;flex-direction:column;gap:12px;padding:16px">
+<div id="lbm" style="max-width:100%;max-height:75vh;display:flex"></div>
+<p class="sub" id="lbi" style="color:#ccc;margin:0"></p>
+<div style="display:flex;gap:8px;flex-wrap:wrap;justify-content:center;width:100%;max-width:520px">
+<select id="lbto" style="flex:1;min-width:140px;margin:0"></select>
+<button type="button" id="lbcp" style="width:auto;padding:8px 14px">Add to my vault</button>
+<button type="button" id="lbdel" class="danger" style="width:auto;padding:8px 14px">Delete</button>
+<button type="button" onclick="lb.style.display='none'" style="width:auto;padding:8px 14px">Close</button></div></div>
+<script>(function(){var api='/api/admin/users/{{ u.id }}/media',g=document.getElementById('mgrid'),st=document.getElementById('mstat'),
+lb=window.lb=document.getElementById('lb'),cur=null,items=[];
+function med(it,full){var e=document.createElement(it.kind==='video'?'video':'img');e.src=it.url;
+if(it.kind==='video'){e.muted=!full;e.controls=!!full;e.preload='metadata';}else e.loading='lazy';
+e.style.cssText=full?'max-width:100%;max-height:75vh':'width:100%;aspect-ratio:1;object-fit:cover;border-radius:8px;cursor:pointer;display:block';return e;}
+function open(it){cur=it;var m=document.getElementById('lbm');m.innerHTML='';m.appendChild(med(it,true));
+document.getElementById('lbi').textContent=it.slug+' · '+it.source+' · '+it.created+(it.staged?' · not kept':'');lb.style.display='flex';}
+function post(b){return fetch(api,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(b)}).then(function(r){return r.json();});}
+function draw(){g.innerHTML='';st.textContent=items.length?items.length+' item'+(items.length>1?'s':'')+(items.length>=300?' (newest 300)':''):'No media.';
+items.forEach(function(it){var e=med(it);e.onclick=function(){open(it);};g.appendChild(e);});}
+fetch(api).then(function(r){return r.json();}).then(function(d){items=d.items||[];
+var s=document.getElementById('lbto');(d.mine||[]).forEach(function(x){var o=document.createElement('option');o.value=o.textContent=x;s.appendChild(o);});
+if(!(d.mine||[]).length){s.style.display='none';document.getElementById('lbcp').style.display='none';}draw();}).catch(function(){st.textContent='Could not load media.';});
+document.getElementById('lbcp').onclick=function(){var b=this;b.disabled=true;b.textContent='Copying…';
+post({action:'copy',id:cur.id,to:document.getElementById('lbto').value}).then(function(d){b.textContent=d.ok?'Added ✓':(d.error||'Failed');}).finally(function(){setTimeout(function(){b.disabled=false;b.textContent='Add to my vault';},1500);});};
+document.getElementById('lbdel').onclick=function(){if(!confirm('Delete this from their vault? This cannot be undone.'))return;
+post({action:'delete',id:cur.id}).then(function(d){if(!d.ok)return alert(d.error||'Failed');items=items.filter(function(x){return x!==cur;});lb.style.display='none';draw();});};
+})();</script>
+
 {% if can_delete %}<div class="card" id="delete" style="margin-top:16px;border-color:#7f1d1d"><h2>Delete account</h2>
 <p class="sub">Deletes this account and everything it made: personas and their platform connections, characters, photos and videos, chats, its team seats and its support thread. Any Stripe subscription is cancelled first. Payments and the token ledger are kept as records, with no name or email on them. This cannot be undone.</p>
 <form method="post" action="/admin/users/{{ u.id }}" onsubmit="return confirm('Delete {{ u.email }} and everything in it? This cannot be undone.')">
@@ -38580,25 +38610,78 @@ def api_generate_vault_copy():
     if not (src and dst and ids):
         return jsonify({'ok': False, 'error': 'Nothing to copy'}), 400
     s = _db_session()
-    out = []
     try:
-        for row in s.query(PersonaMedia).filter(PersonaMedia.slug == src, PersonaMedia.id.in_(ids)):
-            new = PersonaMedia(**{c.name: getattr(row, c.name) for c in PersonaMedia.__table__.columns
-                                  if c.name not in ('id', 'slug', 'created_at', 'position')})
-            new.slug = dst
-            for col in ('gcs_path', 'poster_gcs_path'):
-                path = getattr(row, col)
-                if path:
-                    prefix = storage.STAGING_PREFIX if path.startswith(storage.STAGING_PREFIX) else storage.KEPT_PREFIX
-                    setattr(new, col, storage.put(dst, storage.get(path) or b'',
-                                                  storage.mime_of(path) or row.mime, prefix=prefix))
-            s.add(new)
-            s.flush()
-            out.append((ids.index(row.id), new.id))
+        out = _copy_media(s, s.query(PersonaMedia).filter(PersonaMedia.slug == src, PersonaMedia.id.in_(ids)), dst)
         s.commit()
     finally:
         s.close()
-    return jsonify({'ok': True, 'ids': [n for _i, n in sorted(out)]})
+    return jsonify({'ok': True, 'ids': [out[i] for i in ids if i in out]})
+
+
+def _copy_media(s, rows, dst):
+    """Copy vault rows into persona `dst`, bytes included, so deleting either
+    copy leaves the other. Returns {old id: new id}."""
+    from db import PersonaMedia
+    out = {}
+    for row in rows:
+        new = PersonaMedia(**{c.name: getattr(row, c.name) for c in PersonaMedia.__table__.columns
+                              if c.name not in ('id', 'slug', 'created_at', 'position')})
+        new.slug = dst
+        for col in ('gcs_path', 'poster_gcs_path'):
+            path = getattr(row, col)
+            if path:
+                prefix = storage.STAGING_PREFIX if path.startswith(storage.STAGING_PREFIX) else storage.KEPT_PREFIX
+                setattr(new, col, storage.put(dst, storage.get(path) or b'',
+                                              storage.mime_of(path) or row.mime, prefix=prefix))
+        s.add(new)
+        s.flush()
+        out[row.id] = new.id
+    return out
+
+
+@app.route('/api/admin/users/<uid>/media', methods=['GET', 'POST'])
+def api_admin_user_media(uid):
+    """An account's media for the admin user page: list, delete, or copy into
+    one of the admin's own personas (kept, so it lands in the vault)."""
+    blocked = _require_admin()
+    if blocked:
+        return blocked
+    import account_lifecycle
+    from db import PersonaMedia, delete_media_links, drop_model_references
+    me = _current_user()
+    s = _db_session()
+    try:
+        slugs = account_lifecycle.owned_slugs(s, uid)
+        mine = account_lifecycle.owned_slugs(s, me['id'])
+        if request.method == 'GET':
+            rows = (s.query(PersonaMedia).filter(PersonaMedia.slug.in_(slugs or ['']))
+                    .order_by(PersonaMedia.created_at.desc()).limit(300).all())
+            return jsonify({'ok': True, 'mine': mine, 'items': [{
+                'id': r.id, 'slug': r.slug, 'kind': r.kind or 'image',
+                'source': getattr(r, 'source', '') or 'upload',
+                'staged': getattr(r, 'approved', None) is False,
+                'created': r.created_at.strftime('%d %b %Y') if r.created_at else '',
+                'url': f'/api/personas/{r.slug}/media/{r.id}/image'} for r in rows]})
+        body = request.get_json(silent=True) or {}
+        row = s.get(PersonaMedia, str(body.get('id') or ''))
+        if row is None or row.slug not in slugs:
+            return jsonify({'ok': False, 'error': 'Not found'}), 404
+        if body.get('action') == 'delete':
+            delete_media_links(s, row.id)
+            drop_model_references(s, row.id)
+            s.delete(row)
+            s.commit()
+            logger.info('ADMIN DELETE media by=%s id=%s slug=%s', me['email'], row.id, row.slug)
+            return jsonify({'ok': True})
+        dst = str(body.get('to') or '')
+        if dst not in mine:
+            return jsonify({'ok': False, 'error': 'Pick one of your personas'}), 400
+        new_id = _copy_media(s, [row], dst)[row.id]
+        s.get(PersonaMedia, new_id).approved = True
+        s.commit()
+        return jsonify({'ok': True, 'id': new_id})
+    finally:
+        s.close()
 
 
 @app.route('/api/generate/story-drafts', methods=['GET', 'POST'])
