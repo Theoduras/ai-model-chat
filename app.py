@@ -40010,9 +40010,17 @@ def _gen_advance_open(workspace_id=None, job_id=None):
         rows = [_gen_row(j) for j in q.order_by(GenerationJob.created_at).limit(12)]
     finally:
         s.close()
+    # A lambda answering past its limit is a 504 and an empty studio, so stop
+    # advancing once the budget is spent; the next poll picks up the rest.
+    start = time.monotonic()
     for row in rows:
+        if time.monotonic() - start > GEN_ADVANCE_BUDGET:
+            break
         _gen_advance(row)
     return len(rows)
+
+
+GEN_ADVANCE_BUDGET = float(os.getenv('GEN_ADVANCE_BUDGET', '6'))
 
 
 GEN_FAILED_TTL = int(os.getenv('GEN_FAILED_TTL', '21600'))
