@@ -12,7 +12,6 @@ import subprocess
 import tempfile
 
 import requests
-import runpod
 
 import sys
 
@@ -75,4 +74,10 @@ def handler(job):
         shutil.rmtree(work, ignore_errors=True)
 
 
-runpod.serverless.start({'handler': handler})
+if __name__ == '__main__':
+    # Run by the bootstrap in deploy.py: one job's input file in, its output file out.
+    import json
+    with open(sys.argv[1]) as f:
+        result = handler({'input': json.load(f)})
+    with open(sys.argv[2], 'w') as f:
+        json.dump(result, f)

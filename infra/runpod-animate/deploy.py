@@ -17,32 +17,40 @@ IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2204'
 DC = 'EU-RO-1'
 GPUS = ['NVIDIA RTX PRO 6000 Blackwell Server Edition',
         'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3']
+# The worker takes jobs at once; the first job does the install, because RunPod
+# exits a worker that spends too long starting up.
 SETUP = r'''
+set -e
 V=/runpod-volume/animate
 mkdir -p $V $V/tmp
-LOG=$V/setup.log
-{
-apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null
-if [ ! -f $V/.env-ready ]; then
-  set -e
-  rm -rf $V/Wan2.2 $V/venv
-  git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
-  python3 -m venv --system-site-packages $V/venv
-  cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
-  SAM2_BUILD_CUDA=0 TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install -r /tmp/req.txt runpod requests huggingface_hub
-  set +e
-  TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install flash-attn --no-build-isolation
-  touch $V/.env-ready
-fi
-df -h / /runpod-volume
-} > $LOG 2>&1
-echo "$ANIMATE_HANDLER" | base64 -d > /handler.py
-if [ -f $V/.env-ready ]; then cd $V/Wan2.2 && exec $V/venv/bin/python -u /handler.py; fi
-# Setup failed: answer every job with the log, so the error is readable from the API.
-pip install -q runpod
-exec python3 -u -c "
-import runpod
-runpod.serverless.start({'handler': lambda j: {'error': open('$LOG').read()[-4000:]}})"
+exec 9>$V/setup.lock
+flock 9
+[ -f $V/.env-ready ] && exit 0
+rm -rf $V/Wan2.2 $V/venv
+git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
+python3 -m venv --system-site-packages $V/venv
+cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
+export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
+$V/venv/bin/pip install -q -r /tmp/req.txt requests huggingface_hub
+touch $V/.env-ready
+'''
+BOOT = r'''
+import json, os, subprocess, tempfile, runpod
+V = '/runpod-volume/animate'
+def tail(r): return ((r.stdout or '') + (r.stderr or ''))[-4000:]
+def handler(job):
+    if not os.path.exists(V + '/.env-ready'):
+        r = subprocess.run(['bash', '/setup.sh'], capture_output=True, text=True)
+        if not os.path.exists(V + '/.env-ready'):
+            return {'error': 'setup failed: ' + tail(r)}
+    d = tempfile.mkdtemp()
+    src, out = d + '/in.json', d + '/out.json'
+    with open(src, 'w') as f: json.dump(job['input'], f)
+    r = subprocess.run([V + '/venv/bin/python', '-u', '/handler.py', src, out],
+                       cwd=V + '/Wan2.2', capture_output=True, text=True)
+    if not os.path.exists(out): return {'error': tail(r)}
+    with open(out) as f: return json.load(f)
+runpod.serverless.start({'handler': handler})
 '''
 
 
@@ -71,8 +79,13 @@ with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py')
 body = {'name': 'wan-animate-worker', 'imageName': IMAGE, 'isServerless': True,
         'containerDiskInGb': 40,
         'env': {'ANIMATE_HANDLER': handler, 'ANIMATE_SETUP': base64.b64encode(SETUP.encode()).decode(),
+                'ANIMATE_BOOT': base64.b64encode(BOOT.encode()).decode(),
                 'HF_HOME': '/runpod-volume/animate/hf'},
-        'dockerStartCmd': ['bash', '-c', 'echo "$ANIMATE_SETUP" | base64 -d > /setup.sh && exec bash /setup.sh']}
+        'dockerStartCmd': ['bash', '-c', 'echo "$ANIMATE_SETUP" | base64 -d > /setup.sh; '
+                           'echo "$ANIMATE_HANDLER" | base64 -d > /handler.py; '
+                           'echo "$ANIMATE_BOOT" | base64 -d > /boot.py; '
+                           'apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null; '
+                           'pip install -q runpod; exec python3 -u /boot.py']}
 tpl = find('/templates', 'wan-animate-worker')
 if tpl:
     body.pop('isServerless')
