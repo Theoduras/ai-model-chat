@@ -35316,7 +35316,7 @@ def _gen_spec(slug, body, user):
                     f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
                     + ', '.join(f'{n}s' for n in allowed) + '.')
 
-    if spec.get('story_id'):
+    if spec.get('story_id') and not spec.get('story_still'):
         if model not in imagegen.STORY_MODELS:
             raise imagegen.GenerationError(
                 'A storyboard runs on ' + ' or '.join(
