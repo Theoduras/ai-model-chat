@@ -21,6 +21,11 @@ AREA = {'480p': (832, 480), '720p': (1280, 720)}
 
 def ensure_weights():
     if not os.path.exists(os.path.join(CKPT, '.complete')):
+        try:
+            import hf_transfer  # noqa: F401
+        except ImportError:
+            # The base image turns fast download on without installing it.
+            os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
         from huggingface_hub import snapshot_download
         snapshot_download('Wan-AI/Wan2.2-Animate-14B', local_dir=CKPT)
         open(os.path.join(CKPT, '.complete'), 'w').close()
