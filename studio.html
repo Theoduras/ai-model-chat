@@ -2781,6 +2781,7 @@ function setMoney(tokens) {
 // a real choice. The server accepts only these for a swap, which is why the
 // panel cannot quote a model that will not run.
 const SWAP_NOTES = {
+  'wan-animate-face': 'Only her face goes in: you click the face on the first frame, everything else stays.',
   'wan-animate-hub': 'Same as Wan 2.2 Animate on a faster, distilled sampler (8 steps, 30fps).',
   'wan-2-2-animate-gv': 'Her character is swapped into the clip\'s first frame first, then '
     + 'replaces the person through the whole clip. Motion, scene and sound kept.',
@@ -2806,7 +2807,7 @@ function picksBefore(ssecs) {
 
 // The rating picks the swap engine: safe work on Kling motion control, any
 // explicit rating on H3 (her into the first frame, then locked as her).
-const EXPLICIT_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub', 'wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+const EXPLICIT_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub', 'wan-animate-face', 'wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
 function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (genRating !== 'sfw' && EXPLICIT_SWAPS.includes(picked)) return picked;
@@ -2916,6 +2917,7 @@ function renderSwapOut() {
     const keep = smodel.value;
     smodel.innerHTML = explicit ? [['wan-2-2-animate-gv', 'Wan 2.2 Animate + character lock'],
       ['wan-animate-hub', 'Wan Animate Fast + character lock'],
+      ['wan-animate-face', 'Face swap only (Wan Animate)'],
       ['wan-2-2-char-video', 'Wan 2.2 + her LoRA'],
       ['h3-gv', 'H3 + her LoRA (with sound)'],
       ['mr-wan-3-0-pro', 'Wan 3.0 Pro — her photos + your clip'],
@@ -4012,8 +4014,14 @@ function storyState(step) {
 }
 // An explicit Wan Animate swap runs as a storyboard: her still on the clip's
 // first frame, then the clip in 20s parts, each animated with that still.
-const ANIMATE_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub'];
+const ANIMATE_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub', 'wan-animate-face'];
 const SEGMENT_SECONDS = 20;
+function addFacePoint(e) {
+  const r = e.target.getBoundingClientRect();
+  story.facePoints = (story.facePoints || []).concat([{ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }]).slice(-3);
+  saveStory();
+  renderStoryReview();
+}
 function animSwap() { return !!story && story.from === 'swap' && ANIMATE_SWAPS.includes(story.model); }
 function segmentCount() { return Math.max(1, Math.ceil((story.clipSecs || SEGMENT_SECONDS) / SEGMENT_SECONDS)); }
 function segmentSecs(i) { return Math.max(1, Math.min(SEGMENT_SECONDS, Math.round((story.clipSecs || SEGMENT_SECONDS) - i * SEGMENT_SECONDS))); }
@@ -4069,7 +4077,7 @@ function startStory(from) {
       base.clipSecs = genSwap.seconds;
       // No still: Wan Animate takes her character's full-body photo itself.
       story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height),
-        still: { accepted: true, character: true }, sel: 'next' });
+        still: { accepted: true, character: true }, sel: 'next', clipUrl: genSwap.url, facePoints: [] });
       saveStory();
       return openStory();
     }
@@ -4323,6 +4331,12 @@ function renderStoryReview() {
     box.innerHTML = i >= n
       ? `<p class="hint">All ${n} part${n === 1 ? '' : 's'} of your clip are done. Stitch them below into one video.</p>`
       : `${i ? `<div class="story-pair">${storyFigure(storyMedia(story.parts[i - 1]), `Part ${i}`)}</div>` : ''}
+        ${story.model === 'wan-animate-face' && !i ? `<p class="hint">Click her face on the first frame (up to 3 points). ${(story.facePoints || []).length} set.
+          <button type="button" class="btn btn-ghost btn-sm" onclick="story.facePoints = []; saveStory(); renderStoryReview()">Clear</button></p>
+          <div style="position:relative;display:inline-block;max-width:100%">
+            <video src="${esc(story.clipUrl || '')}" muted playsinline preload="auto" style="max-height:360px;max-width:100%;display:block;cursor:crosshair" onclick="addFacePoint(event)"></video>
+            ${(story.facePoints || []).map(p => `<span style="position:absolute;left:${p.x * 100}%;top:${p.y * 100}%;width:12px;height:12px;margin:-6px;border-radius:50%;background:#2f8;border:2px solid #fff;pointer-events:none"></span>`).join('')}
+          </div>` : ''}
         <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, with her character's full-body photo as the reference.</p>
         <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
@@ -4429,7 +4443,7 @@ function storyPartBody(i) {
   if (animSwap()) {
     const body = { persona: story.persona, job: 'swap', model: story.model, rating: story.rating,
       source: story.source, resolution: '480p', aspect: story.aspect, story: story.id,
-      segment: i, seconds: segmentSecs(i), identity: 'character' };
+      segment: i, seconds: segmentSecs(i), identity: 'character', face_points: story.facePoints || [] };
     if (i) body.continue_from = storyMedia(story.parts[i - 1]).id;
     return body;
   }
