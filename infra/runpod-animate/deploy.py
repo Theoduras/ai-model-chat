@@ -40,6 +40,7 @@ fi
 # "no kernel image" on another, and this SAM2 calls it unguarded; it only smooths masks.
 M=$(ls $V/venv/src/sam-2/sam2/utils/misc.py 2>/dev/null)
 [ -n "$M" ] && ! grep -q 'return mask  # no-fill' $M && sed -i 's/^def fill_holes_in_mask_scores(mask, max_area):/&\n    return mask  # no-fill/' $M
+$V/venv/bin/python -c "import runpod" 2>/dev/null || $V/venv/bin/pip install -q runpod
 # Pose detection on the GPU; the CPU build pinned every core.
 $V/venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers()" 2>/dev/null || { $V/venv/bin/pip uninstall -y -q onnxruntime; $V/venv/bin/pip install -q onnxruntime-gpu; }
 # Fast weight download; the base image turns it on without installing it.
@@ -53,8 +54,14 @@ if [ ! -f $V/.fa-ready ]; then
 fi
 '''
 BOOT = r'''
-import json, os, subprocess, tempfile, threading, time, urllib.request, runpod
+import json, os, subprocess, tempfile, threading, time, urllib.request
 V = '/runpod-volume/animate'
+if os.path.exists(V + '/.env-ready'):
+    # Installed already: serve from the venv so the models load once and stay loaded.
+    subprocess.run(['bash', '/setup.sh'])
+    os.chdir(V + '/Wan2.2')
+    os.execv(V + '/venv/bin/python', [V + '/venv/bin/python', '-u', '/handler.py', '--serve'])
+import runpod
 def tail(r): return ((r.stdout or '') + (r.stderr or ''))[-4000:]
 def handler(job):
     if True:

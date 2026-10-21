@@ -47,6 +47,32 @@ def fetch(src, path):
         f.write(data)
 
 
+_MODELS = None
+
+
+def models():
+    # Loaded once per worker and kept on the GPU; reloading ~60 GB from the network
+    # volume was most of every job's time.
+    global _MODELS
+    if _MODELS is None:
+        root = '/runpod-volume/animate/Wan2.2'
+        sys.path[:0] = [root, os.path.join(root, 'wan/modules/animate/preprocess')]
+        import wan
+        from wan.configs import WAN_CONFIGS
+        from process_pipepline import ProcessPipeline
+        ck = f'{CKPT}/process_checkpoint'
+        prep = ProcessPipeline(det_checkpoint_path=f'{ck}/det/yolov10m.onnx',
+                               pose2d_checkpoint_path=f'{ck}/pose2d/vitpose_h_wholebody.onnx',
+                               sam_checkpoint_path=f'{ck}/sam2/sam2_hiera_large.pt',
+                               flux_kontext_path=None)
+        cfg = WAN_CONFIGS['animate-14B']
+        model = wan.WanAnimate(config=cfg, checkpoint_dir=CKPT, device_id=0, rank=0,
+                               t5_fsdp=False, dit_fsdp=False, use_sp=False, t5_cpu=False,
+                               convert_model_dtype=True, use_relighting_lora=True)
+        _MODELS = prep, model, cfg
+    return _MODELS
+
+
 def handler(job):
     inp = job['input']
     if not inp.get('image_url') or not inp.get('video_url'):
@@ -58,22 +84,24 @@ def handler(job):
         fetch(inp['image_url'], ref)
         fetch(inp['video_url'], clip)
         pre, out = os.path.join(work, 'pre'), os.path.join(work, 'out.mp4')
+        os.makedirs(pre)
         w, h = AREA.get(inp.get('resolution') or '720p', AREA['720p'])
-        subprocess.run([sys.executable, 'wan/modules/animate/preprocess/preprocess_data.py',
-                        '--ckpt_path', f'{CKPT}/process_checkpoint',
-                        '--video_path', clip, '--refer_path', ref, '--save_path', pre,
-                        '--resolution_area', str(w), str(h),
-                        '--iterations', '3', '--k', '7', '--w_len', '1', '--h_len', '1',
-                        '--replace_flag'], check=True)
+        prep, model, cfg = models()
+        prep(video_path=clip, refer_image_path=ref, output_path=pre, resolution_area=[w, h],
+             iterations=3, k=7, w_len=1, h_len=1, replace_flag=True)
         seed = inp.get('seed')
-        subprocess.run([sys.executable, 'generate.py', '--task', 'animate-14B', '--ckpt_dir', CKPT,
-                        '--src_root_path', pre, '--refert_num', '1', '--replace_flag',
-                        '--use_relighting_lora', '--offload_model', 'False',
-                        '--convert_model_dtype',
-                        '--sample_steps', str(int(inp.get('steps') or 20)),
-                        '--base_seed', str(int(seed) if seed is not None else random.randint(0, 2**31 - 1)),
-                        '--prompt', inp.get('prompt') or 'a woman moving naturally',
-                        '--save_file', out], check=True)
+        video = model.generate(src_root_path=pre, replace_flag=True, refert_num=1,
+                               clip_len=cfg.frame_num, shift=cfg.sample_shift, sample_solver='unipc',
+                               sampling_steps=int(inp.get('steps') or 20),
+                               guide_scale=cfg.sample_guide_scale,
+                               seed=int(seed) if seed is not None else random.randint(0, 2**31 - 1),
+                               offload_model=False)
+        from wan.utils.utils import save_video
+        save_video(tensor=video[None], save_file=out, fps=cfg.sample_fps, nrow=1,
+                   normalize=True, value_range=(-1, 1))
+        del video
+        import torch
+        torch.cuda.empty_cache()
         final = os.path.join(work, 'final.mp4')
         # The clip's sound, if it has any; a silent clip just keeps the render.
         mux = subprocess.run(['ffmpeg', '-y', '-i', out, '-i', clip, '-map', '0:v', '-map', '1:a?',
@@ -84,8 +112,12 @@ def handler(job):
         shutil.rmtree(work, ignore_errors=True)
 
 
-if __name__ == '__main__':
-    # Run by the bootstrap in deploy.py: one job's input file in, its output file out.
+if __name__ == '__main__' and sys.argv[1:] == ['--serve']:
+    # Started by the bootstrap in deploy.py once the venv exists: the models stay loaded.
+    import runpod
+    runpod.serverless.start({'handler': handler})
+elif __name__ == '__main__':
+    # The first install's job: one job's input file in, its output file out.
     import json
     with open(sys.argv[1]) as f:
         result = handler({'input': json.load(f)})
