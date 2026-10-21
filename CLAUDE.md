@@ -542,7 +542,7 @@ be set on Vercel.
   (`mr-wan-2-2-spicy`, 480p/720p, 5 or 8s, silent, $0.02-0.04/s).
   All MuleRouter engines are priced at ~2.56x cost on the smallest pack's token (`credits.LOW_MARKUP_MODELS`,
   $5 for 15s of Spicy 2.7), exempt from the 3x floor by the owner's choice.
-- Explicit Swap's default, "Explicit Swap (Wan Animate)" (`wan-2-2-animate-gv`), is Wan 2.2 Animate
+- Explicit Swap's default, "Wan 2.2 Animate + character lock" (`wan-2-2-animate-gv`), is Wan 2.2 Animate
   (replace mode) on our RunPod endpoint from `infra/runpod-animate` endpoint `qfdnou9hy8d3so` (code default
   for `RUNPOD_ANIMATE_ENDPOINT`; deploy.py installs Wan into a venv on its volume, no image of ours). A Swap her in still on the clip's first frame, from her character,
   is made first and is the identity image. Price is a guess until a real run is timed.

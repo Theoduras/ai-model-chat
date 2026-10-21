@@ -310,7 +310,7 @@ MODEL_LABELS = {
     'wan-2-2-gv': 'Explicit Video Realism Pro',
     'h3-gv': 'Explicit Video + Sound (H3)',
     'wan-2-2-char-video': 'Her LoRA video',
-    'wan-2-2-animate-gv': 'Explicit Swap (Wan Animate)',
+    'wan-2-2-animate-gv': 'Wan 2.2 Animate + character lock',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',

@@ -1936,8 +1936,9 @@ function videoModelChips(box, note) {
     box.innerHTML = `<button type="button" class="gen-chip" aria-pressed="true" disabled>` +
       `<span>${esc(videoLabel(m))}</span>` + (rate ? `<small>${rate.toFixed(1)} tokens/s</small>` : '') +
       `</button>`;
-    if (note) note.textContent =
-      `${videoLabel(m)} is the only model that takes a clip, so a swap always runs on it.`;
+    if (note) note.textContent = genRating !== 'sfw'
+      ? 'Pick the swap engine under the clip.'
+      : `${videoLabel(m)} is the only model that takes a clip, so a swap always runs on it.`;
     return;
   }
   if (!models.length) {
@@ -2780,6 +2781,8 @@ function setMoney(tokens) {
 // a real choice. The server accepts only these for a swap, which is why the
 // panel cannot quote a model that will not run.
 const SWAP_NOTES = {
+  'wan-2-2-animate-gv': 'Her character is swapped into the clip\'s first frame first, then '
+    + 'replaces the person through the whole clip. Motion, scene and sound kept.',
   'p-video-replace': 'Keeps your clip exactly as it is — same motion, timing, ' +
     'camera, lighting and background — and changes only who is in it.',
   'wan-2-7': 'Regenerates the clip from her reference photos in a similar ' +
@@ -2910,11 +2913,13 @@ function renderSwapOut() {
     const explicit = genRating !== 'sfw';
     smodel.parentElement.style.display = explicit ? '' : 'none';
     const keep = smodel.value;
-    smodel.innerHTML = explicit ? [['wan-2-2-char-video', 'Wan 2.2 + her LoRA'],
+    smodel.innerHTML = explicit ? [['wan-2-2-animate-gv', 'Wan 2.2 Animate + character lock'],
+      ['wan-2-2-char-video', 'Wan 2.2 + her LoRA'],
       ['h3-gv', 'H3 + her LoRA (with sound)'],
       ['mr-wan-3-0-pro', 'Wan 3.0 Pro — her photos + your clip'],
       ['mr-wan-3-0', 'Wan 3.0 — her photos + your clip']]
-      .filter(([m]) => swapModels().includes(m)).map(([m, label]) =>
+      .filter(([m]) => swapModels().includes(m)
+        && (herLoraReady() || !['wan-2-2-char-video', 'h3-gv'].includes(m))).map(([m, label]) =>
       `<option value="${m}" ${m === keep ? 'selected' : ''}>${label}</option>`).join('') : '';
   }
   if (el('gen-smodel-note')) {
