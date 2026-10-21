@@ -182,7 +182,7 @@ if _ANIM:
 # The hub's Wan Animate worker (wlsdml1114/Wan_Animate_Runpod_hub): ComfyUI, a
 # distilled 4-6 step sampler on 24-32 GB cards. Same job, much faster.
 ANIMATE_HUB_MODEL = 'wan-animate-hub'
-_ANIM_HUB = os.getenv('RUNPOD_ANIMATE_HUB_ENDPOINT', '').strip().rstrip('/')
+_ANIM_HUB = os.getenv('RUNPOD_ANIMATE_HUB_ENDPOINT', 'rwd4y5ankk87e8').strip().rstrip('/')
 if _ANIM_HUB:
     RUNPOD_ENDPOINTS[ANIMATE_HUB_MODEL] = _ANIM_HUB if '/' in _ANIM_HUB else f'https://api.runpod.ai/v2/{_ANIM_HUB}'
 ANIMATE_SWAP_MODELS = (ANIMATE_SWAP_MODEL, ANIMATE_HUB_MODEL)
