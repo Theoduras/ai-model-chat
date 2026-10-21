@@ -35405,7 +35405,7 @@ def _gen_spec(slug, body, user):
         if model == imagegen.ANIMATE_FACE_MODEL:
             try:
                 points = [{'x': min(1.0, max(0.0, float(p['x']))), 'y': min(1.0, max(0.0, float(p['y'])))}
-                          for p in (body.get('face_points') or [])[:3]]
+                          for p in (body.get('face_points') or [])[:8]]
             except (TypeError, ValueError, KeyError):
                 points = []
             if not points:
