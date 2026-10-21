@@ -29,7 +29,7 @@ if [ ! -f $V/.env-ready ]; then
   git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
   python3 -m venv --system-site-packages $V/venv
   cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
-  TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install -r /tmp/req.txt runpod requests huggingface_hub
+  SAM2_BUILD_CUDA=0 TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install -r /tmp/req.txt runpod requests huggingface_hub
   set +e
   TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install flash-attn --no-build-isolation
   touch $V/.env-ready
