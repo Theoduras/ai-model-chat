@@ -48,6 +48,41 @@ def fetch(src, path):
 
 
 _MODELS = None
+# Step distillation: Wan 14B I2V, Animate included, in about 6 steps instead of 20.
+LIGHTX2V = 'Lightx2v/lightx2v_I2V_14B_480p_cfg_step_distill_rank64_bf16.safetensors'
+
+
+def merge_lightx2v(dit):
+    import torch
+    from huggingface_hub import hf_hub_download
+    from safetensors.torch import load_file
+    sd = load_file(hf_hub_download('Kijai/WanVideo_comfy', LIGHTX2V, local_dir=CKPT))
+    merged = skipped = 0
+    for key, t in sd.items():
+        path, _, kind = key.removeprefix('diffusion_model.').rpartition('.')
+        if kind == 'weight':
+            path, _, kind = path.rpartition('.')
+            if kind != 'lora_down':
+                continue
+        try:
+            mod = dit.get_submodule(path)
+        except AttributeError:
+            skipped += 1
+            continue
+        # The relighting LoRA's peft wrapper keeps the real layer in base_layer.
+        mod = getattr(mod, 'base_layer', mod)
+        if kind == 'lora_down':
+            delta = sd[f'diffusion_model.{path}.lora_up.weight'].float() @ t.float()
+            target = mod.weight
+        else:
+            delta, target = t.float(), mod.bias if kind == 'diff_b' else mod.weight
+        if target is None or target.shape != delta.shape:
+            skipped += 1
+            continue
+        with torch.no_grad():
+            target.add_(delta.to(target.device, target.dtype))
+        merged += 1
+    print(f'lightx2v merged {merged}, skipped {skipped}', flush=True)
 
 
 def models():
@@ -69,6 +104,7 @@ def models():
         model = wan.WanAnimate(config=cfg, checkpoint_dir=CKPT, device_id=0, rank=0,
                                t5_fsdp=False, dit_fsdp=False, use_sp=False, t5_cpu=False,
                                convert_model_dtype=True, use_relighting_lora=True)
+        merge_lightx2v(model.noise_model)
         _MODELS = prep, model, cfg
     return _MODELS
 
@@ -92,7 +128,8 @@ def handler(job):
         seed = inp.get('seed')
         video = model.generate(src_root_path=pre, replace_flag=True, refert_num=1,
                                clip_len=cfg.frame_num, shift=cfg.sample_shift, sample_solver='unipc',
-                               sampling_steps=int(inp.get('steps') or 20),
+                               # A distilled model overcooks past a handful of steps.
+                               sampling_steps=min(int(inp.get('steps') or 6), 8),
                                guide_scale=cfg.sample_guide_scale,
                                seed=int(seed) if seed is not None else random.randint(0, 2**31 - 1),
                                offload_model=False)
