@@ -4333,13 +4333,18 @@ function renderStoryReview() {
     box.innerHTML = i >= n
       ? `<p class="hint">All ${n} part${n === 1 ? '' : 's'} of your clip are done. Stitch them below into one video.</p>`
       : `${i ? `<div class="story-pair">${storyFigure(storyMedia(story.parts[i - 1]), `Part ${i}`)}</div>` : ''}
-        ${story.model === 'wan-animate-face' && !i ? `<p class="hint">Click her face, then 3–4 spots across her hair (top, sides, ends), up to 8 points. The green dots are a guess: Clear and click if they miss her. ${(story.facePoints || []).length} set.
-          <button type="button" class="btn btn-ghost btn-sm" onclick="story.facePoints = []; saveStory(); renderStoryReview()">Clear</button></p>
-          <div style="position:relative;display:inline-block;max-width:100%">
+        ${story.model === 'wan-animate-face' && !i ? `<p><b>Face swap:</b> only the area you mark is replaced with her face and hair. Everything else in the clip stays exactly as it is.</p>
+          <ol class="hint" style="margin:4px 0 8px 18px">
+            <li>Click the face of the person in the clip.</li>
+            <li>Click 3–4 spots on their hair (top, both sides, the ends).</li>
+            <li>Press Make part 1.</li></ol>
+          <p class="hint">${(story.facePoints || []).length} of 8 points set. The starting dots are a guess.
+          <button type="button" class="btn btn-ghost btn-sm" onclick="story.facePoints = []; saveStory(); renderStoryReview()">Clear dots</button></p>
+          <div style="position:relative;width:fit-content;max-width:100%;line-height:0">
             <video src="${esc(story.clipUrl || '')}" muted playsinline preload="auto" style="max-height:360px;max-width:100%;display:block;cursor:crosshair" onclick="addFacePoint(event)"></video>
             ${(story.facePoints || []).map(p => `<span style="position:absolute;left:${p.x * 100}%;top:${p.y * 100}%;width:12px;height:12px;margin:-6px;border-radius:50%;background:#2f8;border:2px solid #fff;pointer-events:none"></span>`).join('')}
           </div>` : ''}
-        <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, with her character's full-body photo as the reference.</p>
+        <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, ${story.model === 'wan-animate-face' ? 'her face and hair from her face photo' : "her whole body from her character's full-body photo"}.</p>
         <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
     return;
