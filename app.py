@@ -35145,8 +35145,8 @@ def _gen_spec(slug, body, user):
         spec['source_id'] = source_id
         spec['source_width'] = src['width']
         spec['source_height'] = src['height']
-        if model in imagegen.ANIMATE_SWAP_MODELS and spec.get('story_id') and body.get('still'):
-            # One 20s part of a long clip, animated with her accepted still.
+        if model in imagegen.ANIMATE_SWAP_MODELS and spec.get('story_id') and body.get('segment') is not None:
+            # One 20s part of a long clip.
             try:
                 segment = max(0, int(body.get('segment') or 0))
             except (TypeError, ValueError):
@@ -35155,14 +35155,11 @@ def _gen_spec(slug, body, user):
             seconds = min(imagegen.SEGMENT_SECONDS, int(src['seconds'] or 0) - start)
             if seconds < 1:
                 raise imagegen.GenerationError('The clip has no part left to swap.')
-            still = str(body['still']).strip()
-            if (_media_row(slug, still) or {}).get('kind') not in ('image', None) or not _media_row(slug, still):
-                raise imagegen.GenerationError('Her accepted photo is gone. Make it again.')
             cut = imagegen.cut_seconds(storage.get(src['path']) or b'', start, seconds)
             if not cut:
                 raise imagegen.GenerationError('That part of the clip could not be cut.')
             spec['source_path'] = storage.put(slug, cut, 'video/mp4')
-            spec.update({'segment': segment, 'reference_media': still, 'story_still': still})
+            spec['segment'] = segment
             parent = str(body.get('continue_from') or '').strip()
             if segment and not _story_spec(_workspace_id(user), slug, spec['story_id'], parent):
                 raise imagegen.GenerationError('The part before is no longer in this storyboard.')
@@ -35316,7 +35313,7 @@ def _gen_spec(slug, body, user):
                     f'{CR.MODEL_LABELS.get(model, model)} makes clips of '
                     + ', '.join(f'{n}s' for n in allowed) + '.')
 
-    if spec.get('story_id') and not spec.get('story_still'):
+    if spec.get('story_id') and spec.get('segment') is None:
         if model not in imagegen.STORY_MODELS:
             raise imagegen.GenerationError(
                 'A storyboard runs on ' + ' or '.join(
@@ -35393,16 +35390,16 @@ def _gen_spec(slug, body, user):
             spec['text_stage'] = 'still'
             spec['swap_still'] = True
             spec['addons'].append('still')
-    # Wan Animate takes one identity image: a Swap her in still on the clip's
-    # first frame, made from her character first, so she looks like herself.
-    if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS and not spec.get('story_still'):
+    # Wan Animate takes her character's own full-body photo as the reference,
+    # the way the model is meant to be driven: no still is made first.
+    if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS:
         char = _character_snapshot(slug)
-        if not char or not _character_urls(char, None, None, face_only=True):
-            raise imagegen.GenerationError('Pick a character with an approved face photo.')
+        order = ('nude_front', 'body_front', 'face_front') if level != 'sfw' else ('body_front', 'face_front')
+        key = next((k for k in order if char and k in (char.get('views') or {})), '')
+        if not key:
+            raise imagegen.GenerationError('Pick a character with an approved full-body photo.')
         spec['character'] = char
-        spec['text_stage'] = 'still'
-        spec['swap_still'] = True
-        spec['addons'].append('still')
+        spec['character_ref'] = {'path': char['views'][key]['path'], 'mime': char['views'][key]['mime']}
     if job == 'swap' and model == 'h3-gv' and level != 'sfw':
         if not _char_lora_entry(slug):
             raise imagegen.GenerationError(
@@ -39118,6 +39115,10 @@ def _gen_start(job_id, slug, spec, workspace):
                     raise imagegen.GenerationError("The clip's first frame could not be read.")
                 call['reference_b64'] = base64.b64encode(frame).decode()
                 call['reference_mime'] = 'image/jpeg'
+            if spec.get('character_ref'):
+                import base64
+                call['reference_b64'] = base64.b64encode(storage.get(spec['character_ref']['path'])).decode()
+                call['reference_mime'] = spec['character_ref']['mime'] or 'image/png'
             if spec.get('still_path'):
                 import base64
                 call['reference_b64'] = base64.b64encode(storage.get(spec['still_path'])).decode()

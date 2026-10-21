@@ -4067,6 +4067,11 @@ function startStory(from) {
     if (from === 'swap' && ANIMATE_SWAPS.includes(swapModel())) {
       base.model = swapModel();
       base.clipSecs = genSwap.seconds;
+      // No still: Wan Animate takes her character's full-body photo itself.
+      story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height),
+        still: { accepted: true, character: true }, sel: 'next' });
+      saveStory();
+      return openStory();
     }
     story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still:
       from === 'upload' ? { media: genSwap.id, url: genSwap.url, kind: 'video', accepted: true } : {} });
@@ -4150,7 +4155,7 @@ function renderStory() {
   sel.disabled = story.parts.length > 0 || story.from === 'text' || animSwap();
   const upload = story.from === 'upload';
   el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : story.from === 'text' ? 'From your text' : 'From your photo'} · ${storySeconds()}s accepted so far`;
-  const tiles = [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
+  const tiles = animSwap() ? [] : [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
   story.parts.forEach((p, i) => tiles.push(storyTile(i, 'Part ' + (i + 1), p, 'video')));
   const last = story.parts[story.parts.length - 1];
   const canExtend = storyState(story.still) === 'accepted' && (!last || storyState(last) === 'accepted');
@@ -4317,8 +4322,8 @@ function renderStoryReview() {
     const i = story.parts.length, n = segmentCount();
     box.innerHTML = i >= n
       ? `<p class="hint">All ${n} part${n === 1 ? '' : 's'} of your clip are done. Stitch them below into one video.</p>`
-      : `<div class="story-pair">${storyFigure(i ? storyMedia(story.parts[i - 1]) : storyMedia(story.still), i ? `Part ${i}` : 'Her photo')}</div>
-        <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, swapped with her accepted photo.</p>
+      : `${i ? `<div class="story-pair">${storyFigure(storyMedia(story.parts[i - 1]), `Part ${i}`)}</div>` : ''}
+        <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, with her character's full-body photo as the reference.</p>
         <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
     return;
@@ -4424,7 +4429,7 @@ function storyPartBody(i) {
   if (animSwap()) {
     const body = { persona: story.persona, job: 'swap', model: story.model, rating: story.rating,
       source: story.source, resolution: '480p', aspect: story.aspect, story: story.id,
-      segment: i, still: storyMedia(story.still).id, seconds: segmentSecs(i), identity: 'character' };
+      segment: i, seconds: segmentSecs(i), identity: 'character' };
     if (i) body.continue_from = storyMedia(story.parts[i - 1]).id;
     return body;
   }
