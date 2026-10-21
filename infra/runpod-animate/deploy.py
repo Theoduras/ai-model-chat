@@ -146,7 +146,7 @@ else:
     tpl = call('POST', '/templates', body)
 print('template', tpl['id'], flush=True)
 # The first job installs and downloads (~75 GB), so the ceiling is generous.
-settings = {'templateId': tpl['id'], 'networkVolumeId': vol['id'], 'dataCenterIds': [DC],
+settings = {'templateId': tpl['id'], 'networkVolumeId': vol['id'], 'networkVolumeIds': [vol['id']], 'dataCenterIds': [DC],
             'computeType': 'GPU', 'gpuTypeIds': GPUS, 'gpuCount': 1, 'workersMin': 1,
             'workersMax': 2, 'idleTimeout': 300, 'flashboot': True,
             'executionTimeoutMs': 2 * 3600 * 1000}
