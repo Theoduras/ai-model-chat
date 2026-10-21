@@ -4018,7 +4018,7 @@ const ANIMATE_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub', 'wan-animate-fac
 const SEGMENT_SECONDS = 20;
 function addFacePoint(e) {
   const r = e.target.getBoundingClientRect();
-  story.facePoints = (story.facePoints || []).concat([{ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }]).slice(-3);
+  story.facePoints = (story.facePoints || []).concat([{ x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height }]).slice(-8);
   saveStory();
   renderStoryReview();
 }
@@ -4077,7 +4077,9 @@ function startStory(from) {
       base.clipSecs = genSwap.seconds;
       // No still: Wan Animate takes her character's full-body photo itself.
       story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height),
-        still: { accepted: true, character: true }, sel: 'next', clipUrl: genSwap.url, facePoints: [] });
+        still: { accepted: true, character: true }, sel: 'next', clipUrl: genSwap.url,
+        // A guess for a centred head: face, then top and both sides of the hair. Click to fix.
+        facePoints: [{ x: 0.5, y: 0.22 }, { x: 0.5, y: 0.1 }, { x: 0.4, y: 0.18 }, { x: 0.6, y: 0.18 }] });
       saveStory();
       return openStory();
     }
@@ -4331,7 +4333,7 @@ function renderStoryReview() {
     box.innerHTML = i >= n
       ? `<p class="hint">All ${n} part${n === 1 ? '' : 's'} of your clip are done. Stitch them below into one video.</p>`
       : `${i ? `<div class="story-pair">${storyFigure(storyMedia(story.parts[i - 1]), `Part ${i}`)}</div>` : ''}
-        ${story.model === 'wan-animate-face' && !i ? `<p class="hint">Click her face on the first frame (up to 3 points). ${(story.facePoints || []).length} set.
+        ${story.model === 'wan-animate-face' && !i ? `<p class="hint">Click her face, then 3–4 spots across her hair (top, sides, ends), up to 8 points. The green dots are a guess: Clear and click if they miss her. ${(story.facePoints || []).length} set.
           <button type="button" class="btn btn-ghost btn-sm" onclick="story.facePoints = []; saveStory(); renderStoryReview()">Clear</button></p>
           <div style="position:relative;display:inline-block;max-width:100%">
             <video src="${esc(story.clipUrl || '')}" muted playsinline preload="auto" style="max-height:360px;max-width:100%;display:block;cursor:crosshair" onclick="addFacePoint(event)"></video>
