@@ -185,7 +185,12 @@ ANIMATE_HUB_MODEL = 'wan-animate-hub'
 _ANIM_HUB = os.getenv('RUNPOD_ANIMATE_HUB_ENDPOINT', 'rwd4y5ankk87e8').strip().rstrip('/')
 if _ANIM_HUB:
     RUNPOD_ENDPOINTS[ANIMATE_HUB_MODEL] = _ANIM_HUB if '/' in _ANIM_HUB else f'https://api.runpod.ai/v2/{_ANIM_HUB}'
-ANIMATE_SWAP_MODELS = (ANIMATE_SWAP_MODEL, ANIMATE_HUB_MODEL)
+# Face swap only: the same worker with SAM masking just the face, picked by
+# points the creator clicks on the clip's first frame.
+ANIMATE_FACE_MODEL = 'wan-animate-face'
+if _ANIM_HUB:
+    RUNPOD_ENDPOINTS[ANIMATE_FACE_MODEL] = RUNPOD_ENDPOINTS[ANIMATE_HUB_MODEL]
+ANIMATE_SWAP_MODELS = (ANIMATE_SWAP_MODEL, ANIMATE_HUB_MODEL, ANIMATE_FACE_MODEL)
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
 # character's approved photos, and makes stills from the same base with it.
 CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
@@ -487,6 +492,7 @@ MODEL_RESOLUTION_VALUES = {
     'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
     'wan-2-2-animate-gv': (('480p', '480p'), ('720p', '720p')),
     'wan-animate-hub': (('480p', '480p'), ('720p', '720p')),
+    'wan-animate-face': (('480p', '480p'), ('720p', '720p')),
     # 1080p is its lowest rung and the cheapest; nothing asks it for more.
     MULEROUTER_MODEL: (('1080p', '1080p'), ('2k', '2k'), ('4k', '4k')),
     'mr-wan-3-0': (('480p', '480p'), ('720p', '720p'), ('1080p', '1080p')),
@@ -686,6 +692,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-2-char-video': (5,),
     'wan-2-2-animate-gv': (5, 10, 15, 20),
     'wan-animate-hub': (5, 10, 15, 20),
+    'wan-animate-face': (5, 10, 15, 20),
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
@@ -735,6 +742,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-2-char-video': (5, 5),
     'wan-2-2-animate-gv': (1, 20),
     'wan-animate-hub': (1, 20),
+    'wan-animate-face': (1, 20),
     'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
@@ -3021,7 +3029,7 @@ class RunPodProvider(Provider):
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
-        if model == ANIMATE_HUB_MODEL:
+        if model in (ANIMATE_HUB_MODEL, ANIMATE_FACE_MODEL):
             if not spec.get('source_url'):
                 raise GenerationError('the swap needs the uploaded clip')
             if spec.get('source_width') and spec.get('source_height'):
@@ -3035,6 +3043,12 @@ class RunPodProvider(Provider):
                     # Wan Animate is built for 30fps; 16 played the motion slow.
                     'fps': 30, 'cfg': 1.0, 'steps': 8,
                     'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)}
+            points = [{'x': round(p['x'] * width, 1), 'y': round(p['y'] * height, 1)}
+                      for p in spec.get('face_points') or ()]
+            if model == ANIMATE_FACE_MODEL and points:
+                neg = [{'x': 0, 'y': 0}]
+                body.update(points_store=json.dumps({'positive': points, 'negative': neg}),
+                            coordinates=json.dumps(points), neg_coordinates=json.dumps(neg))
             if image.startswith('data:'):
                 body['image_base64'] = image.split(',', 1)[1]
             else:

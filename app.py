@@ -35394,12 +35394,23 @@ def _gen_spec(slug, body, user):
     # the way the model is meant to be driven: no still is made first.
     if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS:
         char = _character_snapshot(slug)
-        order = ('nude_front', 'body_front', 'face_front') if level != 'sfw' else ('body_front', 'face_front')
+        order = (('face_front',) if model == imagegen.ANIMATE_FACE_MODEL
+                 else ('nude_front', 'body_front', 'face_front') if level != 'sfw'
+                 else ('body_front', 'face_front'))
         key = next((k for k in order if char and k in (char.get('views') or {})), '')
         if not key:
             raise imagegen.GenerationError('Pick a character with an approved full-body photo.')
         spec['character'] = char
         spec['character_ref'] = {'path': char['views'][key]['path'], 'mime': char['views'][key]['mime']}
+        if model == imagegen.ANIMATE_FACE_MODEL:
+            try:
+                points = [{'x': min(1.0, max(0.0, float(p['x']))), 'y': min(1.0, max(0.0, float(p['y'])))}
+                          for p in (body.get('face_points') or [])[:3]]
+            except (TypeError, ValueError, KeyError):
+                points = []
+            if not points:
+                raise imagegen.GenerationError("Click her face on the clip's first frame first.")
+            spec['face_points'] = points
     if job == 'swap' and model == 'h3-gv' and level != 'sfw':
         if not _char_lora_entry(slug):
             raise imagegen.GenerationError(
