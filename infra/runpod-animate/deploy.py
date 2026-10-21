@@ -18,22 +18,31 @@ DC = 'EU-RO-1'
 GPUS = ['NVIDIA RTX PRO 6000 Blackwell Server Edition',
         'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3']
 SETUP = r'''
-set -e
 V=/runpod-volume/animate
-mkdir -p $V
+mkdir -p $V $V/tmp
+LOG=$V/setup.log
+{
 apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null
 if [ ! -f $V/.env-ready ]; then
+  set -e
   rm -rf $V/Wan2.2 $V/venv
   git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
   python3 -m venv --system-site-packages $V/venv
   cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
-  $V/venv/bin/pip install -q -r /tmp/req.txt runpod requests huggingface_hub
-  $V/venv/bin/pip install -q flash-attn --no-build-isolation || true
+  TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install -r /tmp/req.txt runpod requests huggingface_hub
+  set +e
+  TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache $V/venv/bin/pip install flash-attn --no-build-isolation
   touch $V/.env-ready
 fi
+df -h / /runpod-volume
+} > $LOG 2>&1
 echo "$ANIMATE_HANDLER" | base64 -d > /handler.py
-cd $V/Wan2.2
-exec $V/venv/bin/python -u /handler.py
+if [ -f $V/.env-ready ]; then cd $V/Wan2.2 && exec $V/venv/bin/python -u /handler.py; fi
+# Setup failed: answer every job with the log, so the error is readable from the API.
+pip install -q runpod
+exec python3 -u -c "
+import runpod
+runpod.serverless.start({'handler': lambda j: {'error': open('$LOG').read()[-4000:]}})"
 '''
 
 
