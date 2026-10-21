@@ -25,7 +25,7 @@ V=/runpod-volume/animate
 mkdir -p $V $V/tmp
 exec 9>$V/setup.lock
 flock 9
-[ -f $V/.env-ready ] && exit 0
+if [ ! -f $V/.env-ready ]; then
 rm -rf $V/Wan2.2 $V/venv
 git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
 python3 -m venv --system-site-packages $V/venv
@@ -33,13 +33,19 @@ cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e 
 export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
 $V/venv/bin/pip install -q -r /tmp/req.txt requests huggingface_hub
 touch $V/.env-ready
+fi
+# A prebuilt flash-attn for this torch and Python; compiling one takes an hour.
+if [ ! -f $V/.fa-ready ]; then
+  set -- $($V/venv/bin/python -c "import sys, torch; print(f'cp{sys.version_info[0]}{sys.version_info[1]}', str(torch._C._GLIBCXX_USE_CXX11_ABI).upper())")
+  $V/venv/bin/pip install -q "https://github.com/Dao-AILab/flash-attention/releases/download/v2.8.3/flash_attn-2.8.3+cu12torch2.8cxx11abi$2-$1-$1-linux_x86_64.whl" && touch $V/.fa-ready
+fi
 '''
 BOOT = r'''
 import json, os, subprocess, tempfile, runpod
 V = '/runpod-volume/animate'
 def tail(r): return ((r.stdout or '') + (r.stderr or ''))[-4000:]
 def handler(job):
-    if not os.path.exists(V + '/.env-ready'):
+    if not (os.path.exists(V + '/.env-ready') and os.path.exists(V + '/.fa-ready')):
         r = subprocess.run(['bash', '/setup.sh'], capture_output=True, text=True)
         if not os.path.exists(V + '/.env-ready'):
             return {'error': 'setup failed: ' + tail(r)}
