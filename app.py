@@ -7083,6 +7083,14 @@ def _checkout_stripe(user, tier_key, tier, order_id, base):
             # The window is the offer: a checkout page left open past it
             # should not keep the price. Stripe's floor is 30 minutes.
             form['expires_at'] = str(int(time.time()) + 31 * 60)
+    if 'discounts[0][coupon]' not in form and _ref_discountable(tier_key):
+        coupon = _stripe_ref_coupon() if session.get('promo') == PROMO_CODE else ''
+        if coupon:
+            form['discounts[0][coupon]'] = coupon
+            form['metadata[promo]'] = PROMO_CODE
+            form['subscription_data[metadata][promo]'] = PROMO_CODE
+        elif _stripe_promo_code():
+            form['allow_promotion_codes'] = 'true'
     # Reuse the saved card and keep one Stripe customer per account; without
     # this Stripe makes a fresh customer per checkout and the billing portal
     # would only ever show the newest subscription.
@@ -8066,6 +8074,33 @@ def _stripe_ref_coupon():
         s.close()
     return coupon
 
+
+
+def _stripe_promo_code():
+    """VLVT20 as a typeable Stripe promotion code on the referral coupon
+    (20% off the first month), created once and remembered."""
+    from db import get_app_setting, set_app_setting
+    s = _db_session()
+    try:
+        existing = (get_app_setting(s, PROMO_CODE_SETTING) or '').strip()
+    finally:
+        s.close()
+    if existing:
+        return existing
+    coupon = _stripe_ref_coupon()
+    if not coupon:
+        return ''
+    payload = _stripe_post('/promotion_codes', {'coupon': coupon, 'code': PROMO_CODE})
+    promo = str((payload or {}).get('id') or '')
+    if not promo:
+        return ''
+    s = _db_session()
+    try:
+        set_app_setting(s, PROMO_CODE_SETTING, promo)
+        s.commit()
+    finally:
+        s.close()
+    return promo
 
 # ── Welcome offer: a Free account's one 30-minute window at 15% off ──
 
@@ -9219,7 +9254,10 @@ def admin_register_links():
 
 # Tracked links that land on a page rather than /register: the click and the
 # account made afterwards both count, like any register link.
-_SITE_LINKS = {'studio-home': ('Homepage: Generation Studio button', '/studio')}
+_SITE_LINKS = {'studio-home': ('Homepage: Generation Studio button', '/studio'),
+               'vlvt20': ('VLVT20: 20% off first month', '/register')}
+PROMO_CODE = 'VLVT20'
+PROMO_CODE_SETTING = 'stripe_promo_vlvt20_id'
 
 
 def _ensure_tool_links(s):
@@ -9268,6 +9306,8 @@ def register_link_click(code):
             link.clicks = (link.clicks or 0) + 1
             s.commit()
             session['signup_link'] = code
+        if code == PROMO_CODE.lower():
+            session['promo'] = PROMO_CODE
     except Exception:
         error_logger.error('Register link click not recorded', exc_info=True)
     finally:
