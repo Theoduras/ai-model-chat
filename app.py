@@ -35330,6 +35330,16 @@ def _gen_spec(slug, body, user):
             spec['text_stage'] = 'still'
             spec['swap_still'] = True
             spec['addons'].append('still')
+    # Wan Animate takes one identity image: a Swap her in still on the clip's
+    # first frame, made from her character first, so she looks like herself.
+    if job == 'swap' and model == imagegen.ANIMATE_SWAP_MODEL:
+        char = _character_snapshot(slug)
+        if not char or not _character_urls(char, None, None, face_only=True):
+            raise imagegen.GenerationError('Pick a character with an approved face photo.')
+        spec['character'] = char
+        spec['text_stage'] = 'still'
+        spec['swap_still'] = True
+        spec['addons'].append('still')
     if job == 'swap' and model == 'h3-gv' and level != 'sfw':
         if not _char_lora_entry(slug):
             raise imagegen.GenerationError(
@@ -39306,7 +39316,15 @@ SWAP_IN_PROMPT = (
 def _swap_still_call(slug, spec):
     """Her character in place of whoever the picked photo shows, everything
     else kept: Photo to Video's first step, and the whole of Swap her in."""
-    photo = _gen_media_urls(slug, [spec['reference_media']])
+    if spec.get('job') == 'swap' and spec.get('source_path'):
+        frame = imagegen.first_frame(storage.get(spec['source_path']) or b'')
+        if not frame:
+            raise imagegen.GenerationError("The clip's first frame could not be read.")
+        path = storage.put(slug, frame, 'image/jpeg')
+        link = storage.signed_url(path) or _gen_file_link(path)
+        photo = [link] if link else []
+    else:
+        photo = _gen_media_urls(slug, [spec['reference_media']])
     refs = _character_urls(spec['character'], 'nude' if spec.get('explicit') else None,
                            None)[:imagegen.MAX_REFERENCES - 1]
     if not photo or not refs:

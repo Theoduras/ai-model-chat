@@ -64,7 +64,7 @@ DEFAULT_VIDEO_DURATION = 5
 VIDEO_MODELS = ('wan-2-5', 'wan-2-7', 'seedance-2-5', 'seedance-2-0',
                 'seedance-2-0-fast', 'minimax-h3', 'minimax-h3-fast', 'wan-3-0',
                 'p-video-animate', 'wan-2-2', 'wan-2-6-rp', 'wan-2-2-lora', 'wan-2-2-gv',
-                'h3-gv', 'wan-2-2-char-video', 'mr-wan-3-0-pro', 'mr-wan-3-0',
+                'h3-gv', 'wan-2-2-char-video', 'wan-2-2-animate-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0',
                 'mr-wan-2-7-spicy', 'mr-wan-2-2-spicy')
 DEFAULT_VIDEO_MODEL = 'seedance-2-0-fast'
 
@@ -157,6 +157,8 @@ VIDEO_COST_USD_PER_SECOND = {
     # Her LoRA's clips on the char-lora endpoint (both 14B experts, 20 steps).
     # Unmeasured: set from the first test run's GPU time.
     'wan-2-2-char-video': {'480p': 0.08, '720p': 0.16, '1080p': 0.16},
+    # A guess (2x wan-2-2-gv) until a real run is timed on the endpoint.
+    'wan-2-2-animate-gv': {'480p': 0.05, '720p': 0.075, '1080p': 0.075},
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
@@ -308,6 +310,7 @@ MODEL_LABELS = {
     'wan-2-2-gv': 'Explicit Video Realism Pro',
     'h3-gv': 'Explicit Video + Sound (H3)',
     'wan-2-2-char-video': 'Her LoRA video',
+    'wan-2-2-animate-gv': 'Explicit Swap (Wan Animate)',
     'p-video-animate': 'P-Video-Animate',
     'kling-3-0-mc': 'Kling 3.0 motion control',
     'kling-3-0-omni': 'Kling 3.0 Omni edit',
@@ -353,6 +356,7 @@ VIDEO_MODEL_RATINGS = {
     'wan-2-2-gv': ('sfw', 'nsfw'),
     'h3-gv': ('sfw', 'nsfw'),
     'wan-2-2-char-video': ('sfw', 'nsfw'),
+    'wan-2-2-animate-gv': ('nsfw',),
     'p-video-animate': ('sfw',),
     'seedance-2-5': ('sfw',),
     # Settled by the provider, not assumed: an explicit clip came back as a

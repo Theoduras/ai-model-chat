@@ -2802,12 +2802,13 @@ function picksBefore(ssecs) {
 
 // The rating picks the swap engine: safe work on Kling motion control, any
 // explicit rating on H3 (her into the first frame, then locked as her).
-const EXPLICIT_SWAPS = ['wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+const EXPLICIT_SWAPS = ['wan-2-2-animate-gv', 'wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
 function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (genRating !== 'sfw' && EXPLICIT_SWAPS.includes(picked)) return picked;
-  const want = genRating === 'sfw' ? 'kling-3-0-mc' : 'h3-gv';
-  if (swapModels().includes(want)) return want;
+  const want = genRating === 'sfw' ? ['kling-3-0-mc'] : ['wan-2-2-animate-gv', 'h3-gv'];
+  const hit = want.find(m => swapModels().includes(m));
+  if (hit) return hit;
   return (genPrices && genPrices.default_swap_model) || swapModels()[0];
 }
 

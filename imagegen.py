@@ -173,6 +173,12 @@ if _GV:
 _H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'fgt7mgn43o4lfg').strip().rstrip('/')
 if _H3:
     RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
+# Our Wan 2.2 Animate endpoint (infra/runpod-animate): explicit Swap, her still
+# replacing the person in the clip. No default id: hidden until it is deployed.
+ANIMATE_SWAP_MODEL = 'wan-2-2-animate-gv'
+_ANIM = os.getenv('RUNPOD_ANIMATE_ENDPOINT', '').strip().rstrip('/')
+if _ANIM:
+    RUNPOD_ENDPOINTS[ANIMATE_SWAP_MODEL] = _ANIM if '/' in _ANIM else f'https://api.runpod.ai/v2/{_ANIM}'
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
 # character's approved photos, and makes stills from the same base with it.
 CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
@@ -291,7 +297,9 @@ VIDEO_JOBS = {
     # move the face alone (ml-face-swap).
     # H3 takes no video: its swap starts from the clip's first frame and is
     # then redrawn as her by the lock, keeping H3's sound.
-    'swap': {'models': ('kling-3-0-mc', CHAR_LORA_VIDEO_MODEL, 'h3-gv', 'ml-face-swap',
+    'swap': {'models': ('kling-3-0-mc',)
+                       + ((ANIMATE_SWAP_MODEL,) if ANIMATE_SWAP_MODEL in RUNPOD_ENDPOINTS else ())
+                       + (CHAR_LORA_VIDEO_MODEL, 'h3-gv', 'ml-face-swap',
                         'kling-3-0-omni') + MULEROUTER_MODELS,
              'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw', 'nsfw'),
              'open': ('sfw', 'nsfw'), 'clause': 'preserve',
@@ -301,7 +309,7 @@ VIDEO_JOBS = {
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
                           + (tuple(m for m in RUNPOD_MODELS
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL,
-                                                HIDDEN_VIDEO_MODEL))
+                                                HIDDEN_VIDEO_MODEL, ANIMATE_SWAP_MODEL))
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
                           + MULEROUTER_MODELS + SPICY_MODELS,
                 'needs': ('first_frame',),
@@ -470,6 +478,7 @@ MODEL_RESOLUTION_VALUES = {
     'wan-2-2-gv': (('480p', '480p'), ('720p', '720p')),
     'h3-gv': (('480p', '480p'), ('720p', '720p')),
     'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
+    'wan-2-2-animate-gv': (('480p', '480p'), ('720p', '720p')),
     # 1080p is its lowest rung and the cheapest; nothing asks it for more.
     MULEROUTER_MODEL: (('1080p', '1080p'), ('2k', '2k'), ('4k', '4k')),
     'mr-wan-3-0': (('480p', '480p'), ('720p', '720p'), ('1080p', '1080p')),
@@ -667,6 +676,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5,),
+    'wan-2-2-animate-gv': (5, 8, 10),
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
@@ -714,6 +724,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5, 5),
+    'wan-2-2-animate-gv': (5, 10),
     'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
@@ -2963,6 +2974,14 @@ class RunPodProvider(Provider):
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
+        if model == ANIMATE_SWAP_MODEL:
+            if not spec.get('source_url'):
+                raise GenerationError('the swap needs the uploaded clip')
+            return {'input': {
+                'image_url': image, 'video_url': spec['source_url'],
+                'prompt': spec.get('prompt') or build_video_prompt(),
+                'resolution': spec.get('resolution') or '720p', 'steps': 20,
+                'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)}}
         if model == 'h3-gv':
             # worker-comfyui decodes every input image as base64 and fetches no
             # links, so a URL arrives as an unreadable still.png.
