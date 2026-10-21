@@ -28,7 +28,7 @@ flock 9
 if [ ! -f $V/.env-ready ]; then
 rm -rf $V/Wan2.2 $V/venv
 git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
-python3 -m venv --system-site-packages $V/venv
+${PY:-python3} -m venv --system-site-packages $V/venv
 cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
 export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
 $V/venv/bin/pip install -q -r /tmp/req.txt requests huggingface_hub
@@ -91,7 +91,8 @@ body = {'name': 'wan-animate-worker', 'imageName': IMAGE, 'isServerless': True,
                            'echo "$ANIMATE_HANDLER" | base64 -d > /handler.py; '
                            'echo "$ANIMATE_BOOT" | base64 -d > /boot.py; '
                            'export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC; apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null; '
-                           'python3 -m pip install -q runpod; exec python3 -u /boot.py']}
+                           'export PY=$(for p in python3.12 python3.11 python3; do $p -c "import torch" 2>/dev/null && echo $p && break; done); '
+                           '$PY -m pip install -q runpod; exec $PY -u /boot.py']}
 tpl = find('/templates', 'wan-animate-worker')
 if tpl:
     body.pop('isServerless')
