@@ -3037,7 +3037,9 @@ class RunPodProvider(Provider):
                                          spec.get('resolution') or '480p')
             else:
                 width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
-            body = {'video_url': spec['source_url'], 'mode': 'replace',
+            clip = spec['source_url']
+            body = {('video_base64' if clip.startswith('data:') else 'video_url'):
+                    clip.split(',', 1)[1] if clip.startswith('data:') else clip, 'mode': 'replace',
                     'prompt': spec.get('prompt') or build_video_prompt(),
                     'negative_prompt': negative_for(spec), 'width': width, 'height': height,
                     # Wan Animate is built for 30fps; 16 played the motion slow.

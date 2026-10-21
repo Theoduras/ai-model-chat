@@ -4371,7 +4371,7 @@ function renderStoryReview() {
   box.innerHTML = `${st === 'failed' ? `<p class="gen-err">${esc((j && j.error) || 'That failed.')} The tokens were refunded.</p>` : ''}
     ${st === 'gone' ? '<p class="gen-err">This part is gone (dropped or expired). Make it again.</p>' : ''}
     <div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i}` : story.from === 'upload' ? 'Your clip' : 'Still')}${storyFigure(storyMedia(p), `Part ${i + 1}`)}</div>
-    ${storyFields(p.motion, p.prompt, p.seconds)}
+    ${animSwap() ? '' : storyFields(p.motion, p.prompt, p.seconds)}
     <div class="story-acts">
       ${st === 'review' ? `<button type="button" class="btn btn-primary" onclick="acceptStory(${i})">Accept part ${i + 1}</button>` : ''}
       <button type="button" class="btn btn-ghost btn-sm" id="story-go" onclick="redoStoryPart(${i})"></button>

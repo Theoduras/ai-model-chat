@@ -39263,7 +39263,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 if spec.get('source_path'):
                     _fix_stored_m4v(spec['source_path'])
                     url = storage.signed_url(spec['source_path'])
-                    if not url and spec.get('model') in imagegen.MULEROUTER_ENDPOINTS:
+                    if not url and (spec.get('model') in imagegen.MULEROUTER_ENDPOINTS
+                                    or spec.get('model') in imagegen.ANIMATE_SWAP_MODELS):
                         url = _gen_file_link(spec['source_path'])
                     if not url:
                         url = _gen_source_data_uri(spec['source_path'])
