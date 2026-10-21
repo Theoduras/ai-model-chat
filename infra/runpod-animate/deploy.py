@@ -91,7 +91,7 @@ body = {'name': 'wan-animate-worker', 'imageName': IMAGE, 'isServerless': True,
                            'echo "$ANIMATE_HANDLER" | base64 -d > /handler.py; '
                            'echo "$ANIMATE_BOOT" | base64 -d > /boot.py; '
                            'export DEBIAN_FRONTEND=noninteractive TZ=Etc/UTC; apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null; '
-                           'pip install -q runpod; exec python3 -u /boot.py']}
+                           'python3 -m pip install -q runpod; exec python3 -u /boot.py']}
 tpl = find('/templates', 'wan-animate-worker')
 if tpl:
     body.pop('isServerless')
