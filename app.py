@@ -35394,12 +35394,16 @@ def _gen_spec(slug, body, user):
     # the way the model is meant to be driven: no still is made first.
     if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS:
         char = _character_snapshot(slug)
+        # An explicit swap never falls back to her clothed photo: the model copies
+        # the reference's clothes onto the clip, so a dressed photo dresses her.
         order = (('face_front',) if model == imagegen.ANIMATE_FACE_MODEL
-                 else ('nude_front', 'body_front', 'face_front') if level != 'sfw'
+                 else ('nude_front',) if level != 'sfw'
                  else ('body_front', 'face_front'))
         key = next((k for k in order if char and k in (char.get('views') or {})), '')
         if not key:
-            raise imagegen.GenerationError('Pick a character with an approved full-body photo.')
+            raise imagegen.GenerationError(
+                'Approve her nude full-body photo in the character builder first.'
+                if order == ('nude_front',) else 'Pick a character with an approved full-body photo.')
         spec['character'] = char
         spec['character_ref'] = {'path': char['views'][key]['path'], 'mime': char['views'][key]['mime']}
         if model == imagegen.ANIMATE_FACE_MODEL:
