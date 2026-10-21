@@ -36,6 +36,9 @@ export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
 $V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-build-isolation -r /tmp/req.txt requests huggingface_hub hf_transfer
 touch $V/.env-ready
 fi
+# SAM2's compiled hole-filler is built for whichever GPU did the install and dies with
+# "no kernel image" on another; without it SAM2 skips that step on its own.
+find $V/venv/src -path '*sam*' -name '_C*.so' -delete 2>/dev/null || true
 # Pose detection on the GPU; the CPU build pinned every core.
 $V/venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers()" 2>/dev/null || { $V/venv/bin/pip uninstall -y -q onnxruntime; $V/venv/bin/pip install -q onnxruntime-gpu; }
 # Fast weight download; the base image turns it on without installing it.
