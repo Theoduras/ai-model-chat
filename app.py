@@ -40050,7 +40050,7 @@ def _gen_chain_step(job_id, slug, spec, workspace, provider_name, provider_job, 
     _gen_finish(job_id, slug, spec, workspace, ['storage:' + path])
 
 
-def _gen_advance_open(workspace_id=None, job_id=None, limit=12):
+def _gen_advance_open(workspace_id=None, job_id=None, limit=12, one=False):
     """Advance the open jobs a reader is about to look at. On a host with no
     background worker this is what moves a generation along at all: the studio
     polls every few seconds, so the browser drives its own jobs. Scoped to one
@@ -40068,6 +40068,9 @@ def _gen_advance_open(workspace_id=None, job_id=None, limit=12):
         rows = [_gen_row(j) for j in q.order_by(GenerationJob.created_at).limit(limit)]
     finally:
         s.close()
+    if one and rows:
+        # A random one, so a long job at the front never starves the rest.
+        rows = [random.choice(rows)]
     for row in rows:
         _gen_advance(row)
     return len(rows)
@@ -40709,7 +40712,7 @@ def api_generate_advance():
         return blocked
     if GEN_HAS_WORKER:
         return jsonify({'ok': True, 'advanced': 0})
-    n = _gen_advance_open(workspace_id=_workspace_id(_current_user()), limit=1)
+    n = _gen_advance_open(workspace_id=_workspace_id(_current_user()), one=True)
     _gen_purge_finished()
     return jsonify({'ok': True, 'advanced': n})
 
