@@ -29,7 +29,7 @@ if [ ! -f $V/.env-ready ]; then
 rm -rf $V/Wan2.2 $V/venv
 git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
 ${PY:-python3} -m venv --system-site-packages $V/venv
-cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
+{ cat $V/Wan2.2/requirements.txt; echo; cat $V/Wan2.2/requirements_animate.txt; } | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
 export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
 $V/venv/bin/pip install -q -r /tmp/req.txt requests huggingface_hub
 touch $V/.env-ready
