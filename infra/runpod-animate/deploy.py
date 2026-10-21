@@ -37,8 +37,9 @@ $V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-b
 touch $V/.env-ready
 fi
 # SAM2's compiled hole-filler is built for whichever GPU did the install and dies with
-# "no kernel image" on another; without it SAM2 skips that step on its own.
-find $V/venv/src -path '*sam*' -name '_C*.so' -delete 2>/dev/null || true
+# "no kernel image" on another, and this SAM2 calls it unguarded; it only smooths masks.
+M=$(ls $V/venv/src/sam-2/sam2/utils/misc.py 2>/dev/null)
+[ -n "$M" ] && ! grep -q 'return mask  # no-fill' $M && sed -i 's/^def fill_holes_in_mask_scores(mask, max_area):/&\n    return mask  # no-fill/' $M
 # Pose detection on the GPU; the CPU build pinned every core.
 $V/venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers()" 2>/dev/null || { $V/venv/bin/pip uninstall -y -q onnxruntime; $V/venv/bin/pip install -q onnxruntime-gpu; }
 # Fast weight download; the base image turns it on without installing it.
