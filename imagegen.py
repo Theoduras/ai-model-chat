@@ -174,9 +174,9 @@ _H3 = os.getenv('RUNPOD_H3_ENDPOINT', 'fgt7mgn43o4lfg').strip().rstrip('/')
 if _H3:
     RUNPOD_ENDPOINTS['h3-gv'] = _H3 if '/' in _H3 else f'https://api.runpod.ai/v2/{_H3}'
 # Our Wan 2.2 Animate endpoint (infra/runpod-animate): explicit Swap, her still
-# replacing the person in the clip. No default id: hidden until it is deployed.
+# replacing the person in the clip. Set the variable empty to drop it.
 ANIMATE_SWAP_MODEL = 'wan-2-2-animate-gv'
-_ANIM = os.getenv('RUNPOD_ANIMATE_ENDPOINT', '').strip().rstrip('/')
+_ANIM = os.getenv('RUNPOD_ANIMATE_ENDPOINT', 'qfdnou9hy8d3so').strip().rstrip('/')
 if _ANIM:
     RUNPOD_ENDPOINTS[ANIMATE_SWAP_MODEL] = _ANIM if '/' in _ANIM else f'https://api.runpod.ai/v2/{_ANIM}'
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a

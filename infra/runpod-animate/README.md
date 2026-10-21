@@ -5,9 +5,9 @@ a "Swap her in" still on the clip's first frame from her character, then this wo
 replaces the person in the clip with that still (Wan 2.2 Animate, replace mode,
 relighting LoRA), and the clip's sound is copied back.
 
-1. Build and push the image in this folder.
-2. `ANIMATE_IMAGE=... RUNPOD_API_KEY=... python infra/runpod-animate/deploy.py`
-3. Set the printed id as `RUNPOD_ANIMATE_ENDPOINT` on Vercel and Cloud Run.
+`RUNPOD_API_KEY=... python infra/runpod-animate/deploy.py` creates or updates endpoint
+`qfdnou9hy8d3so` (the code default). No image of ours: a stock PyTorch image installs Wan
+2.2 into a venv on the volume on first start.
 
 The first job downloads the weights onto the volume (~75 GB, slow once). Price in
 `credits.py` is a guess (2x `wan-2-2-gv`) until a real run is timed. Not yet run.

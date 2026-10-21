@@ -1,8 +1,9 @@
-# Deploys the wan-2-2-animate-gv endpoint. Build and push the image first:
-#   docker build -t <you>/wan-animate:1 infra/runpod-animate && docker push <you>/wan-animate:1
-#   ANIMATE_IMAGE=<you>/wan-animate:1 RUNPOD_API_KEY=... python infra/runpod-animate/deploy.py
-# Prints the endpoint id: set it as RUNPOD_ANIMATE_ENDPOINT on Vercel and Cloud Run.
-# Re-running is safe: whatever already exists by name is reused.
+# Deploys the wan-2-2-animate-gv endpoint with nothing but RUNPOD_API_KEY:
+#   python infra/runpod-animate/deploy.py
+# No image of our own: a stock PyTorch image runs SETUP, which installs Wan 2.2
+# and its deps into a venv on the network volume once; handler.py fetches the
+# weights there on its first job. Re-running is safe: things are reused by name.
+import base64
 import json
 import os
 import sys
@@ -10,12 +11,30 @@ import urllib.error
 import urllib.request
 
 API = 'https://rest.runpod.io/v1'
-KEY = os.environ['RUNPOD_API_KEY']
-IMAGE = os.environ['ANIMATE_IMAGE']
+KEY = os.environ.get('RUNPOD_API_KEY', '')
 UA = {'User-Agent': 'ai-model-chat-deploy/1.0'}
-DC = os.getenv('ANIMATE_DC', 'EU-RO-1')
-# 14B with offload fits 48 GB at 480p; 80 GB is the headroom for 720p.
-GPUS = ['NVIDIA A100 80GB PCIe', 'NVIDIA H100 80GB HBM3', 'NVIDIA RTX 6000 Ada Generation']
+IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2204'
+DC = 'EU-RO-1'
+GPUS = ['NVIDIA RTX PRO 6000 Blackwell Server Edition',
+        'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3']
+SETUP = r'''
+set -e
+V=/runpod-volume/animate
+mkdir -p $V
+apt-get update -qq && apt-get install -y -qq ffmpeg git > /dev/null
+if [ ! -f $V/.env-ready ]; then
+  rm -rf $V/Wan2.2 $V/venv
+  git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
+  python3 -m venv --system-site-packages $V/venv
+  cat $V/Wan2.2/requirements.txt $V/Wan2.2/requirements_animate.txt | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
+  $V/venv/bin/pip install -q -r /tmp/req.txt runpod requests huggingface_hub
+  $V/venv/bin/pip install -q flash-attn --no-build-isolation || true
+  touch $V/.env-ready
+fi
+echo "$ANIMATE_HANDLER" | base64 -d > /handler.py
+cd $V/Wan2.2
+exec $V/venv/bin/python -u /handler.py
+'''
 
 
 def call(method, path, body=None):
@@ -36,12 +55,28 @@ def find(path, name):
 
 
 vol = find('/networkvolumes', 'wan-animate') or call('POST', '/networkvolumes', {
-    'name': 'wan-animate', 'size': 120, 'dataCenterId': DC})
-tpl = find('/templates', 'wan-animate') or call('POST', '/templates', {
-    'name': 'wan-animate', 'imageName': IMAGE, 'isServerless': True,
-    'containerDiskInGb': 40, 'env': {}})
-ep = find('/endpoints', 'wan-animate') or call('POST', '/endpoints', {
-    'name': 'wan-animate', 'templateId': tpl['id'], 'networkVolumeId': vol['id'],
-    'dataCenterIds': [DC], 'gpuTypeIds': GPUS, 'workersMin': 0, 'workersMax': 2,
-    'idleTimeout': 300, 'flashboot': True, 'executionTimeoutMs': 1800000})
-print('RUNPOD_ANIMATE_ENDPOINT =', ep['id'])
+    'name': 'wan-animate', 'size': 150, 'dataCenterId': DC})
+print('volume', vol['id'], flush=True)
+with open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'handler.py'), 'rb') as f:
+    handler = base64.b64encode(f.read()).decode()
+body = {'name': 'wan-animate-worker', 'imageName': IMAGE, 'isServerless': True,
+        'containerDiskInGb': 40,
+        'env': {'ANIMATE_HANDLER': handler, 'ANIMATE_SETUP': base64.b64encode(SETUP.encode()).decode(),
+                'HF_HOME': '/runpod-volume/animate/hf'},
+        'dockerStartCmd': ['bash', '-c', 'echo "$ANIMATE_SETUP" | base64 -d > /setup.sh && exec bash /setup.sh']}
+tpl = find('/templates', 'wan-animate-worker')
+if tpl:
+    body.pop('isServerless')
+    tpl = call('PATCH', f'/templates/{tpl["id"]}', body)
+else:
+    tpl = call('POST', '/templates', body)
+print('template', tpl['id'], flush=True)
+# The first job installs and downloads (~75 GB), so the ceiling is generous.
+settings = {'templateId': tpl['id'], 'networkVolumeId': vol['id'], 'dataCenterIds': [DC],
+            'computeType': 'GPU', 'gpuTypeIds': GPUS, 'gpuCount': 1, 'workersMin': 0,
+            'workersMax': 2, 'idleTimeout': 300, 'flashboot': True,
+            'executionTimeoutMs': 2 * 3600 * 1000}
+ep = find('/endpoints', 'wan-animate')
+ep = call('PATCH', f'/endpoints/{ep["id"]}', {k: v for k, v in settings.items() if k != 'computeType'}) \
+    if ep else call('POST', '/endpoints', dict(settings, name='wan-animate'))
+print('ENDPOINT', ep['id'])

@@ -14,14 +14,16 @@ import tempfile
 import requests
 import runpod
 
-CKPT = '/runpod-volume/Wan2.2-Animate-14B'
+import sys
+
+CKPT = '/runpod-volume/animate/Wan2.2-Animate-14B'
 AREA = {'480p': (832, 480), '720p': (1280, 720)}
 
 
 def ensure_weights():
     if not os.path.exists(os.path.join(CKPT, '.complete')):
-        subprocess.run(['huggingface-cli', 'download', 'Wan-AI/Wan2.2-Animate-14B',
-                        '--local-dir', CKPT], check=True)
+        from huggingface_hub import snapshot_download
+        snapshot_download('Wan-AI/Wan2.2-Animate-14B', local_dir=CKPT)
         open(os.path.join(CKPT, '.complete'), 'w').close()
 
 
@@ -48,14 +50,14 @@ def handler(job):
         fetch(inp['video_url'], clip)
         pre, out = os.path.join(work, 'pre'), os.path.join(work, 'out.mp4')
         w, h = AREA.get(inp.get('resolution') or '720p', AREA['720p'])
-        subprocess.run(['python3', 'wan/modules/animate/preprocess/preprocess_data.py',
+        subprocess.run([sys.executable, 'wan/modules/animate/preprocess/preprocess_data.py',
                         '--ckpt_path', f'{CKPT}/process_checkpoint',
                         '--video_path', clip, '--refer_path', ref, '--save_path', pre,
                         '--resolution_area', str(w), str(h),
                         '--iterations', '3', '--k', '7', '--w_len', '1', '--h_len', '1',
                         '--replace_flag'], check=True)
         seed = inp.get('seed')
-        subprocess.run(['python3', 'generate.py', '--task', 'animate-14B', '--ckpt_dir', CKPT,
+        subprocess.run([sys.executable, 'generate.py', '--task', 'animate-14B', '--ckpt_dir', CKPT,
                         '--src_root_path', pre, '--refert_num', '1', '--replace_flag',
                         '--use_relighting_lora', '--offload_model', 'True',
                         '--convert_model_dtype',
