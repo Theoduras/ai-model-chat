@@ -3032,7 +3032,8 @@ class RunPodProvider(Provider):
             body = {'video_url': spec['source_url'], 'mode': 'replace',
                     'prompt': spec.get('prompt') or build_video_prompt(),
                     'negative_prompt': negative_for(spec), 'width': width, 'height': height,
-                    'fps': 16, 'cfg': 1.0, 'steps': 6,
+                    # Wan Animate is built for 30fps; 16 played the motion slow.
+                    'fps': 30, 'cfg': 1.0, 'steps': 8,
                     'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)}
             if image.startswith('data:'):
                 body['image_base64'] = image.split(',', 1)[1]

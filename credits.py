@@ -160,7 +160,7 @@ VIDEO_COST_USD_PER_SECOND = {
     # A guess (2x wan-2-2-gv) until a real run is timed on the endpoint.
     'wan-2-2-animate-gv': {'480p': 0.05, '720p': 0.075, '1080p': 0.075},
     # A guess until a real run on the hub endpoint is timed.
-    'wan-animate-hub': {'480p': 0.03, '720p': 0.05, '1080p': 0.05},
+    'wan-animate-hub': {'480p': 0.075, '720p': 0.125, '1080p': 0.125},
     # Our H3 endpoint (infra/runpod-h3), priced near MiniMax's own H3 API
     # ($0.08/s at 768p, $0.13/s at 2K). RunPod billed it about $2.80 per GPU
     # hour on its first day, so the real cost per clip second is well below.
