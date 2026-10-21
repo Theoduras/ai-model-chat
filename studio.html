@@ -2934,7 +2934,8 @@ function renderSwapOut() {
   if (sres.dataset.cap !== key) {
     sres.dataset.cap = key;
     sres.innerHTML = allowed.map(r =>
-      opt(r, r, allowed[allowed.length - 1])).join('');
+      opt(r, r, swapModel() === 'wan-2-2-animate-gv' && allowed.includes('480p')
+        ? '480p' : allowed[allowed.length - 1])).join('');
   }
   if (picksBefore(ssecs) || !ssecs.options.length
       || ssecs.dataset.clip !== String(genSwap && genSwap.seconds)) {
