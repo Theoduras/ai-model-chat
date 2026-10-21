@@ -31,7 +31,7 @@ git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
 ${PY:-python3} -m venv --system-site-packages $V/venv
 { cat $V/Wan2.2/requirements.txt; echo; cat $V/Wan2.2/requirements_animate.txt; } | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
 export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
-$V/venv/bin/pip install -q -r /tmp/req.txt requests huggingface_hub
+$V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-build-isolation -r /tmp/req.txt requests huggingface_hub
 touch $V/.env-ready
 fi
 # A prebuilt flash-attn for this torch and Python; compiling one takes an hour.
