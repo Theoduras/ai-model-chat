@@ -43,7 +43,7 @@ if [ ! -f $V/.fa-ready ]; then
 fi
 '''
 BOOT = r'''
-import json, os, subprocess, tempfile, runpod
+import json, os, subprocess, tempfile, threading, time, urllib.request, runpod
 V = '/runpod-volume/animate'
 def tail(r): return ((r.stdout or '') + (r.stderr or ''))[-4000:]
 def handler(job):
@@ -51,6 +51,32 @@ def handler(job):
         r = subprocess.run(['bash', '/setup.sh'], capture_output=True, text=True)
         if not os.path.exists(V + '/.env-ready'):
             return {'error': 'setup failed: ' + tail(r)}
+    stop = threading.Event()
+    threading.Thread(target=progress, args=(job, stop), daemon=True).start()
+    try:
+        return run(job)
+    finally:
+        stop.set()
+def size(path):
+    return sum(os.path.getsize(os.path.join(r, f)) for r, _, fs in os.walk(path) for f in fs
+               if os.path.exists(os.path.join(r, f)))
+def progress(job, stop):
+    # Weight download progress, readable from the job's status while it runs.
+    try:
+        info = json.load(urllib.request.urlopen(
+            'https://huggingface.co/api/models/Wan-AI/Wan2.2-Animate-14B?blobs=true', timeout=30))
+        total = sum(x.get('size') or 0 for x in info.get('siblings', []))
+    except Exception:
+        total = 0
+    ckpt, last, t = V + '/Wan2.2-Animate-14B', None, time.time()
+    while total and not stop.wait(20):
+        have = size(ckpt)
+        if last is not None:
+            mbs = (have - last) / (time.time() - t) / 1e6
+            runpod.serverless.progress_update(job, f'download {min(100, have * 100 // total)}% '
+                                                   f'({have / 1e9:.1f}/{total / 1e9:.1f} GB) {mbs:.0f} MB/s')
+        last, t = have, time.time()
+def run(job):
     d = tempfile.mkdtemp()
     src, out = d + '/in.json', d + '/out.json'
     with open(src, 'w') as f: json.dump(job['input'], f)
