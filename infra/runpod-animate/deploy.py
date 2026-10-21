@@ -34,6 +34,8 @@ export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
 $V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-build-isolation -r /tmp/req.txt requests huggingface_hub
 touch $V/.env-ready
 fi
+# Fast weight download; the base image turns it on without installing it.
+$V/venv/bin/python -c "import hf_transfer" 2>/dev/null || $V/venv/bin/pip install -q hf_transfer
 # A prebuilt flash-attn for this torch and Python; compiling one takes an hour.
 if [ ! -f $V/.fa-ready ]; then
   set -- $($V/venv/bin/python -c "import sys, torch; print(f'cp{sys.version_info[0]}{sys.version_info[1]}', str(torch._C._GLIBCXX_USE_CXX11_ABI).upper())")
@@ -45,7 +47,7 @@ import json, os, subprocess, tempfile, runpod
 V = '/runpod-volume/animate'
 def tail(r): return ((r.stdout or '') + (r.stderr or ''))[-4000:]
 def handler(job):
-    if not (os.path.exists(V + '/.env-ready') and os.path.exists(V + '/.fa-ready')):
+    if True:
         r = subprocess.run(['bash', '/setup.sh'], capture_output=True, text=True)
         if not os.path.exists(V + '/.env-ready'):
             return {'error': 'setup failed: ' + tail(r)}
