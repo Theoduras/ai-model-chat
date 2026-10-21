@@ -179,6 +179,13 @@ ANIMATE_SWAP_MODEL = 'wan-2-2-animate-gv'
 _ANIM = os.getenv('RUNPOD_ANIMATE_ENDPOINT', 'qfdnou9hy8d3so').strip().rstrip('/')
 if _ANIM:
     RUNPOD_ENDPOINTS[ANIMATE_SWAP_MODEL] = _ANIM if '/' in _ANIM else f'https://api.runpod.ai/v2/{_ANIM}'
+# The hub's Wan Animate worker (wlsdml1114/Wan_Animate_Runpod_hub): ComfyUI, a
+# distilled 4-6 step sampler on 24-32 GB cards. Same job, much faster.
+ANIMATE_HUB_MODEL = 'wan-animate-hub'
+_ANIM_HUB = os.getenv('RUNPOD_ANIMATE_HUB_ENDPOINT', '').strip().rstrip('/')
+if _ANIM_HUB:
+    RUNPOD_ENDPOINTS[ANIMATE_HUB_MODEL] = _ANIM_HUB if '/' in _ANIM_HUB else f'https://api.runpod.ai/v2/{_ANIM_HUB}'
+ANIMATE_SWAP_MODELS = (ANIMATE_SWAP_MODEL, ANIMATE_HUB_MODEL)
 # Our character-LoRA endpoint (infra/runpod-lora): trains a Wan 2.2 LoRA on a
 # character's approved photos, and makes stills from the same base with it.
 CHAR_LORA_IMAGE_MODEL = 'wan-2-2-char'
@@ -298,7 +305,7 @@ VIDEO_JOBS = {
     # H3 takes no video: its swap starts from the clip's first frame and is
     # then redrawn as her by the lock, keeping H3's sound.
     'swap': {'models': ('kling-3-0-mc',)
-                       + ((ANIMATE_SWAP_MODEL,) if ANIMATE_SWAP_MODEL in RUNPOD_ENDPOINTS else ())
+                       + tuple(m for m in ANIMATE_SWAP_MODELS if m in RUNPOD_ENDPOINTS)
                        + (CHAR_LORA_VIDEO_MODEL, 'h3-gv', 'ml-face-swap',
                         'kling-3-0-omni') + MULEROUTER_MODELS,
              'needs': ('source', 'refs'), 'kind': 'swap', 'ratings': ('sfw', 'nsfw'),
@@ -309,7 +316,7 @@ VIDEO_JOBS = {
     'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
                           + (tuple(m for m in RUNPOD_MODELS
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL,
-                                                HIDDEN_VIDEO_MODEL, ANIMATE_SWAP_MODEL))
+                                                HIDDEN_VIDEO_MODEL) + ANIMATE_SWAP_MODELS)
                              if RUNPOD_API_KEY or VAST_MODELS else ('wan-2-7',))
                           + MULEROUTER_MODELS + SPICY_MODELS,
                 'needs': ('first_frame',),
@@ -479,6 +486,7 @@ MODEL_RESOLUTION_VALUES = {
     'h3-gv': (('480p', '480p'), ('720p', '720p')),
     'wan-2-2-char-video': (('480p', '480p'), ('720p', '720p'), ('1080p', '720p')),
     'wan-2-2-animate-gv': (('480p', '480p'), ('720p', '720p')),
+    'wan-animate-hub': (('480p', '480p'), ('720p', '720p')),
     # 1080p is its lowest rung and the cheapest; nothing asks it for more.
     MULEROUTER_MODEL: (('1080p', '1080p'), ('2k', '2k'), ('4k', '4k')),
     'mr-wan-3-0': (('480p', '480p'), ('720p', '720p'), ('1080p', '1080p')),
@@ -677,6 +685,7 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5,),
     'wan-2-2-animate-gv': (5, 8, 10),
+    'wan-animate-hub': (5, 8, 10),
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
@@ -725,6 +734,7 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5, 5),
     'wan-2-2-animate-gv': (5, 10),
+    'wan-animate-hub': (5, 10),
     'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
@@ -2939,6 +2949,12 @@ class RunPodProvider(Provider):
                 # generate_video hands the clip back inline as base64.
                 url = 'data:video/mp4;base64,' + out['video']
             if not url and isinstance(out, dict):
+                # The hub's Wan Animate: {node_id: [base64 mp4, ...]}.
+                for v in out.values():
+                    if isinstance(v, list) and v and isinstance(v[0], str) and len(v[0]) > 1000:
+                        url = 'data:video/mp4;base64,' + v[0]
+                        break
+            if not url and isinstance(out, dict):
                 # worker-comfyui: [{'type': 'base64' | 's3_url', 'data': ...}].
                 for f in out.get('images') or ():
                     if f.get('type') == 's3_url':
@@ -2974,6 +2990,20 @@ class RunPodProvider(Provider):
         if not image:
             raise GenerationError('a video needs an approved still as its first frame')
         model = spec.get('model') or 'wan-2-2'
+        if model == ANIMATE_HUB_MODEL:
+            if not spec.get('source_url'):
+                raise GenerationError('the swap needs the uploaded clip')
+            width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
+            body = {'video_url': spec['source_url'], 'mode': 'replace',
+                    'prompt': spec.get('prompt') or build_video_prompt(),
+                    'negative_prompt': negative_for(spec), 'width': width, 'height': height,
+                    'fps': 16, 'cfg': 1.0, 'steps': 6,
+                    'seed': int(spec['seed']) if spec.get('seed') is not None else random.randint(0, 2**31 - 1)}
+            if image.startswith('data:'):
+                body['image_base64'] = image.split(',', 1)[1]
+            else:
+                body['image_url'] = image
+            return {'input': body}
         if model == ANIMATE_SWAP_MODEL:
             if not spec.get('source_url'):
                 raise GenerationError('the swap needs the uploaded clip')

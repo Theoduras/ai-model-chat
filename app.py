@@ -35372,7 +35372,7 @@ def _gen_spec(slug, body, user):
             spec['addons'].append('still')
     # Wan Animate takes one identity image: a Swap her in still on the clip's
     # first frame, made from her character first, so she looks like herself.
-    if job == 'swap' and model == imagegen.ANIMATE_SWAP_MODEL:
+    if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS:
         char = _character_snapshot(slug)
         if not char or not _character_urls(char, None, None, face_only=True):
             raise imagegen.GenerationError('Pick a character with an approved face photo.')

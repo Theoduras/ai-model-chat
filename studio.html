@@ -2781,6 +2781,7 @@ function setMoney(tokens) {
 // a real choice. The server accepts only these for a swap, which is why the
 // panel cannot quote a model that will not run.
 const SWAP_NOTES = {
+  'wan-animate-hub': 'Same as Wan 2.2 Animate on a faster, distilled sampler (6 steps).',
   'wan-2-2-animate-gv': 'Her character is swapped into the clip\'s first frame first, then '
     + 'replaces the person through the whole clip. Motion, scene and sound kept.',
   'p-video-replace': 'Keeps your clip exactly as it is — same motion, timing, ' +
@@ -2805,7 +2806,7 @@ function picksBefore(ssecs) {
 
 // The rating picks the swap engine: safe work on Kling motion control, any
 // explicit rating on H3 (her into the first frame, then locked as her).
-const EXPLICIT_SWAPS = ['wan-2-2-animate-gv', 'wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+const EXPLICIT_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub', 'wan-2-2-char-video', 'h3-gv', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
 function swapModel() {
   const picked = (el('gen-smodel') || {}).value;
   if (genRating !== 'sfw' && EXPLICIT_SWAPS.includes(picked)) return picked;
@@ -2914,6 +2915,7 @@ function renderSwapOut() {
     smodel.parentElement.style.display = explicit ? '' : 'none';
     const keep = smodel.value;
     smodel.innerHTML = explicit ? [['wan-2-2-animate-gv', 'Wan 2.2 Animate + character lock'],
+      ['wan-animate-hub', 'Wan Animate Fast + character lock'],
       ['wan-2-2-char-video', 'Wan 2.2 + her LoRA'],
       ['h3-gv', 'H3 + her LoRA (with sound)'],
       ['mr-wan-3-0-pro', 'Wan 3.0 Pro — her photos + your clip'],
@@ -2939,7 +2941,7 @@ function renderSwapOut() {
   if (sres.dataset.cap !== key) {
     sres.dataset.cap = key;
     sres.innerHTML = allowed.map(r =>
-      opt(r, r, swapModel() === 'wan-2-2-animate-gv' && allowed.includes('480p')
+      opt(r, r, ['wan-2-2-animate-gv', 'wan-animate-hub'].includes(swapModel()) && allowed.includes('480p')
         ? '480p' : allowed[allowed.length - 1])).join('');
   }
   if (picksBefore(ssecs) || !ssecs.options.length
