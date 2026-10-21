@@ -36,8 +36,8 @@ touch $V/.env-ready
 fi
 # Fast weight download; the base image turns it on without installing it.
 $V/venv/bin/python -c "import hf_transfer" 2>/dev/null || $V/venv/bin/pip install -q hf_transfer
-# Imported by the animate preprocess but missing from its requirements.
-$V/venv/bin/python -c "import moviepy" 2>/dev/null || $V/venv/bin/pip install -q moviepy
+# Imported by Wan (preprocess, and the s2v module its package loads) but not in its requirements.
+$V/venv/bin/python -c "import moviepy, librosa, soundfile" 2>/dev/null || $V/venv/bin/pip install -q moviepy librosa soundfile
 # A prebuilt flash-attn for this torch and Python; compiling one takes an hour.
 if [ ! -f $V/.fa-ready ]; then
   set -- $($V/venv/bin/python -c "import sys, torch; print(f'cp{sys.version_info[0]}{sys.version_info[1]}', str(torch._C._GLIBCXX_USE_CXX11_ABI).upper())")
