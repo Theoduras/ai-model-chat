@@ -15,8 +15,10 @@ KEY = os.environ.get('RUNPOD_API_KEY', '')
 UA = {'User-Agent': 'ai-model-chat-deploy/1.0'}
 IMAGE = 'runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2204'
 DC = 'EU-RO-1'
+# 80 GB+ only: the model stays on the GPU, nothing is offloaded to the CPU.
 GPUS = ['NVIDIA RTX PRO 6000 Blackwell Server Edition',
-        'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3']
+        'NVIDIA RTX PRO 6000 Blackwell Workstation Edition', 'NVIDIA H100 80GB HBM3',
+        'NVIDIA A100-SXM4-80GB', 'NVIDIA A100 80GB PCIe']
 # The worker takes jobs at once; the first job does the install, because RunPod
 # exits a worker that spends too long starting up.
 SETUP = r'''
@@ -29,11 +31,13 @@ if [ ! -f $V/.env-ready ]; then
 rm -rf $V/Wan2.2 $V/venv
 git clone --depth 1 https://github.com/Wan-Video/Wan2.2.git $V/Wan2.2
 ${PY:-python3} -m venv --system-site-packages $V/venv
-{ cat $V/Wan2.2/requirements.txt; echo; cat $V/Wan2.2/requirements_animate.txt; } | grep -vi -e flash_attn -e '^torch' > /tmp/req.txt
+{ cat $V/Wan2.2/requirements.txt; echo; cat $V/Wan2.2/requirements_animate.txt; } | grep -vi -e flash_attn -e '^torch' -e '^onnxruntime' > /tmp/req.txt
 export TMPDIR=$V/tmp PIP_CACHE_DIR=$V/pipcache SAM2_BUILD_CUDA=0
-$V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-build-isolation -r /tmp/req.txt requests huggingface_hub
+$V/venv/bin/pip install -q setuptools wheel && $V/venv/bin/pip install -q --no-build-isolation -r /tmp/req.txt requests huggingface_hub hf_transfer
 touch $V/.env-ready
 fi
+# Pose detection on the GPU; the CPU build pinned every core.
+$V/venv/bin/python -c "import onnxruntime as o; assert 'CUDAExecutionProvider' in o.get_available_providers()" 2>/dev/null || { $V/venv/bin/pip uninstall -y -q onnxruntime; $V/venv/bin/pip install -q onnxruntime-gpu; }
 # Fast weight download; the base image turns it on without installing it.
 $V/venv/bin/python -c "import hf_transfer" 2>/dev/null || $V/venv/bin/pip install -q hf_transfer
 # Imported by Wan (preprocess, and the s2v module its package loads) but not in its requirements.

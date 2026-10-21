@@ -27,7 +27,12 @@ def ensure_weights():
             # The base image turns fast download on without installing it.
             os.environ['HF_HUB_ENABLE_HF_TRANSFER'] = '0'
         from huggingface_hub import snapshot_download
-        snapshot_download('Wan-AI/Wan2.2-Animate-14B', local_dir=CKPT)
+        # The CLIP .pth already holds xlm-roberta's weights; only its tokenizer is read.
+        snapshot_download('Wan-AI/Wan2.2-Animate-14B', local_dir=CKPT, max_workers=16,
+                          ignore_patterns=['assets/*', 'xlm-roberta-large/onnx/*',
+                                           'xlm-roberta-large/*.bin', 'xlm-roberta-large/*.h5',
+                                           'xlm-roberta-large/*.msgpack',
+                                           'xlm-roberta-large/*.safetensors'])
         open(os.path.join(CKPT, '.complete'), 'w').close()
 
 
@@ -63,7 +68,7 @@ def handler(job):
         seed = inp.get('seed')
         subprocess.run([sys.executable, 'generate.py', '--task', 'animate-14B', '--ckpt_dir', CKPT,
                         '--src_root_path', pre, '--refert_num', '1', '--replace_flag',
-                        '--use_relighting_lora', '--offload_model', 'True',
+                        '--use_relighting_lora', '--offload_model', 'False',
                         '--convert_model_dtype',
                         '--sample_steps', str(int(inp.get('steps') or 20)),
                         '--base_seed', str(int(seed) if seed is not None else random.randint(0, 2**31 - 1)),
