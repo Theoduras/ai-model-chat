@@ -34968,7 +34968,7 @@ def _gen_spec(slug, body, user):
     if job and level != 'sfw' and 'nsfw' not in imagegen.job_ratings(job):
         raise imagegen.GenerationError('That video job is not offered for explicit work.')
     spec = {'kind': kind, 'slug': slug, 'job': job,
-            'story_id': _story_id(body) if job == 'animate' or kind == 'image' else '',
+            'story_id': _story_id(body) if job in ('animate', 'swap') or kind == 'image' else '',
             'reference_media': (body.get('reference_media') or '').strip(),
             'prompt_extra': (body.get('prompt') or '').strip()[
                 :GEN_PROMPT_MAX if kind == 'image' else GEN_VIDEO_PROMPT_MAX],
@@ -35145,6 +35145,29 @@ def _gen_spec(slug, body, user):
         spec['source_id'] = source_id
         spec['source_width'] = src['width']
         spec['source_height'] = src['height']
+        if model in imagegen.ANIMATE_SWAP_MODELS and spec.get('story_id') and body.get('still'):
+            # One 20s part of a long clip, animated with her accepted still.
+            try:
+                segment = max(0, int(body.get('segment') or 0))
+            except (TypeError, ValueError):
+                segment = 0
+            start = segment * imagegen.SEGMENT_SECONDS
+            seconds = min(imagegen.SEGMENT_SECONDS, int(src['seconds'] or 0) - start)
+            if seconds < 1:
+                raise imagegen.GenerationError('The clip has no part left to swap.')
+            still = str(body['still']).strip()
+            if (_media_row(slug, still) or {}).get('kind') not in ('image', None) or not _media_row(slug, still):
+                raise imagegen.GenerationError('Her accepted photo is gone. Make it again.')
+            cut = imagegen.cut_seconds(storage.get(src['path']) or b'', start, seconds)
+            if not cut:
+                raise imagegen.GenerationError('That part of the clip could not be cut.')
+            spec['source_path'] = storage.put(slug, cut, 'video/mp4')
+            spec.update({'segment': segment, 'reference_media': still, 'story_still': still})
+            parent = str(body.get('continue_from') or '').strip()
+            if segment and not _story_spec(_workspace_id(user), slug, spec['story_id'], parent):
+                raise imagegen.GenerationError('The part before is no longer in this storyboard.')
+            if parent:
+                spec.update({'continue_from': parent, 'parent_media': parent})
     elif job == 'text':
         if not spec['prompt_extra'] and not (body.get('motion') or '').strip():
             raise imagegen.GenerationError('Write what she does in the clip.')
@@ -35372,7 +35395,7 @@ def _gen_spec(slug, body, user):
             spec['addons'].append('still')
     # Wan Animate takes one identity image: a Swap her in still on the clip's
     # first frame, made from her character first, so she looks like herself.
-    if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS:
+    if job == 'swap' and model in imagegen.ANIMATE_SWAP_MODELS and not spec.get('story_still'):
         char = _character_snapshot(slug)
         if not char or not _character_urls(char, None, None, face_only=True):
             raise imagegen.GenerationError('Pick a character with an approved face photo.')
@@ -35693,7 +35716,8 @@ def _measure_stored_clip(path):
     return 0, 0, 0
 
 
-VIDEO_SOURCE_MAX_SECONDS = CR.VIDEO_MAX_SECONDS
+# Long clips are cut into 20s parts by the explicit Wan Animate swap.
+VIDEO_SOURCE_MAX_SECONDS = int(os.getenv('VIDEO_SOURCE_MAX_SECONDS', '300'))
 VIDEO_SOURCE_MIMES = {'video/mp4': '.mp4', 'video/quicktime': '.mov'}
 
 
@@ -39432,7 +39456,8 @@ def _gen_face_lock_urls(job_id, slug, spec, workspace, urls):
             finally:
                 s.close()
         # Both are kept so she can pick: the lock is not always the better face.
-        out += [locked, url] if locked else [url]
+        # A storyboard's still is one photo to accept, so it keeps the lock only.
+        out += ([locked] if spec.get('story_id') else [locked, url]) if locked else [url]
     return out
 
 

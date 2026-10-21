@@ -3790,6 +3790,11 @@ async function runVideoJob() {
     // The job runs on exactly the prompt shown, so a write still under way finishes first.
     if (genVAutoTimer) { clearTimeout(genVAutoTimer); genVAutoTimer = null; await autoWriteVideoPrompt(true); }
     else if (genVWritePromise) await genVWritePromise;
+    if (genJob === 'swap' && genRating !== 'sfw' && ANIMATE_SWAPS.includes(swapModel())) {
+      btn.disabled = false;
+      setGenStatus('', null);
+      return startStory('swap');
+    }
     const body = await jobPayload();
     const res = await fetch('/api/generate/job', {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
@@ -4005,11 +4010,19 @@ function storyState(step) {
   if (!storyMedia(step)) return 'gone';
   return step.accepted ? 'accepted' : 'review';
 }
+// An explicit Wan Animate swap runs as a storyboard: her still on the clip's
+// first frame, then the clip in 20s parts, each animated with that still.
+const ANIMATE_SWAPS = ['wan-2-2-animate-gv', 'wan-animate-hub'];
+const SEGMENT_SECONDS = 20;
+function animSwap() { return !!story && story.from === 'swap' && ANIMATE_SWAPS.includes(story.model); }
+function segmentCount() { return Math.max(1, Math.ceil((story.clipSecs || SEGMENT_SECONDS) / SEGMENT_SECONDS)); }
+function segmentSecs(i) { return Math.max(1, Math.min(SEGMENT_SECONDS, Math.round((story.clipSecs || SEGMENT_SECONDS) - i * SEGMENT_SECONDS))); }
 function storyModels() {
   const rates = (genPrices && genPrices.video_rates) || {};
   return STORY_MODELS.filter(m => rates[m]);
 }
 function storyRes() {
+  if (animSwap()) return '480p';
   const rates = ((genPrices && genPrices.video_rates) || {})[story.model] || {};
   return rates['720p'] ? '720p' : Object.keys(rates)[0] || '720p';
 }
@@ -4051,6 +4064,10 @@ function startStory(from) {
     persona: slug(), from: from, rating: genRating, model: models[0], seconds: 5, parts: [], sel: 'still' };
   if (from === 'swap' || from === 'upload') {
     if (!genSwap) return setGenStatus('✗ Upload or pick the clip first', false);
+    if (from === 'swap' && ANIMATE_SWAPS.includes(swapModel())) {
+      base.model = swapModel();
+      base.clipSecs = genSwap.seconds;
+    }
     story = Object.assign(base, { source: genSwap.id, aspect: storyAspect(genSwap.width, genSwap.height), still:
       from === 'upload' ? { media: genSwap.id, url: genSwap.url, kind: 'video', accepted: true } : {} });
     if (from === 'upload') story.sel = 'next';
@@ -4129,8 +4146,8 @@ function storySeconds() {
 function renderStory() {
   if (!story || el('story').hidden) { renderStoryEntry(); return; }
   const sel = el('story-model');
-  sel.innerHTML = storyModels().map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
-  sel.disabled = story.parts.length > 0 || story.from === 'text';
+  sel.innerHTML = (animSwap() ? [story.model] : storyModels()).map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
+  sel.disabled = story.parts.length > 0 || story.from === 'text' || animSwap();
   const upload = story.from === 'upload';
   el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : story.from === 'text' ? 'From your text' : 'From your photo'} · ${storySeconds()}s accepted so far`;
   const tiles = [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
@@ -4296,6 +4313,16 @@ function renderStoryReview() {
     }
     return;
   }
+  if (key === 'next' && animSwap()) {
+    const i = story.parts.length, n = segmentCount();
+    box.innerHTML = i >= n
+      ? `<p class="hint">All ${n} part${n === 1 ? '' : 's'} of your clip are done. Stitch them below into one video.</p>`
+      : `<div class="story-pair">${storyFigure(i ? storyMedia(story.parts[i - 1]) : storyMedia(story.still), i ? `Part ${i}` : 'Her photo')}</div>
+        <p class="hint">Part ${i + 1} of ${n}: seconds ${i * SEGMENT_SECONDS}–${i * SEGMENT_SECONDS + segmentSecs(i)} of your clip, swapped with her accepted photo.</p>
+        <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
+    renderStoryButtons();
+    return;
+  }
   if (key === 'next') {
     const i = story.parts.length;
     box.innerHTML = `<div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i} — part ${i + 1} starts on its last frame` : 'Part 1 starts on this')}</div>
@@ -4330,7 +4357,8 @@ function renderStoryReview() {
 function renderStoryButtons() {
   const btn = el('story-go');
   if (!btn) return;
-  const secs = Number((el('story-secs') || {}).value) || story.seconds;
+  const secs = animSwap() ? segmentSecs(story.sel === 'next' ? story.parts.length : Number(story.sel))
+    : Number((el('story-secs') || {}).value) || story.seconds;
   const price = storyPartPrice(secs);
   const cash = cashFor(price);
   const verb = story.sel === 'next' ? `Make part ${story.parts.length + 1}` : 'Redo with these changes';
@@ -4393,6 +4421,13 @@ async function makeStoryStill() {
 }
 
 function storyPartBody(i) {
+  if (animSwap()) {
+    const body = { persona: story.persona, job: 'swap', model: story.model, rating: story.rating,
+      source: story.source, resolution: '480p', aspect: story.aspect, story: story.id,
+      segment: i, still: storyMedia(story.still).id, seconds: segmentSecs(i), identity: 'character' };
+    if (i) body.continue_from = storyMedia(story.parts[i - 1]).id;
+    return body;
+  }
   const secs = Number((el('story-secs') || {}).value) || story.seconds;
   const prompt = ((el('story-prompt') || {}).value || '').trim();
   const body = { persona: story.persona, job: 'animate', rating: story.rating, model: story.model,
@@ -4414,7 +4449,7 @@ async function makeStoryPart(i) {
   setStoryStatus('Sending…');
   try {
     const body = storyPartBody(i);
-    if (!body.motion && !body.video_prompt) throw new Error('Say what she does in this part');
+    if (!animSwap() && !body.motion && !body.video_prompt) throw new Error('Say what she does in this part');
     const d = await storyPost('/api/generate/job', body);
     story.parts[i] = { job: d.job, motion: body.motion, prompt: body.video_prompt, seconds: body.seconds,
       loras: Object.assign({}, storyTicks) };

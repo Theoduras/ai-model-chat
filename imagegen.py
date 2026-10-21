@@ -684,8 +684,8 @@ MODEL_VIDEO_DURATIONS = {
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5,),
-    'wan-2-2-animate-gv': (5, 8, 10),
-    'wan-animate-hub': (5, 8, 10),
+    'wan-2-2-animate-gv': (5, 10, 15, 20),
+    'wan-animate-hub': (5, 10, 15, 20),
     'h3-gv': (5, 10, 15),
     'wan-2-5': (3, 5, 10),
     'seedance-2-5': (3, 5, 10),
@@ -733,8 +733,8 @@ MODEL_VIDEO_SECONDS = {
     'wan-2-2-lora': (5, 8),
     'wan-2-2-gv': (5, 8),
     'wan-2-2-char-video': (5, 5),
-    'wan-2-2-animate-gv': (5, 10),
-    'wan-animate-hub': (5, 10),
+    'wan-2-2-animate-gv': (1, 20),
+    'wan-animate-hub': (1, 20),
     'h3-gv': (5, 15),
     'wan-2-5': (3, 10),
     'seedance-2-5': (3, 10),
@@ -2137,6 +2137,37 @@ def cut_window(video, start_frame, frames, fps, width, height):
             return b''
 
 
+SEGMENT_SECONDS = 20
+
+
+def cut_seconds(video, start, seconds):
+    """`seconds` of a clip from `start`, sound kept: one part of a long swap.
+    b'' when the cut fails."""
+    if not HAS_FFMPEG:
+        return b''
+    with tempfile.TemporaryDirectory(dir='/tmp') as d:
+        src, out = os.path.join(d, 'in.mp4'), os.path.join(d, 'out.mp4')
+        with open(src, 'wb') as f:
+            f.write(video)
+        try:
+            subprocess.run([FFMPEG, '-y', '-loglevel', 'error', '-ss', str(start), '-i', src,
+                            '-t', str(seconds), '-c:v', 'libx264', '-preset', 'fast', '-crf', '18',
+                            '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-movflags', '+faststart', out],
+                           check=True, timeout=180, capture_output=True)
+            with open(out, 'rb') as f:
+                return f.read()
+        except Exception as e:
+            logging.getLogger(__name__).warning('segment cut failed: %s', str(e)[:200])
+            return b''
+
+
+def match_px(src_w, src_h, rung):
+    """The clip's own shape at this rung's short side, in multiples of 16."""
+    short = int(str(rung).rstrip('p') or 480)
+    w, h = (short, short * src_h / src_w) if src_w <= src_h else (short * src_w / src_h, short)
+    return int(round(w / 16) * 16), int(round(h / 16) * 16)
+
+
 def read_frame(image, wait=150, job=''):
     """What an explicit frame shows, in plain words, from char-caption:
     {caption, job, error}. Still running after `wait` gives the job id to poll
@@ -2993,7 +3024,11 @@ class RunPodProvider(Provider):
         if model == ANIMATE_HUB_MODEL:
             if not spec.get('source_url'):
                 raise GenerationError('the swap needs the uploaded clip')
-            width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
+            if spec.get('source_width') and spec.get('source_height'):
+                width, height = match_px(spec['source_width'], spec['source_height'],
+                                         spec.get('resolution') or '480p')
+            else:
+                width, height = video_px(spec.get('aspect'), spec.get('resolution') or '480p')
             body = {'video_url': spec['source_url'], 'mode': 'replace',
                     'prompt': spec.get('prompt') or build_video_prompt(),
                     'negative_prompt': negative_for(spec), 'width': width, 'height': height,
