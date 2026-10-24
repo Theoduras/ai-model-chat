@@ -23845,7 +23845,8 @@ def _wish_vault_set(persona, wish, fan):
     new ones. Matched on their tags, outfit, location and light, so it is free;
     loose on purpose: one shared word is enough, the closest go first."""
     from db import PersonaMedia
-    words = _wish_words(wish)
+    words = _wish_words(wish) | set(re.findall(r'[a-z]{3,}', _wish_setting(persona, wish)['room']))
+    words -= {'her', 'apartment', 'the'}
     if not words:
         return None
     sent = {m for st in _wish_sets(persona) if fan in st.get('fans', [])
@@ -23874,6 +23875,70 @@ def _wish_vault_set(persona, wish, fan):
     return {'media_ids': [m for _, m in scored[:3]], 'uuids': [], 'vault': True}
 
 
+_WISH_ROOMS = (
+    (('shower',), 'her bathroom, in the shower'),
+    (('bath', 'bathtub', 'bathroom'), 'her bathroom'),
+    (('kitchen', 'counter'), 'her kitchen'),
+    (('couch', 'sofa', 'living'), 'her living room, on the sofa'),
+    (('mirror',), 'her bedroom, in front of a full-length mirror'),
+    (('hotel',), 'a hotel room'),
+    (('car',), 'her parked car'),
+    (('balcony',), 'her balcony'),
+    (('pool', 'poolside'), 'beside a pool'),
+    (('beach',), 'on a beach'),
+    (('gym',), 'a gym'),
+    (('bed', 'bedroom', 'sheets', 'pillow'), 'her bedroom, on the bed'),
+)
+
+
+def _wish_local_hour(persona, wish):
+    """Her hour right now: the Fanvue PPV offset, else her account's timezone."""
+    now = datetime.now(timezone.utc)
+    tz = _fanvue_ppv(persona).get('tz_offset')
+    if tz not in (None, ''):
+        try:
+            return (now + timedelta(hours=float(tz))).hour
+        except (TypeError, ValueError):
+            pass
+    try:
+        from zoneinfo import ZoneInfo
+        from db import User
+        s = _db_session()
+        try:
+            u = s.get(User, (wish.get('owner') or {}).get('id'))
+            name = (u.timezone or '').strip() if u else ''
+        finally:
+            s.close()
+        if name:
+            return now.astimezone(ZoneInfo(name)).hour
+    except Exception:
+        pass
+    return now.hour
+
+
+def _wish_setting(persona, wish):
+    """Where and when the set is shot, once per wish so every photo shares it.
+    Without a room Seedream copies the plain backdrop of her reference views."""
+    if wish.get('setting'):
+        return wish['setting']
+    hour = _wish_local_hour(persona, wish)
+    said = set(re.findall(r'[a-z]+', f"{wish.get('scene', '')} {wish.get('outfit', '')}".lower()))
+    room = next((r for keys, r in _WISH_ROOMS if said & set(keys)), '')
+    if not room:
+        room = 'her living room' if 17 <= hour < 22 else 'her bedroom'
+    light = ('soft morning daylight through the window' if 6 <= hour < 11 else
+             'bright daylight through the window' if 11 <= hour < 16 else
+             'warm golden-hour light through the window' if 16 <= hour < 19 else
+             'warm lamp light, evening' if 19 <= hour < 23 else
+             'dim warm bedside lamp light, night')
+    place = str((_persona_config(persona) or {}).get('location') or '').split(',')[0].strip()
+    if place and room.startswith('her '):
+        base, _, spot = room.partition(', ')
+        room = f'{base} in her apartment in {place}' + (f', {spot}' if spot else '')
+    wish['setting'] = {'room': room[:120], 'light': light}
+    return wish['setting']
+
+
 def _wish_start_photo(persona, wish, trace, first=None):
     """Queue one photo of the set; its job id, or None without the tokens.
     Every photo after the first leads with it as the reference, so outfit,
@@ -23883,6 +23948,11 @@ def _wish_start_photo(persona, wish, trace, first=None):
             'rating': 'explicit' if wish['explicit'] else 'sfw',
             'shot': 'nude' if wish['explicit'] else 'full',
             'prompt': wish['scene'], 'clothing': wish['outfit']}
+    where = _wish_setting(persona, wish)
+    body['location_text'] = where['room']
+    body['prompt'] = (f"{body['prompt']}. A real lived-in room with furniture and personal "
+                      f"details, {where['light']}; not a studio backdrop, not a plain or "
+                      'white background')
     rules = (_fv_wish_cfg(persona).get('rules') or '').strip()
     if rules:
         body['prompt'] = f"{body['prompt']}. Always: {rules}"
