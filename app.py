@@ -21199,7 +21199,7 @@ def fanvue_webhook():
         logger.info('Fanvue webhook %s for an unknown creator %s', kind, creator)
         return jsonify({'ok': True, 'ignored': 'unknown creator'})
 
-    _fv_trace(persona, 'connected', f'webhook {kind}: '
+    _fv_trace(persona, 'debug', f'webhook {kind}: '
                                     f'{json.dumps(ev.get("raw") or ev)[:300]}')
     if kind == 'creator.payment.succeeded' and data.get('source') != 'tip':
         amount = _fv_first(data, 'amount', 'gross', 'total', default=None)

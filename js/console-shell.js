@@ -183,7 +183,7 @@
   }
 
   function renderFeed(d) {
-    var rows = (d.rows || []).slice(-14).reverse();
+    var rows = (d.rows || []).filter(function (r) { return r.stage !== 'debug'; }).slice(-14).reverse();
     var box = document.querySelector('.cn-feed');
     if (!rows.length) {
       box.innerHTML = '<div class="cn-empty">Nothing has happened yet.</div>';
