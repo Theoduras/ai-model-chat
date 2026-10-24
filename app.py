@@ -24306,9 +24306,15 @@ def _fanvue_paged(persona, path, want=None, size=FV_PAGE_SIZE,
     a limit silently returned one default-sized page — which read as a hard cap
     nobody set, on both the chat list and a chat's message history."""
     out, seen = [], set()
+    sep = '&' if '?' in path else '?'
+    cursor = ''
     for page in range(1, max_pages + 1):
+        # The v1 collections page by nextCursor and ignore ?page=, so without
+        # the cursor every chat past the first page was never seen at all.
+        q = f'size={size}&cursor={urllib.parse.quote(cursor)}' if cursor \
+            else f'page={page}&size={size}'
         try:
-            res = _fanvue_call(persona, 'GET', f'{path}?page={page}&size={size}')
+            res = _fanvue_call(persona, 'GET', f'{path}{sep}{q}')
         except Exception as e:
             logger.info('Fanvue %s page %d failed for %s: %s', path, page,
                         persona, str(e)[:200])
@@ -24331,9 +24337,12 @@ def _fanvue_paged(persona, path, want=None, size=FV_PAGE_SIZE,
             break
         if want is not None and len(out) >= want:
             return out[:want]
+        cursor = str(res.get('nextCursor') or '') if isinstance(res, dict) else ''
+        if cursor:
+            continue
         pg = (res.get('pagination') or {}) if isinstance(res, dict) else {}
         more = pg.get('hasMore') if 'hasMore' in pg else len(rows) >= size
-        if not more:
+        if not more or (isinstance(res, dict) and 'nextCursor' in res):
             break
     return out
 
@@ -24373,6 +24382,10 @@ class _Platform:
     # Whether a lightweight, no-paywall link nudge runs instead, when has_ppv
     # is False.
     has_cta = False
+    # The env switch of the always-on loop. A round run where that loop is off
+    # (Vercel) marks each message answered, then loses the paced reply when the
+    # lambda freezes, so the console defers to the loop instead.
+    worker_env = ''
 
     def k(self, name, persona=''):
         return f'{self.prefix}_{name}_{persona}' if persona else f'{self.prefix}_{name}'
@@ -24407,6 +24420,10 @@ class _Platform:
         messages on this platform, never an offer."""
         return ''
 
+    def waiting_min(self, chat):
+        """Minutes the fan's unanswered last message has waited, or None."""
+        return None
+
     def reachable(self, persona):
         """Why an account that *is* connected still cannot be talked to, or ''.
 
@@ -24424,6 +24441,7 @@ class _FanvuePlatform(_Platform):
     fan_prefix = 'fv:'
     has_lists = True
     has_funnels = True
+    worker_env = 'FANVUE_WORKER'
 
     def connected(self, persona):
         return bool(_fanvue_tokens(persona).get('access_token'))
@@ -24442,6 +24460,14 @@ class _FanvuePlatform(_Platform):
 
     def online(self, chat, grace):
         return _fv_chat_online(chat, grace)
+
+    def waiting_min(self, chat):
+        last = chat.get('lastMessage') if isinstance(chat.get('lastMessage'), dict) else {}
+        fan = self.read_chat(chat)[0]
+        if not last or not fan or _fv_sender(last) != fan:
+            return None
+        return _fv_msg_age_minutes(last) or _fv_msg_age_minutes(
+            {'createdAt': chat.get('lastMessageAt') or ''})
 
     def messages(self, persona, fan_id, want):
         return _fanvue_chat_messages(persona, fan_id, want)
@@ -24517,7 +24543,19 @@ def _plat_cta(plat, persona):
 
 def _plat_auto_round(plat, persona):
     with plat.tracing():
-        return _plat_round_body(plat, persona)
+        res = _plat_round_body(plat, persona)
+        _set_setting(plat.k('last_round', persona),
+                     json.dumps({'at': int(time.time()), **res[0]}))
+        if plat is PLAT_FANVUE:
+            _fv_open_spawn(plat, persona)
+        return res
+
+
+def _plat_last_round(plat, persona):
+    try:
+        return json.loads(_get_setting(plat.k('last_round', persona)) or '{}')
+    except Exception:
+        return {}
 
 
 def _plat_round_body(plat, persona):
@@ -24527,6 +24565,9 @@ def _plat_round_body(plat, persona):
     exclude_creators = opts.get('exclude_creators', True)
     online_only = bool(opts.get('online_only'))
     online_grace = max(0, min(int(opts.get('online_grace', 5)), 120))
+    # An offline fan who wrote to her is still answered, just not instantly:
+    # skipping him outright left him unanswered for good once he stayed away.
+    online_wait = max(0, min(int(opts.get('online_wait', 30) or 30), 1440))
     reply_limit = max(1, min(int(opts.get('reply_limit', 10)), 30))
     only = [h.strip().lstrip('@').lower()
             for h in (opts.get('only_handles') or '').split(',') if h.strip()]
@@ -24617,6 +24658,7 @@ def _plat_round_body(plat, persona):
         log.append(f'{len(dropped)} chat(s) dropped — {plat.label} will not accept '
                    f'a message for them: ' + ', '.join(dropped[:5])
                    + (' …' if len(dropped) > 5 else ''))
+    actions['chats'] = len(chats)
     cr = plat.acting_as(persona)
     log.append(f'{len(chats)} chats found' + (f' (acting as @{cr})' if cr else '') + (f'; only={only}' if only else ''))
     for chat in chats:
@@ -24645,7 +24687,9 @@ def _plat_round_body(plat, persona):
             log.append(f'{who}: skipped (in an excluded list)')
             _skip_note(plat, persona, fan_uuid, who, 'in an excluded list')
             continue
-        if online_only and not plat.online(chat, online_grace):
+        waited = plat.waiting_min(chat) if online_only else None
+        if online_only and not plat.online(chat, online_grace) \
+                and not (waited is not None and waited >= online_wait):
             actions['skipped_offline'] += 1
             log.append(f'{who}: skipped (offline)')
             _skip_note(plat, persona, fan_uuid, who, 'offline')
@@ -24953,6 +24997,206 @@ def _plat_round_body(plat, persona):
     return actions, log
 
 
+FV_OPEN_KINDS = ('quiet', 'offline', 'new')
+FV_OPEN_DAILY = 50          # openers per persona per day, button and auto together
+FV_OPEN_QUIET_DAYS = 3      # a chat silent this long counts as old
+FV_OPEN_OFFLINE_HOURS = 24  # an offline fan is only opened on after a day of silence
+FV_OPEN_EVERY = 3600        # the automatic sweep runs at most hourly
+
+
+_fv_opening = set()
+
+
+def _fv_open_spawn(plat, persona):
+    """Openers on their own thread: up to a day's worth of model calls would
+    otherwise hold her reply round, and every fan waiting on it."""
+    with _fanvue_lock_guard:
+        if persona in _fv_opening:
+            return
+        _fv_opening.add(persona)
+
+    def run():
+        try:
+            with app.app_context(), plat.tracing():
+                _fv_open_maybe(plat, persona)
+        except Exception:
+            logger.exception('Fanvue openers failed for %s', persona)
+        finally:
+            with _fanvue_lock_guard:
+                _fv_opening.discard(persona)
+    threading.Thread(target=run, daemon=True).start()
+
+
+def _fv_open_maybe(plat, persona):
+    """Run a queued "message these fans" request, else the hourly automatic sweep.
+
+    Both run here, on the loop's host, because the console is served by Vercel
+    and a paced send started there is frozen with the lambda."""
+    req_key = plat.k('open_request', persona)
+    try:
+        req = json.loads(_get_setting(req_key) or '{}')
+    except Exception:
+        req = {}
+    if req.get('at'):
+        if not _claim_msg(plat, persona, '__open__', f"req{req['at']}", ttl=86400):
+            return 0
+        _set_setting(req_key, '')
+        return _fv_open_round(plat, persona, req.get('kinds') or FV_OPEN_KINDS,
+                              int(req.get('limit') or FV_OPEN_DAILY))
+    opts = _fanvue_auto_settings(persona, plat=plat)
+    if not (opts.get('enabled') and opts.get('auto_open')):
+        return 0
+    slot = str(int(time.time() // FV_OPEN_EVERY))
+    slot_key = plat.k('open_slot', persona)
+    # The claim only stops a second instance; this one would reclaim its own.
+    if _get_setting(slot_key) == slot or \
+            not _claim_msg(plat, persona, '__open__', 'auto' + slot, ttl=FV_OPEN_EVERY * 2):
+        return 0
+    _set_setting(slot_key, slot)
+    return _fv_open_round(plat, persona, opts.get('open_kinds') or FV_OPEN_KINDS,
+                          FV_OPEN_DAILY)
+
+
+def _fv_open_round(plat, persona, kinds, limit):
+    """Start a conversation with fans who are not talking to her: chats quiet for
+    days, fans offline for a day, and subscribers or followers she has never
+    chatted with. One opener per quiet spell; his reply resets it."""
+    now = int(time.time())
+    day = datetime.now(timezone.utc).strftime('%Y-%m-%d')
+    day_key = plat.k('opened_day', persona)
+    try:
+        used = json.loads(_get_setting(day_key) or '{}')
+    except Exception:
+        used = {}
+    sent_today = int(used.get('n') or 0) if used.get('day') == day else 0
+    budget = min(max(0, int(limit)), FV_OPEN_DAILY - sent_today)
+    if budget <= 0:
+        return 0
+    opts = _fanvue_auto_settings(persona, plat=plat)
+    exclude_creators = opts.get('exclude_creators', True)
+    grace = max(0, min(int(opts.get('online_grace', 5)), 120))
+    inc_lists, exc_lists = plat.list_filter(persona, opts)
+    state_key = plat.k('opened', persona)
+    try:
+        opened = json.loads(_get_setting(state_key) or '{}')
+    except Exception:
+        opened = {}
+    scope = plat.scope(persona)
+
+    picks, chatted = [], set()
+    for chat in plat.chats(persona, scope):
+        fan, handle, is_creator, _ = plat.read_chat(chat)
+        if not fan:
+            continue
+        chatted.add(fan)
+        last = chat.get('lastMessage') if isinstance(chat.get('lastMessage'), dict) else {}
+        last_at = _fv_epoch(chat.get('lastMessageAt')) or _fv_epoch(
+            _fv_first(last, 'createdAt', 'sentAt', default=''))
+        # His own unanswered message is the reply round's to answer, and an
+        # opener already sent this spell is the newest thing in the chat.
+        if not last_at or (last and _fv_sender(last) == fan) \
+                or int(opened.get(fan) or 0) >= last_at - 120:
+            continue
+        quiet = now - last_at >= FV_OPEN_QUIET_DAYS * 86400
+        offline = now - last_at >= FV_OPEN_OFFLINE_HOURS * 3600 \
+            and not plat.online(chat, grace)
+        kind = 'quiet' if quiet and 'quiet' in kinds else \
+            'offline' if offline and 'offline' in kinds else ''
+        if not kind or (exclude_creators and is_creator) or fan in exc_lists \
+                or (inc_lists is not None and fan not in inc_lists) \
+                or _fv_is_unsendable(persona, fan, plat=plat):
+            continue
+        picks.append((kind, fan, handle, last_at))
+    picks.sort(key=lambda p: -p[3])
+    if 'new' in kinds and len(picks) < budget:
+        seen = set(chatted)
+        for path in ('subscribers', 'followers'):
+            for u in _fanvue_paged(persona, f'/v1{scope}/{path}',
+                                   want=(budget - len(picks)) * 3):
+                fan = str(_fv_first(u, 'uuid', 'id', default='') or '')
+                if not fan or fan in seen or opened.get(fan) or fan in exc_lists \
+                        or (inc_lists is not None and fan not in inc_lists):
+                    continue
+                seen.add(fan)
+                picks.append(('new', fan, _fv_first(u, 'handle', 'displayName', default=''),
+                              _fv_first(u, 'nickname', 'displayName', default='')))
+
+    hcfg = _fv_humanize_cfg(persona, plat=plat)
+    lim = persona_length_limits(persona)
+    counts = dict.fromkeys(FV_OPEN_KINDS, 0)
+    for kind, fan, handle, extra in picks:
+        if sum(counts.values()) >= budget:
+            break
+        who = handle or fan[:8]
+        fan_key = plat.fan_key(fan)
+        if kind == 'new':
+            try:
+                _fanvue_call(persona, 'POST', f'/v1{scope}/chats', body={'userUuid': fan})
+            except Exception as e:
+                # 409-style "already exists" still leaves a chat to write into.
+                if getattr(e, 'code', 0) not in (400, 409):
+                    _fv_trace(persona, 'opener', f'{who}: could not start a chat — '
+                              f'{_fv_error_text(e)[:120]}', fan=fan_key)
+                    continue
+            instr = ("This fan subscribed to or follows you, but you have never chatted. "
+                     "Send ONE short, warm first message to start a conversation, like a "
+                     "real person — " + (f"you can call him {extra}, " if extra else '')
+                     + "ask one easy question about him. No selling, no links, no content "
+                     "offers. ")
+            hist = []
+        else:
+            days = max(1, (now - int(extra)) // 86400)
+            instr = (f"You and this fan have not talked for {days} day(s). Open the chat "
+                     "again with ONE short, natural message, like a real person texting "
+                     "someone she remembers — pick up something from earlier if it fits. "
+                     "Low-pressure, NOT needy, no selling, no links. Do NOT repeat "
+                     "anything you said before. ")
+            hist = [{'role': 'model' if d == 'out' else 'user', 'content': t}
+                    for (d, t) in _fanvue_saved_history(persona, fan_key, limit=10)]
+        instr = (_fan_memory_block(_fan_memory(persona, fan_key), persona) + instr
+                 + lim['note'] + ' ' + NO_PLACEHOLDER_RULE)
+        text = _strip_placeholders(
+            _fv_trim(_persona_text(persona, instr, history=hist,
+                                   max_tokens=lim['tokens'], temperature=0.95),
+                     max_sentences=lim['sentences'], hard_cap=lim['cap']))
+        if not text:
+            continue
+        opened[fan] = now
+        _set_setting(state_key, json.dumps(opened))
+        counts[kind] += 1
+        _set_setting(day_key, json.dumps({'day': day, 'n': sent_today + sum(counts.values())}))
+        _fv_trace(persona, 'opener', f'{who} ({kind}) — opening the chat: {text[:60]}',
+                  fan=fan_key)
+        if hcfg['humanize']:
+            _fv_submit(persona, persona, scope, fan, fan_key, handle, text, '', hcfg,
+                       None, False, plat=plat)
+        else:
+            _fv_deliver(persona, scope, fan, fan_key, handle, text, '', hcfg, None,
+                        False, plat=plat)
+    total = sum(counts.values())
+    if total:
+        _fv_trace(persona, 'opener', 'Opened %d chat(s): %s' % (total, ', '.join(
+            f'{n} {k}' for k, n in counts.items() if n)))
+    return total
+
+
+@app.route('/api/fanvue/open-chats', methods=['POST'])
+@platform_scoped
+def api_fanvue_open_chats():
+    """Queue openers for the loop's host to send on its next round."""
+    data = request.json or {}
+    persona = (data.get('persona') or '').strip()
+    if not persona or not PLAT_FANVUE.connected(persona):
+        return jsonify({'ok': False, 'error': 'Fanvue not connected for this persona.'}), 400
+    kinds = [k for k in FV_OPEN_KINDS if k in (data.get('kinds') or [])]
+    if not kinds:
+        return jsonify({'ok': False, 'error': 'Pick at least one group of fans.'}), 400
+    limit = max(1, min(int(data.get('limit') or FV_OPEN_DAILY), FV_OPEN_DAILY))
+    _set_setting(PLAT_FANVUE.k('open_request', persona),
+                 json.dumps({'at': int(time.time()), 'kinds': kinds, 'limit': limit}))
+    return jsonify({'ok': True})
+
+
 @app.route('/api/fanvue/auto', methods=['GET', 'POST'])
 @platform_scoped
 def api_fanvue_auto():
@@ -24977,6 +25221,10 @@ def _plat_auto_api(plat):
             opts['online_only'] = bool(data['online_only'])
         if 'online_grace' in data:
             opts['online_grace'] = max(0, min(int(data['online_grace'] or 5), 120))
+        if 'auto_open' in data:
+            opts['auto_open'] = bool(data['auto_open'])
+        if 'open_kinds' in data:
+            opts['open_kinds'] = [k for k in FV_OPEN_KINDS if k in (data['open_kinds'] or [])]
         if 'humanize' in data:
             opts['humanize'] = bool(data['humanize'])
         if 'typing_speed' in data:
@@ -25026,6 +25274,8 @@ def _plat_auto_api(plat):
                     'only_handles': opts.get('only_handles', ''),
                     'online_only': bool(opts.get('online_only')),
                     'online_grace': opts.get('online_grace', 5),
+                    'auto_open': bool(opts.get('auto_open')),
+                    'open_kinds': opts.get('open_kinds', list(FV_OPEN_KINDS)),
                     'humanize': bool(opts.get('humanize', True)),
                     'typing_speed': max(4, min(int(opts.get('typing_speed') or 14), 40)),
                     'react_rate': max(0, min(int(opts.get('react_rate', 25)), 100)),
@@ -25170,6 +25420,17 @@ def _plat_trace_api(plat):
         problems.append(unreachable)
     elif not opts.get('enabled'):
         problems.append('Auto-reply is off — turn it on for her to answer fans.')
+    elif plat.worker_env and (time.time() - (_plat_last_round(plat, persona).get('at') or 0)) > 600:
+        last_at = _plat_last_round(plat, persona).get('at')
+        problems.append(
+            ('No reply round has run for %d min' % ((time.time() - last_at) // 60)
+             if last_at else 'No reply round has ever run')
+            + ' — the bot host (Cloud Run) is not running her %s loop, so nobody '
+            'is answered. Check that the service is up and %s is not 0.'
+            % (plat.label, plat.worker_env))
+    elif plat.worker_env and not _plat_last_round(plat, persona).get('chats'):
+        problems.append('Her last round found no chats — %s returned an empty chat '
+                        'list. Reconnect the account.' % plat.label)
     elif not rows:
         problems.append('No activity recorded yet. A line appears here as soon '
                         'as a fan writes.')
@@ -25227,6 +25488,7 @@ def _plat_trace_api(plat):
                     'queued': _fv_inflight[0], 'workers': _fv_workers(),
                     'storage_ephemeral': ephemeral,
                     'webhook_ready': bool(hook.get('ready')),
+                    'last_round': _plat_last_round(plat, persona),
                     'problems': problems, 'rows': rows[-FV_TRACE_MAX:]})
 
 
@@ -25270,6 +25532,11 @@ def _plat_auto_run_api(plat):
     if not plat.connected(persona):
         return jsonify({'ok': False,
                         'error': f'{plat.label} not connected for this persona.'}), 400
+    if plat.worker_env and not _worker_enabled(plat.worker_env):
+        last = _plat_last_round(plat, persona)
+        return jsonify({'ok': True, 'deferred': True, 'actions': last,
+                        'ago': int(time.time() - last['at']) if last.get('at') else None,
+                        'log': []})
     try:
         res = _plat_round_now(plat, persona, block=True)
         actions, log = res if res else ({}, [])

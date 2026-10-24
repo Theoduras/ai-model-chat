@@ -276,7 +276,7 @@
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-enabled" style="width:auto"> <b>Auto-reply enabled</b></label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-exclude-creators" checked style="width:auto"> Exclude other creators (only reply to fans)</label>
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-ppv-require-payment" style="width:auto"> Require payment before next PPV tier <span style="color:var(--text-muted)">(off = tiers flow on chatting; use off for testing)</span></label>
-      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-online-only" style="width:auto" onchange="document.getElementById('fv-online-grace-wrap').style.display=this.checked?'':'none'"> Only reply to fans who are online <span style="color:var(--text-muted)">(skip everyone else this round)</span></label>
+      <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-online-only" style="width:auto" onchange="document.getElementById('fv-online-grace-wrap').style.display=this.checked?'':'none'"> Only reply to fans who are online <span style="color:var(--text-muted)">(others are answered after 30 min)</span></label>
     </div>
     <div class="auto-toggles" id="fv-toggles-human" style="display:flex; flex-wrap:wrap; gap:10px 20px; margin-top:10px;">
       <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-humanize" checked style="width:auto" onchange="document.getElementById('fv-typing-wrap').style.display=this.checked?'':'none'"> Type like a human <span style="color:var(--text-muted)">(pause to read, then type at a believable speed instead of replying instantly)</span></label>
@@ -294,6 +294,19 @@
       <div class="field" style="margin:0;">
         <label>React with an emoji <span style="font-weight:400;color:var(--text-muted);">(% of replies — Fanvue has no reaction button, so she sends the emoji as its own message just before she answers. 0 = never)</span></label>
         <input type="number" id="fv-react-rate" min="0" max="100" step="5" value="25" style="max-width:120px;">
+      </div>
+    </div>
+    <div class="field full" style="margin-top:14px;">
+      <label>Start new chats <span style="font-weight:400;color:var(--text-muted);">(she writes first, one personal message each, up to 50 a day. A fan gets one per quiet spell; if he answers, normal replies take over)</span></label>
+      <div class="auto-toggles" style="display:flex; flex-wrap:wrap; gap:10px 20px; margin-top:6px;">
+        <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-open-quiet" checked style="width:auto"> Chats quiet for 3+ days</label>
+        <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-open-offline" checked style="width:auto"> Offline fans, quiet for a day</label>
+        <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-open-new" checked style="width:auto"> Subscribers &amp; followers she never chatted with</label>
+      </div>
+      <div style="display:flex; flex-wrap:wrap; align-items:center; gap:10px 20px; margin-top:8px;">
+        <label class="soon" style="display:flex;align-items:center;gap:8px;cursor:pointer;background:none;color:var(--text-2);font-size:.85rem;padding:0"><input type="checkbox" id="fv-auto-open" style="width:auto"> Do this automatically every hour</label>
+        <button type="button" class="btn-ai" onclick="openChats()">Message these fans now</button>
+        <span id="fv-open-result"></span>
       </div>
     </div>
     <div class="field full" id="fv-online-grace-wrap" style="margin-top:12px;display:none;">
@@ -1129,6 +1142,9 @@ async function loadAuto(){
   document.getElementById('fv-online-only').checked=!!a.online_only;
   document.getElementById('fv-online-grace').value=(a.online_grace!==undefined?a.online_grace:5);
   document.getElementById('fv-online-grace-wrap').style.display=a.online_only?'':'none';
+  document.getElementById('fv-auto-open').checked=!!a.auto_open;
+  const kinds=a.open_kinds||['quiet','offline','new'];
+  ['quiet','offline','new'].forEach(k=>{document.getElementById('fv-open-'+k).checked=kinds.includes(k);});
   document.getElementById('fv-humanize').checked=a.humanize!==false;
   document.getElementById('fv-typing-speed').value=String(a.typing_speed||14);
   document.getElementById('fv-react-rate').value=(a.react_rate!==undefined?a.react_rate:25);
@@ -1194,6 +1210,8 @@ async function saveAuto(){
     only_handles:document.getElementById('fv-only-handles').value,
     online_only:document.getElementById('fv-online-only').checked,
     online_grace:parseInt(document.getElementById('fv-online-grace').value||'5',10),
+    auto_open:document.getElementById('fv-auto-open').checked,
+    open_kinds:openKinds(),
     humanize:document.getElementById('fv-humanize').checked,
     typing_speed:parseInt(document.getElementById('fv-typing-speed').value||'14',10),
     react_rate:parseInt(document.getElementById('fv-react-rate').value||'0',10),
@@ -1215,8 +1233,7 @@ async function saveAuto(){
     busy(box,'Running first round…');
     const run=await post('/api/fanvue/auto-run',{persona:persona()});
     if(!run.ok){err(box,run.error);return;}
-    const a=run.actions||{};
-    box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+(a.replies||0)+' replies. See the activity log for the detail.</span>';
+    box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Saved &amp; running — '+roundText(run)+'</span>';
   } else {
     box.innerHTML='<span class="hint">Auto-reply is off.</span>';
   }
@@ -1240,8 +1257,22 @@ async function runAutoOnce(){
   busy(box,'Running one round…');
   const data=await post('/api/fanvue/auto-run',{persona:persona()});
   if(!data.ok){err(box,data.error);return;}
-  const a=data.actions||{};
-  box.innerHTML='<span class="hint">'+(a.replies||0)+' replies, '+(a.skipped_creators||0)+' creators skipped. See the activity log for the detail.</span>';
+  box.innerHTML='<span class="hint">'+roundText(data)+'</span>';
+}
+function roundText(d){
+  const a=d.actions||{};
+  const n=(a.chats!==undefined?a.chats+' chats, ':'')+(a.replies||0)+' replies, '+(a.skipped_offline||0)+' offline skipped';
+  if(!d.deferred)return n+'. See the activity log for the detail.';
+  if(d.ago===null||d.ago===undefined)return 'the bot host has not run a round yet — nobody is being answered. See the problems above.';
+  return 'the bot host runs her rounds; last one '+Math.round(d.ago/60)+' min ago: '+n+'.';
+}
+function openKinds(){return ['quiet','offline','new'].filter(k=>document.getElementById('fv-open-'+k).checked);}
+async function openChats(){
+  const box=document.getElementById('fv-open-result');
+  busy(box,'Queuing…');
+  const d=await post('/api/fanvue/open-chats',{persona:persona(),kinds:openKinds()});
+  if(!d.ok){err(box,d.error||'Failed');return;}
+  box.innerHTML='<span class="hint" style="color:#4ade80;">✓ Queued — the bot starts them on its next round. Each shows in the activity log.</span>';
 }
 function updateConn(){
   const pill=document.getElementById('conn-pill');
