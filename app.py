@@ -25603,7 +25603,7 @@ def _plat_auto_run_api(plat):
             _fv_tick_lease(plat, persona, release=True)
 
 
-FV_TICK_BUDGET = 45   # seconds of work per tick; Vercel cuts a request at 60
+FV_TICK_BUDGET = 25   # seconds of work per tick; the pinger gives up at 30
 
 
 def _fv_tick_lease(plat, persona, release=False):
