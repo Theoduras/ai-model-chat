@@ -1570,7 +1570,7 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                  expression='', smudges=False, location='', zoom='',
                  location_ref='', location_text='', scene_text='',
                  angle='', pose='', gaze='', hair='', makeup='', skin='', lens='', grade='',
-                 props=''):
+                 props='', place_has_person=False):
     """The positive prompt for one generation, written the way a creator
     would brief her own post: what it is for, who, the shot, what she wears,
     what she is doing, the phone and the light, how real it looks.
@@ -1637,6 +1637,13 @@ def build_prompt(appearance, shot, outfit=None, has_reference=False, extra='',
                   'reference image — the same room, layout, furniture and light; the '
                   'setting must clearly match it, with nobody else in it'
                   if location_ref else ''),
+        # A vault photo of her is a room with her in it: take the room only.
+        _sentence('Only the room comes from that image: ignore the person in it — her pose, '
+                  'outfit, hair and framing are not copied' if location_ref and place_has_person
+                  else ''),
+        _sentence('She is physically in that room at the correct scale and perspective, resting '
+                  'on the furniture with real contact shadows, the camera at a natural height '
+                  'for the space' if location_ref else ''),
         _sentence(matched),
         (MAKEUP_FROM_REFERENCE if has_reference and shot == 'closeup'
          and not option_text(MAKEUPS, makeup) else ''),

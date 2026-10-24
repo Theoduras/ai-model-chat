@@ -23916,6 +23916,42 @@ def _wish_local_hour(persona, wish):
     return now.hour
 
 
+_ROOM_WORDS = {'bed', 'bedroom', 'sheets', 'pillow', 'couch', 'sofa', 'living', 'kitchen',
+               'bathroom', 'shower', 'bath', 'bathtub', 'mirror', 'hotel', 'balcony', 'room',
+               'apartment', 'window', 'desk', 'chair', 'armchair', 'closet', 'vanity'}
+
+
+def _wish_room_photo(persona, wish, room):
+    """The vault photo whose room the set is shot in: her own uploads first,
+    since what she generated may itself be on a plain backdrop; a generated
+    photo only when its tags name a room. Safe-work wishes only see safe-work
+    photos."""
+    from db import PersonaMedia
+    want = set(re.findall(r'[a-z]{3,}', room.lower())) & _ROOM_WORDS
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    s = _db_session()
+    try:
+        rows = s.query(PersonaMedia.id, PersonaMedia.tags, PersonaMedia.source,
+                       PersonaMedia.rating, PersonaMedia.expires_at).filter(
+            PersonaMedia.slug == persona, PersonaMedia.kind == 'image',
+            PersonaMedia.approved.is_(True), PersonaMedia.no_dms.isnot(True)
+        ).order_by(PersonaMedia.created_at.desc()).limit(400).all()
+    finally:
+        s.close()
+    best, best_key = '', None
+    for mid, tags, source, rating, expires in rows:
+        if (expires and expires < now) or (not wish['explicit'] and (rating or '') == 'nsfw'):
+            continue
+        words = set(re.findall(r'[a-z]+', (tags or '').lower()))
+        rooms = words & _ROOM_WORDS
+        if source != 'upload' and not rooms:
+            continue
+        key = (len(rooms & want), bool(rooms), source == 'upload')
+        if best_key is None or key > best_key:
+            best, best_key = mid, key
+    return best
+
+
 def _wish_setting(persona, wish):
     """Where and when the set is shot, once per wish so every photo shares it.
     Without a room Seedream copies the plain backdrop of her reference views."""
@@ -23935,7 +23971,8 @@ def _wish_setting(persona, wish):
     if place and room.startswith('her '):
         base, _, spot = room.partition(', ')
         room = f'{base} in her apartment in {place}' + (f', {spot}' if spot else '')
-    wish['setting'] = {'room': room[:120], 'light': light}
+    wish['setting'] = {'room': room[:120], 'light': light,
+                       'photo': _wish_room_photo(persona, wish, room)}
     return wish['setting']
 
 
@@ -23950,9 +23987,12 @@ def _wish_start_photo(persona, wish, trace, first=None):
             'prompt': wish['scene'], 'clothing': wish['outfit']}
     where = _wish_setting(persona, wish)
     body['location_text'] = where['room']
+    if where.get('photo'):
+        body['place_media'] = where['photo']
+    # A room photo brings its own light, and she is lit to match it.
+    light = '' if where.get('photo') else f", {where['light']}"
     body['prompt'] = (f"{body['prompt']}. A real lived-in room with furniture and personal "
-                      f"details, {where['light']}; not a studio backdrop, not a plain or "
-                      'white background')
+                      f"details{light}; not a studio backdrop, not a plain or white background")
     rules = (_fv_wish_cfg(persona).get('rules') or '').strip()
     if rules:
         body['prompt'] = f"{body['prompt']}. Always: {rules}"
@@ -35817,6 +35857,7 @@ def _gen_spec(slug, body, user):
                         if kind != 'image' else '',
         'location_ref': (_studio_location(slug, body.get('location_ref'))
                          and str(body['location_ref'])),
+        'place_media': _vault_place(slug, body.get('place_media')) and str(body['place_media']),
         'zoom': (body.get('zoom') or '').strip().lower(),
         'props': re.sub(r'\s+', ' ', str(body.get('props') or '')).strip()[:80],
     })
@@ -37675,7 +37716,8 @@ def _gen_image_prompt(slug, spec, has_reference):
         hair=spec.get('hair', ''), makeup=spec.get('makeup', ''), skin=spec.get('skin', ''),
         lens=spec.get('lens', ''), grade=spec.get('grade', ''), props=spec.get('props', ''),
         location_ref=(('second-to-last' if spec.get('outfit_ref') else 'last')
-                      if spec.get('location_ref') else ''),
+                      if spec.get('location_ref') or spec.get('place_media') else ''),
+        place_has_person=bool(spec.get('place_media')) and not spec.get('location_ref'),
         location_text=spec.get('location_text', ''), scene_text=spec.get('scene_text', ''),
         banned=banned, age=age)
 
@@ -39976,7 +40018,8 @@ def _gen_start(job_id, slug, spec, workspace):
                 refs = refs[:imagegen.MAX_REFERENCES]
                 outfit = _studio_outfit(slug, spec.get('outfit_ref'))
                 outfit_url = outfit and _char_path_url(outfit.gcs_path, outfit.mime)
-                place = _studio_location(slug, spec.get('location_ref'))
+                place = (_studio_location(slug, spec.get('location_ref'))
+                         or _vault_place(slug, spec.get('place_media')))
                 place_url = place and _char_path_url(place.gcs_path, place.mime)
                 # The prompt names them by position: the place is the last
                 # reference (second-to-last beside an outfit) and the outfit is
@@ -41715,6 +41758,22 @@ def _studio_outfit(slug, outfit_id):
 
 def _studio_location(slug, location_id):
     return _studio_photo('locations', slug, location_id)
+
+
+def _vault_place(slug, media_id):
+    """An approved vault photo of this persona used as the room of a still."""
+    if not media_id:
+        return None
+    from db import get_persona_media
+    s = _db_session()
+    try:
+        row = get_persona_media(s, str(media_id))
+        if row is None or row.slug != slug or not row.approved or row.kind != 'image':
+            return None
+        s.expunge(row)
+        return row
+    finally:
+        s.close()
 
 
 def _studio_outfit_slug(slug):
