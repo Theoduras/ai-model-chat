@@ -2634,6 +2634,8 @@ _OPEN_PATHS = (
                # browser. It carries its own proof (CRON_SECRET) and has no
                # session to offer, so a sign-in check would only ever 401 it.
                '/api/generate/tick',
+               # Fanvue's reply round on Vercel, called by the minute pinger.
+               '/api/fanvue/tick',
                # The weekly niche re-rank, same scheduler and same proof.
                '/api/niche/refresh',
                # Vast workers fetch the LoRA links to preload at boot, by VAST_LORA_KEY.
@@ -24424,6 +24426,10 @@ class _Platform:
         """Minutes the fan's unanswered last message has waited, or None."""
         return None
 
+    def quiet_min(self, chat):
+        """Minutes since the last message either way, or None when unknown."""
+        return None
+
     def reachable(self, persona):
         """Why an account that *is* connected still cannot be talked to, or ''.
 
@@ -24468,6 +24474,11 @@ class _FanvuePlatform(_Platform):
             return None
         return _fv_msg_age_minutes(last) or _fv_msg_age_minutes(
             {'createdAt': chat.get('lastMessageAt') or ''})
+
+    def quiet_min(self, chat):
+        last = chat.get('lastMessage') if isinstance(chat.get('lastMessage'), dict) else {}
+        return _fv_msg_age_minutes({'createdAt': chat.get('lastMessageAt') or ''}) \
+            or (_fv_msg_age_minutes(last) if last else None)
 
     def messages(self, persona, fan_id, want):
         return _fanvue_chat_messages(persona, fan_id, want)
@@ -24541,13 +24552,16 @@ def _plat_cta(plat, persona):
         return {}
 
 
-def _plat_auto_round(plat, persona):
+def _plat_auto_round(plat, persona, deadline=None):
     with plat.tracing():
-        res = _plat_round_body(plat, persona)
+        res = _plat_round_body(plat, persona, deadline=deadline)
         _set_setting(plat.k('last_round', persona),
                      json.dumps({'at': int(time.time()), **res[0]}))
         if plat is PLAT_FANVUE:
-            _fv_open_spawn(plat, persona)
+            if deadline is None:
+                _fv_open_spawn(plat, persona)
+            elif time.time() < deadline:
+                _fv_open_maybe(plat, persona, deadline=deadline)
         return res
 
 
@@ -24558,9 +24572,14 @@ def _plat_last_round(plat, persona):
         return {}
 
 
-def _plat_round_body(plat, persona):
+def _plat_round_body(plat, persona, deadline=None):
     """One live auto-reply round on one platform: reply in-persona to new fan
-    messages, skipping other creators when configured. Returns (actions, log)."""
+    messages, skipping other creators when configured. Returns (actions, log).
+
+    With a deadline the round runs inside a request (Vercel, driven by the
+    minute tick): it sends without pacing, since a paced send on a thread is
+    frozen with the lambda, reads only the chats that need an answer, and
+    leaves whatever the deadline cuts off to the next tick."""
     opts = _fanvue_auto_settings(persona, plat=plat)
     exclude_creators = opts.get('exclude_creators', True)
     online_only = bool(opts.get('online_only'))
@@ -24600,6 +24619,8 @@ def _plat_round_body(plat, persona):
             not in ('1', 'true', 'yes'):
         ppv_test_phrase = ''
     hcfg = _fv_humanize_cfg(persona, plat=plat)
+    if deadline is not None:
+        hcfg = {**hcfg, 'humanize': False}
     # The funnel system is per-persona and off by default; when it is off, fcfg
     # is None and not one line of it runs. It is Fanvue-only for now — the
     # ledger it reasons from is written by Fanvue's own payment webhook.
@@ -24664,6 +24685,9 @@ def _plat_round_body(plat, persona):
     for chat in chats:
         if actions['replies'] >= reply_limit:
             break
+        if deadline is not None and time.time() > deadline:
+            log.append('out of time — the rest go on the next tick')
+            break
         fan_uuid, handle, is_creator, chat_uuid = plat.read_chat(chat)
         if not fan_uuid:
             log.append(f'skip chat: no fan_uuid (keys={list(chat.keys())})')
@@ -24694,6 +24718,15 @@ def _plat_round_body(plat, persona):
             log.append(f'{who}: skipped (offline)')
             _skip_note(plat, persona, fan_uuid, who, 'offline')
             continue
+        if deadline is not None and plat.waiting_min(chat) is None:
+            # Our message is newest: the only work is a follow-up, and the chat
+            # list says when the last message was, so most chats need no read.
+            quiet = plat.quiet_min(chat)
+            fu = followups.get(fan_uuid)
+            sent_n = int(fu.get('n', 0)) if isinstance(fu, dict) else 0
+            if quiet is not None and (sent_n >= FOLLOWUP_MAX
+                                      or quiet < FOLLOWUP_BASE_MIN * (sent_n + 1)):
+                continue
         fan_key = plat.fan_key(fan_uuid)
         try:
             msgs = plat.messages(persona, fan_uuid, 20)
@@ -25027,7 +25060,7 @@ def _fv_open_spawn(plat, persona):
     threading.Thread(target=run, daemon=True).start()
 
 
-def _fv_open_maybe(plat, persona):
+def _fv_open_maybe(plat, persona, deadline=None):
     """Run a queued "message these fans" request, else the hourly automatic sweep.
 
     Both run here, on the loop's host, because the console is served by Vercel
@@ -25037,27 +25070,35 @@ def _fv_open_maybe(plat, persona):
         req = json.loads(_get_setting(req_key) or '{}')
     except Exception:
         req = {}
+    # Inline, the tick's lease already keeps one instance on her; the claim
+    # would instead stop the next tick, on another instance, finishing the batch.
+    inline = deadline is not None
     if req.get('at'):
-        if not _claim_msg(plat, persona, '__open__', f"req{req['at']}", ttl=86400):
+        if not inline and not _claim_msg(plat, persona, '__open__', f"req{req['at']}",
+                                         ttl=86400):
             return 0
-        _set_setting(req_key, '')
-        return _fv_open_round(plat, persona, req.get('kinds') or FV_OPEN_KINDS,
-                              int(req.get('limit') or FV_OPEN_DAILY))
+        n, done = _fv_open_round(plat, persona, req.get('kinds') or FV_OPEN_KINDS,
+                                 int(req.get('limit') or FV_OPEN_DAILY), deadline)
+        if done:
+            _set_setting(req_key, '')
+        return n
     opts = _fanvue_auto_settings(persona, plat=plat)
     if not (opts.get('enabled') and opts.get('auto_open')):
         return 0
     slot = str(int(time.time() // FV_OPEN_EVERY))
     slot_key = plat.k('open_slot', persona)
     # The claim only stops a second instance; this one would reclaim its own.
-    if _get_setting(slot_key) == slot or \
-            not _claim_msg(plat, persona, '__open__', 'auto' + slot, ttl=FV_OPEN_EVERY * 2):
+    if _get_setting(slot_key) == slot or (not inline and not _claim_msg(
+            plat, persona, '__open__', 'auto' + slot, ttl=FV_OPEN_EVERY * 2)):
         return 0
-    _set_setting(slot_key, slot)
-    return _fv_open_round(plat, persona, opts.get('open_kinds') or FV_OPEN_KINDS,
-                          FV_OPEN_DAILY)
+    n, done = _fv_open_round(plat, persona, opts.get('open_kinds') or FV_OPEN_KINDS,
+                             FV_OPEN_DAILY, deadline)
+    if done:
+        _set_setting(slot_key, slot)
+    return n
 
 
-def _fv_open_round(plat, persona, kinds, limit):
+def _fv_open_round(plat, persona, kinds, limit, deadline=None):
     """Start a conversation with fans who are not talking to her: chats quiet for
     days, fans offline for a day, and subscribers or followers she has never
     chatted with. One opener per quiet spell; his reply resets it."""
@@ -25071,7 +25112,7 @@ def _fv_open_round(plat, persona, kinds, limit):
     sent_today = int(used.get('n') or 0) if used.get('day') == day else 0
     budget = min(max(0, int(limit)), FV_OPEN_DAILY - sent_today)
     if budget <= 0:
-        return 0
+        return 0, True
     opts = _fanvue_auto_settings(persona, plat=plat)
     exclude_creators = opts.get('exclude_creators', True)
     grace = max(0, min(int(opts.get('online_grace', 5)), 120))
@@ -25122,10 +25163,16 @@ def _fv_open_round(plat, persona, kinds, limit):
                               _fv_first(u, 'nickname', 'displayName', default='')))
 
     hcfg = _fv_humanize_cfg(persona, plat=plat)
+    if deadline is not None:
+        hcfg = {**hcfg, 'humanize': False}
     lim = persona_length_limits(persona)
     counts = dict.fromkeys(FV_OPEN_KINDS, 0)
+    done = True
     for kind, fan, handle, extra in picks:
         if sum(counts.values()) >= budget:
+            break
+        if deadline is not None and time.time() > deadline:
+            done = False
             break
         who = handle or fan[:8]
         fan_key = plat.fan_key(fan)
@@ -25177,7 +25224,7 @@ def _fv_open_round(plat, persona, kinds, limit):
     if total:
         _fv_trace(persona, 'opener', 'Opened %d chat(s): %s' % (total, ', '.join(
             f'{n} {k}' for k, n in counts.items() if n)))
-    return total
+    return total, done
 
 
 @app.route('/api/fanvue/open-chats', methods=['POST'])
@@ -25425,9 +25472,14 @@ def _plat_trace_api(plat):
         problems.append(
             ('No reply round has run for %d min' % ((time.time() - last_at) // 60)
              if last_at else 'No reply round has ever run')
-            + ' — the bot host (Cloud Run) is not running her %s loop, so nobody '
-            'is answered. Check that the service is up and %s is not 0.'
-            % (plat.label, plat.worker_env))
+            + (' — the bot host is not running her %s loop, so nobody is answered. '
+               'Check that the service is up and %s is not 0.'
+               % (plat.label, plat.worker_env) if _worker_enabled(plat.worker_env) else
+               ' — nothing is calling the minute tick, so nobody is answered. At '
+               'cron-job.org, call https://velvetfunneler.com/api/fanvue/tick every '
+               'minute with the header "Authorization: Bearer <CRON_SECRET>"'
+               + ('.' if (os.getenv('CRON_SECRET') or '').strip() else
+                  ' — and set CRON_SECRET on Vercel first, it is not set.')))
     elif plat.worker_env and not _plat_last_round(plat, persona).get('chats'):
         problems.append('Her last round found no chats — %s returned an empty chat '
                         'list. Reconnect the account.' % plat.label)
@@ -25532,13 +25584,13 @@ def _plat_auto_run_api(plat):
     if not plat.connected(persona):
         return jsonify({'ok': False,
                         'error': f'{plat.label} not connected for this persona.'}), 400
-    if plat.worker_env and not _worker_enabled(plat.worker_env):
-        last = _plat_last_round(plat, persona)
-        return jsonify({'ok': True, 'deferred': True, 'actions': last,
-                        'ago': int(time.time() - last['at']) if last.get('at') else None,
-                        'log': []})
+    inline = plat.worker_env and not _worker_enabled(plat.worker_env)
+    if inline and not _fv_tick_lease(plat, persona):
+        return jsonify({'ok': True, 'actions': _plat_last_round(plat, persona),
+                        'log': ['a round is already running for her']})
     try:
-        res = _plat_round_now(plat, persona, block=True)
+        res = _plat_round_now(plat, persona, block=True,
+                              deadline=time.time() + FV_TICK_BUDGET if inline else None)
         actions, log = res if res else ({}, [])
         return jsonify({'ok': True, 'actions': actions, 'log': log})
     except url_error.HTTPError as e:
@@ -25546,6 +25598,45 @@ def _plat_auto_run_api(plat):
                         f'{e.read()[:200].decode(errors="ignore")}'}), 400
     except Exception as e:
         return jsonify({'ok': False, 'error': str(e)[:200]}), 400
+    finally:
+        if inline:
+            _fv_tick_lease(plat, persona, release=True)
+
+
+FV_TICK_BUDGET = 45   # seconds of work per tick; Vercel cuts a request at 60
+
+
+def _fv_tick_lease(plat, persona, release=False):
+    """One instance at a time on her inline round. The per-process round lock
+    cannot see another lambda, and two would answer the same fan twice."""
+    if release:
+        _set_setting(_claim_key(plat, persona, '__tick__'), '')
+        return True
+    return _claim_msg(plat, persona, '__tick__', 'lease', ttl=FV_TICK_BUDGET + 10)
+
+
+@app.route('/api/fanvue/tick', methods=['GET', 'POST'])
+def api_fanvue_tick():
+    """Every enabled persona's reply round, driven by a minute pinger: the
+    host the site runs on has no always-on process to run the loop."""
+    if not _cron_authorised():
+        return ('', 404)
+    plat = PLAT_FANVUE
+    deadline = time.time() + FV_TICK_BUDGET
+    out = {}
+    for persona in _fanvue_enabled_list(plat=plat):
+        if time.time() > deadline:
+            break
+        if not plat.connected(persona) or not _fv_tick_lease(plat, persona):
+            continue
+        try:
+            res = _plat_round_now(plat, persona, deadline=deadline)
+            out[persona] = (res or ({},))[0].get('replies', 0)
+        except Exception:
+            logger.exception('Fanvue tick failed for %s', persona)
+        finally:
+            _fv_tick_lease(plat, persona, release=True)
+    return jsonify({'ok': True, 'replies': out})
 
 
 def _fv_spec_paths(word):
@@ -25679,6 +25770,10 @@ def _fanvue_round_now(persona, block=False):
 _INSTANCE_ID = os.urandom(16).hex()
 
 
+def _claim_key(plat, persona, fan_uuid):
+    return 'fvclaim:' + hashlib.sha1(f'{plat.slug}:{persona}:{fan_uuid}'.encode()).hexdigest()
+
+
 def _claim_msg(plat, persona, fan_uuid, msg_id, ttl=600):
     """Claim one fan message for this instance. The round lock is per process,
     and a second Cloud Run instance (or a deploy overlap) otherwise answers the
@@ -25687,7 +25782,7 @@ def _claim_msg(plat, persona, fan_uuid, msg_id, ttl=600):
     a holder that died never strands the message."""
     from db import AppSetting
     from sqlalchemy.exc import IntegrityError
-    key = 'fvclaim:' + hashlib.sha1(f'{plat.slug}:{persona}:{fan_uuid}'.encode()).hexdigest()
+    key = _claim_key(plat, persona, fan_uuid)
     now = int(time.time())
     mine = f'{msg_id}|{now}|{_INSTANCE_ID}'
     s = _db_session()
@@ -25736,7 +25831,7 @@ def _skip_flush(plat, persona, dropped):
     _plat_trace(plat, persona, 'skipped', 'skipped this round: ' + '; '.join(parts))
 
 
-def _plat_round_now(plat, persona, block=False):
+def _plat_round_now(plat, persona, block=False, deadline=None):
     """Run one round for a persona, never letting that persona overlap itself.
     Returns (actions, log) or None when a round was already in flight."""
     lock = _fanvue_persona_lock(_fanvue_round_locks, f'{plat.slug}:{persona}')
@@ -25744,7 +25839,7 @@ def _plat_round_now(plat, persona, block=False):
         return None
     try:
         with app.app_context():
-            return _plat_auto_round(plat, persona)
+            return _plat_auto_round(plat, persona, deadline=deadline)
     finally:
         lock.release()
 
