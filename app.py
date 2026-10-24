@@ -21199,8 +21199,8 @@ def fanvue_webhook():
         logger.info('Fanvue webhook %s for an unknown creator %s', kind, creator)
         return jsonify({'ok': True, 'ignored': 'unknown creator'})
 
-    _fv_trace(persona, 'debug', f'webhook {kind}: '
-                                    f'{json.dumps(ev.get("raw") or ev)[:300]}')
+    logger.info('Fanvue webhook %s for %s: %s', kind, persona,
+                json.dumps(ev.get('raw') or ev)[:300])
     if kind == 'creator.payment.succeeded' and data.get('source') != 'tip':
         amount = _fv_first(data, 'amount', 'gross', 'total', default=None)
         _fv_settle_drop(persona, fan,
@@ -25454,6 +25454,7 @@ def _plat_trace_api(plat):
         rows = []
     if not isinstance(rows, list):
         rows = []
+    rows = [r for r in rows if isinstance(r, dict) and r.get('stage') != 'debug']
     opts = _fanvue_auto_settings(persona, plat=plat)
     connected = plat.connected(persona)
     lock = _fanvue_round_locks.get(f'{plat.slug}:{persona}')
