@@ -423,8 +423,8 @@ Stay completely in character. Never mention being an AI.
   to `kept/` and sets `approved`. The three-day purge is a **bucket lifecycle
   rule**, installed at boot by `_gen_worker`, never a loop: a worker that is
   not running must not be why a generation outlives its window.
-- **Fan wishes are the one exception to review** (`/api/fanvue/wish`, Fanvue only,
-  super admin only while testing, off per persona by default). A Fanvue message that
+- **Fan wishes are the one exception to review** (`/api/fanvue/wish`, every plan with the chatbot,
+  off per persona by default; the creator adds rules and a wish menu, and close vault photos go first). A Fanvue message that
   passes `wishes.looks_like_wish` gets one classifier call; a wish is generated from
   her character on Seedream 4.5 and sent as a locked PPV (`set_id='wish'`) without
   review. The media is kept and approved in her vault (reusable like any kept photo)

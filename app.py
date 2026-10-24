@@ -2587,7 +2587,8 @@ _PAID_API = ('/api/telegram', '/api/tguser', '/api/x', '/api/xlog', '/api/thread
 # The chatbot side of the product, for plans without the `chatbot` capability
 # (Free is content creation only). These are not in _PAID_* because Demo, which
 # has the capability, must keep reaching them as it always has.
-_CHATBOT_PREFIXES = ('/planner', '/api/growth', '/discord',
+_CHATBOT_PREFIXES = ('/planner', '/api/growth', '/discord', '/wishes',
+                     '/api/wishes/status', '/api/wishes/test-link', '/api/fanvue/wish',
                      '/instagram', '/tiktok', '/reddit', '/api/discord',
                      '/api/instagram', '/api/tiktok', '/api/reddit')
 _PERSONA_SUB_RE = re.compile(r'^/api/personas/([a-z0-9_-]+)(?:/|$)')
@@ -20728,15 +20729,39 @@ def api_fanvue_media_lookup():
     return jsonify({'media': out})
 
 
+def _wish_clean_menu(raw):
+    out = []
+    for m in (raw if isinstance(raw, list) else [])[:20]:
+        if not isinstance(m, dict):
+            continue
+        name = str(m.get('name') or '').strip()[:40]
+        prompt = str(m.get('prompt') or '').strip()[:400]
+        if name and prompt:
+            out.append({'name': name, 'prompt': prompt,
+                        'price': max(0, min(50000, int(m.get('price') or 0))),
+                        'explicit': bool(m.get('explicit'))})
+    return out
+
+
+def _wish_guard(persona):
+    """Signed in and her own persona; an admin may open any."""
+    if not _current_user():
+        return jsonify({'ok': False, 'error': 'Sign in first'}), 401
+    if not re.match(r'^[a-z0-9_-]+$', persona or ''):
+        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    mine = owned_slugs()
+    if mine is not None and persona not in mine:
+        return jsonify({'ok': False, 'error': 'Not found'}), 404
+    return None
+
+
 @app.route('/api/fanvue/wish', methods=['GET', 'POST'])
 def api_fanvue_wish():
-    blocked = _require_super_admin()
-    if blocked:
-        return blocked
     d = request.args if request.method == 'GET' else (request.get_json(silent=True) or {})
     persona = (d.get('persona') or '').strip()
-    if not re.match(r'^[a-z0-9_-]+$', persona):
-        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
+    blocked = _wish_guard(persona)
+    if blocked:
+        return blocked
     if request.method == 'POST':
         old = _fv_wish_cfg(persona)
         try:
@@ -20747,7 +20772,13 @@ def api_fanvue_wish():
                    # The Fanvue page saves without these; keep what is there.
                    'provider': 'exclu' if d.get('provider', old.get('provider')) == 'exclu'
                                else 'fanvue',
-                   'hook_url': str(d.get('hook_url', old.get('hook_url')) or '').strip()[:500]}
+                   'hook_url': str(d.get('hook_url', old.get('hook_url')) or '').strip()[:500],
+                   'rules': str(d.get('rules', old.get('rules')) or '').strip()[:500],
+                   'menu': _wish_clean_menu(d.get('menu', old.get('menu')))}
+            term = wishes.blocked(cfg['rules'], *(m['name'] + ' ' + m['prompt']
+                                                  for m in cfg['menu']))
+            if term:
+                return jsonify({'ok': False, 'error': f'"{term}" is not allowed in a wish'}), 400
             if cfg['hook_url'] and not cfg['hook_url'].startswith('https://'):
                 return jsonify({'ok': False, 'error': 'The webhook URL must start with https://'}), 400
         except (TypeError, ValueError):
@@ -20758,19 +20789,17 @@ def api_fanvue_wish():
 
 @app.route('/wishes')
 def wishes_page():
-    if _require_super_admin():
-        return redirect('/dashboard')
+    if not _current_user():
+        return redirect('/login')
     return send_from_directory(BASE_DIR, 'wishes.html')
 
 
 @app.route('/api/wishes/status')
 def api_wishes_status():
-    blocked = _require_super_admin()
+    persona = (request.args.get('persona') or '').strip()
+    blocked = _wish_guard(persona)
     if blocked:
         return blocked
-    persona = (request.args.get('persona') or '').strip()
-    if not re.match(r'^[a-z0-9_-]+$', persona):
-        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
     _set_setting('wish_origin', _callback_origin())
     cfg = _fv_wish_cfg(persona)
     on, exclu = bool(cfg.get('enabled')), _wish_provider(cfg) == 'exclu'
@@ -20801,12 +20830,10 @@ def api_wishes_status():
 def api_wishes_test_link():
     """Make one media link from a vault item and delete it straight away, so a
     missing permission or a switched-off feature shows here, not on a fan."""
-    blocked = _require_super_admin()
+    persona = ((request.get_json(silent=True) or {}).get('persona') or '').strip()
+    blocked = _wish_guard(persona)
     if blocked:
         return blocked
-    persona = ((request.get_json(silent=True) or {}).get('persona') or '').strip()
-    if not re.match(r'^[a-z0-9_-]+$', persona):
-        return jsonify({'ok': False, 'error': 'Invalid persona'}), 400
     if _wish_provider(_fv_wish_cfg(persona)) == 'exclu':
         _set_setting('wish_origin', _callback_origin())
         st = next((x for x in reversed(_wish_sets(persona)) if x.get('media_ids')), {})
@@ -23582,8 +23609,8 @@ def _fv_wish_cfg(persona):
 
 
 def _wish_owner(persona):
-    """The persona's owner as a user dict, only while that is the super admin:
-    wishes auto-send unreviewed media, so they stay a super-admin test."""
+    """The persona's owner as a user dict, while her plan includes the chatbot.
+    Wishes spend that owner's tokens; only an admin is not charged."""
     uid = _persona_owner(persona)
     if not uid:
         return None
@@ -23591,13 +23618,22 @@ def _wish_owner(persona):
     s = _db_session()
     try:
         u = s.get(User, uid)
-        if u is None or u.role != 'super_admin':
+        if u is None:
             return None
-        return {'id': u.id, 'email': u.email, 'role': u.role, 'tier': u.tier,
-                'status': u.status, 'workspace_id': u.id,
-                'is_admin': True, 'is_super_admin': True}
+        role = u.role or 'user'
+        owner = {'id': u.id, 'email': u.email, 'role': role, 'tier': u.tier,
+                 'status': u.status, 'workspace_id': u.id, 'workspace_owner_id': u.id,
+                 'seat_role': 'owner', 'legacy_plan': u.legacy_plan or '',
+                 'onlyfans_grandfathered': bool(u.onlyfans_grandfathered),
+                 'grandfathered_until': (u.grandfathered_until.isoformat()
+                                         if u.grandfathered_until else None),
+                 'is_admin': role in ('admin', 'super_admin'),
+                 'is_super_admin': role == 'super_admin'}
     finally:
         s.close()
+    if not _user_is_active(owner) or not user_capabilities(owner).get('chatbot'):
+        return None
+    return owner
 
 
 def _fv_wish_mark_paid(persona, fan_uuid):
@@ -23652,7 +23688,7 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
         return None
     owner = _wish_owner(persona)
     if not owner:
-        _fv_trace(persona, 'ppv', f'{who}: wish ignored — persona not owned by the super admin',
+        _fv_trace(persona, 'ppv', f'{who}: wish ignored — her plan does not include wishes',
                   fan=fan_key)
         return None
     if time.time() - _fv_wish_busy.get(f'{persona}:{fan_uuid}', 0) < 300 \
@@ -23662,7 +23698,7 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
         _fv_trace(persona, 'guardrail', f'{who}: last wish not bought — no new one',
                   fan=fan_key)
         return None
-    wish = wishes.parse(_persona_text(
+    wish = _wish_from_menu(cfg, text) or wishes.parse(_persona_text(
         persona, wishes.CLASSIFY_INSTRUCTION.format(text=text[:500]),
         max_tokens=250, temperature=0.2))
     if not wish:
@@ -23676,7 +23712,7 @@ def _fv_wish_check(persona, fan_uuid, fan_key, who, text):
         _fv_trace(persona, 'guardrail', f'{who}: explicit wish, persona is SFW', fan=fan_key)
         return None
     wish['owner'] = owner
-    wish['price'] = wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)
+    wish['price'] = wish.get('price') or wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)
     _fv_trace(persona, 'ppv', f'{who}: wish detected: {wish["scene"]} — generating '
                               f'({"explicit" if wish["explicit"] else "safe"}, '
                               f'${wish["price"] / 100:g})', fan=fan_key)
@@ -23705,6 +23741,53 @@ def _gen_wait(job_id, timeout=150):
     return None
 
 
+def _wish_from_menu(cfg, text):
+    """A menu wish the fan named, or None. Every word of its name has to be in
+    the message, so the classifier call is skipped only on a clear ask."""
+    said = set(re.findall(r'[a-z]+', (text or '').lower()))
+    for m in cfg.get('menu') or []:
+        need = {w for w in re.findall(r'[a-z]+', m['name'].lower()) if len(w) > 2}
+        if need and need <= said:
+            return {'scene': m['prompt'], 'outfit': '', 'caption': '',
+                    'explicit': bool(m.get('explicit')), 'price': int(m.get('price') or 0),
+                    'menu': m['name']}
+    return None
+
+
+def _wish_vault_set(persona, wish, fan):
+    """Photos already in her vault close to this wish, sent instead of making
+    new ones. Matched on their tags, outfit, location and light, so it is free;
+    loose on purpose: one shared word is enough, the closest go first."""
+    from db import PersonaMedia
+    words = _wish_words(wish)
+    if not words:
+        return None
+    sent = {m for st in _wish_sets(persona) if fan in st.get('fans', [])
+            for m in st.get('media_ids') or []}
+    want = ('nsfw',) if wish['explicit'] else ('sfw', '')
+    now = datetime.now(timezone.utc).replace(tzinfo=None)
+    s = _db_session()
+    try:
+        rows = s.query(PersonaMedia.id, PersonaMedia.tags, PersonaMedia.outfit,
+                       PersonaMedia.location, PersonaMedia.lighting,
+                       PersonaMedia.rating, PersonaMedia.expires_at).filter(
+            PersonaMedia.slug == persona, PersonaMedia.kind == 'image',
+            PersonaMedia.approved.is_(True), PersonaMedia.no_dms.isnot(True)).all()
+    finally:
+        s.close()
+    scored = []
+    for mid, *text, rating, expires in rows:
+        if mid in sent or (rating or '') not in want or (expires and expires < now):
+            continue
+        hit = len(words & set(re.findall(r'[a-z]+', ' '.join(t or '' for t in text).lower())))
+        if hit:
+            scored.append((hit, mid))
+    scored.sort(reverse=True)
+    if len(scored) < 2:
+        return None
+    return {'media_ids': [m for _, m in scored[:3]], 'uuids': [], 'vault': True}
+
+
 def _wish_start_photo(persona, wish, trace, first=None):
     """Queue one photo of the set; its job id, or None without the tokens.
     Every photo after the first leads with it as the reference, so outfit,
@@ -23714,12 +23797,15 @@ def _wish_start_photo(persona, wish, trace, first=None):
             'rating': 'explicit' if wish['explicit'] else 'sfw',
             'shot': 'nude' if wish['explicit'] else 'full',
             'prompt': wish['scene'], 'clothing': wish['outfit']}
+    rules = (_fv_wish_cfg(persona).get('rules') or '').strip()
+    if rules:
+        body['prompt'] = f"{body['prompt']}. Always: {rules}"
     if first:
         body.update(reference_media=first,
                     prompt=f"{wish['scene']}. Same woman, same outfit, same "
                            'room, background and lighting as the first '
                            'reference photo; only the pose and camera '
-                           'angle change.')
+                           'angle change.' + (f' Always: {rules}' if rules else ''))
     spec = _gen_spec(persona, body, owner)
     char = _character_snapshot(persona)
     if char:
@@ -23855,8 +23941,13 @@ def _wish_set(persona, wish, fan, trace, fanvue_scope=False):
 
 def _wish_reused_set(persona, wish, fan, trace, fanvue_scope=False):
     st = _wish_reuse(persona, wish, fan)
-    if st:
+    vault = None if st else _wish_vault_set(persona, wish, fan)
+    if vault:
+        st = vault
+        trace('ppv', f'wish sent from her vault ({len(st["media_ids"])} photos)')
+    elif st:
         trace('ppv', f'wish reuses an earlier set ({len(st.get("media_ids") or st.get("uuids"))} photos)')
+    if st:
         st = dict(st)
         if fanvue_scope is not False and not st.get('uuids'):
             paths = [(m, _wish_media_path(m)) for m in st.get('media_ids', [])]
@@ -23865,7 +23956,8 @@ def _wish_reused_set(persona, wish, fan, trace, fanvue_scope=False):
         if fanvue_scope is False and not st.get('media_ids'):
             st = None
     if st:
-        _wish_remember(persona, wish, st, fan, reused=True)
+        # A vault pick is a new set: remembered so this fan never gets it twice.
+        _wish_remember(persona, wish, st, fan, reused=not vault)
     return st
 
 
@@ -24117,7 +24209,7 @@ def _wish_detect(persona, fan, who, text, trace):
     if url:
         trace('guardrail', f'{who}: last wish link not bought — no new one')
         return ('wait', url)
-    wish = wishes.parse(_persona_text(
+    wish = _wish_from_menu(cfg, text) or wishes.parse(_persona_text(
         persona, wishes.CLASSIFY_INSTRUCTION.format(text=text[:500]),
         max_tokens=250, temperature=0.2))
     if not wish:
@@ -24130,7 +24222,8 @@ def _wish_detect(persona, fan, who, text, trace):
         trace('guardrail', f'{who}: explicit wish, persona is SFW')
         return None
     wish['owner'] = owner
-    wish['price'] = min(50000, max(300, wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)))
+    wish['price'] = min(50000, max(300, wish.get('price')
+                                   or wishes.price(cfg, wish['explicit'], FV_PRICE_FLOOR)))
     trace('ppv', f'{who}: wish detected: {wish["scene"]} — making a wish link '
                  f'(${wish["price"] / 100:g})')
     _fv_wish_busy[f'{persona}:{fan}'] = time.time()

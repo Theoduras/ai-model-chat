@@ -56,6 +56,19 @@
   </div>
 
   <div class="card">
+    <div class="lbl">Rules for every wish</div>
+    <textarea id="rules" maxlength="500" rows="3" style="width:100%;" placeholder="e.g. always show her belly piercing; never show feet; soft warm light"></textarea>
+    <small style="color:var(--text-muted)">Added to the photo prompt of every wish. Save below.</small>
+  </div>
+
+  <div class="card">
+    <div class="lbl">Wish menu</div>
+    <small style="color:var(--text-muted)">Ready-made wishes. When a fan's message names one (every word of the name), she makes exactly this prompt at this price. Photos already in her vault that fit a wish are sent first.</small>
+    <div id="menu" style="display:flex;flex-direction:column;gap:8px;margin:10px 0;"></div>
+    <button class="btn-ai" type="button" onclick="addItem()">+ Add a wish</button>
+  </div>
+
+  <div class="card">
     <div class="lbl">Link provider (web chat &amp; Telegram)</div>
     <div class="row">
       <label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="radio" name="prov" value="fanvue" onchange="provUI()"> Fanvue media link</label>
@@ -117,6 +130,9 @@ async function load() {
   $('sfw').value = cfg.price_sfw ? cfg.price_sfw / 100 : '';
   $('nsfw').value = cfg.price_nsfw ? cfg.price_nsfw / 100 : '';
   $('phrase').value = cfg.test_phrase || '';
+  $('rules').value = cfg.rules || '';
+  $('menu').innerHTML = '';
+  (cfg.menu || []).forEach(addItem);
   lora = cfg.lora || '';
   const prov = cfg.provider === 'exclu' ? 'exclu' : 'fanvue';
   document.querySelectorAll('input[name=prov]').forEach(r => r.checked = r.value === prov);
@@ -136,10 +152,33 @@ function provUI() {
 }
 function copy(id) { try { navigator.clipboard.writeText($(id).textContent); } catch (e) {} }
 
+function addItem(m) {
+  m = m || {};
+  const row = document.createElement('div');
+  row.className = 'row menu-item';
+  row.innerHTML = '<input type="text" class="mi-name" maxlength="40" placeholder="Name, e.g. Shower set" style="max-width:180px;">' +
+    '<input type="text" class="mi-prompt" maxlength="400" placeholder="Prompt: what the photos show" style="flex:1;min-width:200px;">' +
+    '<label style="margin:0;">$ <input type="number" class="mi-price" min="0" step="1" placeholder="normal" style="max-width:80px;"></label>' +
+    '<label style="display:flex;gap:6px;align-items:center;margin:0;"><input type="checkbox" class="mi-x"> Explicit</label>' +
+    '<button type="button" class="btn-ai" onclick="this.parentNode.remove()">Remove</button>';
+  row.querySelector('.mi-name').value = m.name || '';
+  row.querySelector('.mi-prompt').value = m.prompt || '';
+  row.querySelector('.mi-price').value = m.price ? m.price / 100 : '';
+  row.querySelector('.mi-x').checked = !!m.explicit;
+  $('menu').appendChild(row);
+}
+function menuItems() {
+  return [...document.querySelectorAll('.menu-item')].map(r => ({
+    name: r.querySelector('.mi-name').value.trim(), prompt: r.querySelector('.mi-prompt').value.trim(),
+    price: Math.round((r.querySelector('.mi-price').value || 0) * 100), explicit: r.querySelector('.mi-x').checked
+  })).filter(m => m.name && m.prompt);
+}
+
 async function save() {
   const d = await post('/api/fanvue/wish', { persona: persona(), enabled: $('on').checked,
     price_sfw: Math.round(($('sfw').value || 0) * 100), price_nsfw: Math.round(($('nsfw').value || 0) * 100),
-    test_phrase: $('phrase').value, lora, provider: provider(), hook_url: $('hook').value.trim() });
+    test_phrase: $('phrase').value, lora, provider: provider(), hook_url: $('hook').value.trim(),
+    rules: $('rules').value, menu: menuItems() });
   $('save-msg').className = 'msg ' + (d.ok ? 'ok' : 'no');
   $('save-msg').textContent = d.ok ? 'Saved' : (d.error || 'Not saved');
   if (d.ok) load();
