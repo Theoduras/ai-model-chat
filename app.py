@@ -23754,6 +23754,92 @@ def _wish_from_menu(cfg, text):
     return None
 
 
+VAULT_TAG_BATCH = 20
+_TAG_STOP = {'same', 'woman', 'only', 'pose', 'camera', 'angle', 'change', 'first',
+             'reference', 'image', 'shows', 'showing', 'there', 'this', 'that', 'which',
+             'has', 'are', 'its', 'looking', 'appears', 'visible', 'always'}
+
+
+def _vault_words(*texts):
+    out = []
+    for w in re.findall(r'[a-z]+', ' '.join(t or '' for t in texts).lower()):
+        if len(w) > 2 and w not in _WISH_STOP and w not in _TAG_STOP and w not in out \
+                and len(','.join(out + [w])) <= 300:
+            out.append(w)
+    return ','.join(out)
+
+
+def _vault_tag_round(deadline):
+    """Tag untagged vault photos of personas with wishes on, so a wish can be
+    matched to them. A generated photo is tagged from its own prompt, free; an
+    upload is read by char-caption on RunPod, never by Google, because it may
+    be explicit. '-' marks a photo nothing could be read from."""
+    from db import AppSetting, PersonaMedia, GenerationJob
+    s = _db_session()
+    try:
+        personas = []
+        for k, v in s.query(AppSetting.key, AppSetting.value).filter(
+                AppSetting.key.like('fanvue_wish_%')).all():
+            try:
+                if json.loads(v or '{}').get('enabled'):
+                    personas.append(k[len('fanvue_wish_'):])
+            except ValueError:
+                pass
+        if not personas:
+            return 0
+        jobs = json.loads(_get_setting('vaulttag_jobs') or '{}')
+        rows = s.query(PersonaMedia.id, PersonaMedia.source, PersonaMedia.gcs_path).filter(
+            PersonaMedia.slug.in_(personas), PersonaMedia.kind == 'image',
+            PersonaMedia.approved.is_(True),
+            (PersonaMedia.tags == '') | PersonaMedia.tags.is_(None)).limit(VAULT_TAG_BATCH).all()
+        tagged = {}
+        for mid, job in list(jobs.items()):
+            if time.time() > deadline:
+                break
+            r = imagegen.read_frame(None, wait=0, job=job)
+            if not r['job']:
+                tagged[mid] = _vault_words(r['caption']) or '-'
+                jobs.pop(mid)
+        reading = True
+        for mid, source, path in rows:
+            if time.time() > deadline:
+                break
+            if mid in jobs or mid in tagged:
+                continue
+            if source == 'generated':
+                gj = s.query(GenerationJob.spec_json).filter(
+                    GenerationJob.result_media_ids.like(f'%{mid}%')).first()
+                spec = json.loads(gj[0] or '{}') if gj else {}
+                words = _vault_words(spec.get('prompt'), spec.get('clothing'),
+                                     spec.get('scene'), spec.get('shot'))
+                if words:
+                    tagged[mid] = words
+                    continue
+            if not reading:
+                continue
+            data = path and storage.get(path)
+            if not data:
+                tagged[mid] = '-'
+                continue
+            r = imagegen.read_frame(data, wait=0)
+            if r['job']:
+                jobs[mid] = r['job']
+            elif r['caption']:
+                tagged[mid] = _vault_words(r['caption']) or '-'
+            elif r['error'] in ('reading is off', 'unreachable'):
+                reading = False
+            else:
+                tagged[mid] = '-'
+        for mid, tags in tagged.items():
+            s.query(PersonaMedia).filter(PersonaMedia.id == mid).update(
+                {'tags': tags}, synchronize_session=False)
+        s.commit()
+        _set_setting('vaulttag_jobs', json.dumps(jobs))
+        return len(tagged)
+    finally:
+        s.close()
+
+
 def _wish_vault_set(persona, wish, fan):
     """Photos already in her vault close to this wish, sent instead of making
     new ones. Matched on their tags, outfit, location and light, so it is free;
@@ -25916,6 +26002,10 @@ def api_fanvue_tick():
         finally:
             _fv_tick_lease(plat, persona, release=True)
     _wish_queue_run(deadline)
+    try:
+        _vault_tag_round(deadline)
+    except Exception:
+        logger.exception('vault tagging failed')
     return jsonify({'ok': True, 'replies': out})
 
 
