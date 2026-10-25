@@ -274,7 +274,7 @@ gcloud run deploy ai-model-chat-dev-browser --image="$IMAGE" \
   --region=europe-west4 --platform=managed --allow-unauthenticated \
   --command=/bin/sh --args=/app/start.sh \
   --update-env-vars="GUNICORN_TARGET=of_browser:service()" \
-  --min-instances=1 --max-instances=1 --no-cpu-throttling \
+  --min-instances=0 --max-instances=1 \
   --session-affinity --memory=2Gi
 ```
 
@@ -299,7 +299,7 @@ gcloud run deploy ai-model-chat-dev-browser \
   --command=/bin/sh \
   --args=/app/start.sh \
   --update-env-vars="GUNICORN_TARGET=of_browser:service()" \
-  --min-instances=1 --max-instances=1 --no-cpu-throttling \
+  --min-instances=0 --max-instances=1 \
   --session-affinity --memory=2Gi
 ```
 

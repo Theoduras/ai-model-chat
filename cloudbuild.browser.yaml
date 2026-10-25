@@ -93,9 +93,8 @@ steps:
       - --command=/bin/sh
       - --args=/app/start.sh
       - --update-env-vars=GUNICORN_TARGET=of_browser:service()
-      - --min-instances=1
+      - --min-instances=0
       - --max-instances=1
-      - --no-cpu-throttling
       - --session-affinity
       # Two browsers at once is the normal case, not the exception: a sign-in
       # window is open while the account's own signer page is held, and each is
