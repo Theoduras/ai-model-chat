@@ -942,6 +942,8 @@ def test_storyboard():
                     'motion': 'she smiles', 'model': 'h3-gv', 'seconds': 5},
              'p2': {'story_id': 'abcd1234', 'seed': 77, 'story_anchor': 'still',
                     'continue_from': 'p1', 'model': 'h3-gv', 'seconds': 5},
+             'p3': {'story_id': 'abcd1234', 'seed': 5, 'story_anchor': 'scene2',
+                    'prev_scene': 'p2', 'model': 'mr-wan-2-2-spicy', 'seconds': 8},
              'other': {'story_id': 'zzzz9999', 'seed': 1}}
     rows = {k: {'kind': 'video', 'gcs_path': 'staging/' + k} for k in specs}
     rows['img'] = {'kind': 'image', 'gcs_path': 'staging/img'}
@@ -981,6 +983,18 @@ def test_storyboard():
         except IG.GenerationError:
             ok = True
         check('a storyboard runs only on its own engines', ok)
+        cut = A._gen_spec('lilith', dict(base, prev_scene='p2', reference_media='still'), None)
+        check('a new scene starts on its own photo with its own seed, hung off the scene before',
+              cut['prev_scene'] == 'p2' and cut['parent_media'] == 'p2' and not cut.get('continue_from')
+              and cut['story_anchor'] == 'still' and isinstance(cut.get('seed'), int))
+        for bad, extra in (('no photo', {'prev_scene': 'p2'}),
+                           ("another storyboard's clip", {'prev_scene': 'other', 'reference_media': 'still'})):
+            try:
+                A._gen_spec('lilith', dict(base, **extra), None)
+                ok = False
+            except IG.GenerationError:
+                ok = True
+            check(f'a new scene is refused with {bad}', ok)
         check('a bad story id is ignored', A._story_id({'story': '../x'}) == '')
         try:
             A._gen_spec('lilith', {'job': 'text', 'model': 'h3-gv', 'seconds': 5, 'rating': 'nsfw',
@@ -1010,6 +1024,9 @@ def test_storyboard():
         check('parts walk back to part one, in order',
               [p for p, _s in A._story_parts('ws', 'lilith', 'abcd1234', 'p2')]
               == ['staging/p1', 'staging/p2'])
+        check('the walk carries on across a scene cut',
+              [p for p, _s in A._story_parts('ws', 'lilith', 'abcd1234', 'p3')]
+              == ['staging/p1', 'staging/p2', 'staging/p3'])
         del rows['p1']
         check('a missing part breaks the walk',
               A._story_parts('ws', 'lilith', 'abcd1234', 'p2') is None)
@@ -1036,6 +1053,14 @@ def test_storyboard():
           f'{ref} vs {fixed}')
     check('an untinted part is left alone', IG.colour_grades([clips[0], clips[0]])[1] is None)
     check('the graded parts join', len(IG.join_clips(clips, grades)) > 0)
+    check('a new scene keeps its own colour', IG.colour_grades(clips, {1})[1] is None)
+    c = os.path.join(d, 'c.mp4')
+    subprocess.run(['ffmpeg', '-y', '-loglevel', 'error', '-f', 'lavfi', '-i',
+                    'color=c=0x204080:size=320x200:rate=24:duration=1', '-pix_fmt', 'yuv420p', c],
+                   check=True)
+    clips.append(open(c, 'rb').read())
+    check('scenes from engines of different sizes join',
+          len(IG.join_clips(clips, IG.colour_grades(clips, {2}), {2})) > 0)
 
 
 def test_story_drafts():

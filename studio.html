@@ -3911,8 +3911,8 @@ function renderGenStaging() {
 // Each step is its own job, so a finished job is the review gate. The server
 // holds what matters (seed, anchor, which clip a part carries on from); this
 // only remembers which jobs belong to the board and which were accepted.
-const STORY_MODELS = ['h3-gv', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
-const STORY_SECONDS = { 'h3-gv': [5, 10, 15], 'mr-wan-2-7-spicy': [5, 10, 15], 'mr-wan-3-0-pro': [5, 10, 15], 'mr-wan-3-0': [5, 10, 15] };
+const STORY_MODELS = ['mr-wan-2-2-spicy', 'h3-gv', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+const STORY_SECONDS = { 'mr-wan-2-2-spicy': [5, 8], 'h3-gv': [5, 10, 15], 'mr-wan-2-7-spicy': [5, 10, 15], 'mr-wan-3-0-pro': [5, 10, 15], 'mr-wan-3-0': [5, 10, 15] };
 let story = null;
 
 function storyKey() { return 'story_' + slug(); }
@@ -4162,11 +4162,12 @@ function renderStory() {
   if (!story || el('story').hidden) { renderStoryEntry(); return; }
   const sel = el('story-model');
   sel.innerHTML = (animSwap() ? [story.model] : storyModels()).map(m => `<option value="${m}"${m === story.model ? ' selected' : ''}>${esc(engineLabel(m))}</option>`).join('');
-  sel.disabled = story.parts.length > 0 || story.from === 'text' || animSwap();
+  // The engine is fixed within a scene; a new scene may pick another.
+  sel.disabled = (story.parts.length > 0 && !(story.sel === 'next' && story.cutOn)) || story.from === 'text' || animSwap();
   const upload = story.from === 'upload';
   el('story-sub').textContent = `${upload ? 'Carrying on your clip' : story.from === 'swap' ? 'From your clip' : story.from === 'text' ? 'From your text' : 'From your photo'} · ${storySeconds()}s accepted so far`;
   const tiles = animSwap() ? [] : [storyTile('still', upload ? 'Your clip' : 'Still', story.still, upload ? 'video' : 'image')];
-  story.parts.forEach((p, i) => tiles.push(storyTile(i, 'Part ' + (i + 1), p, 'video')));
+  story.parts.forEach((p, i) => tiles.push(storyTile(i, (p.cut ? 'New scene · ' : '') + 'Part ' + (i + 1), p, 'video')));
   const last = story.parts[story.parts.length - 1];
   const canExtend = storyState(story.still) === 'accepted' && (!last || storyState(last) === 'accepted');
   if (canExtend) {
@@ -4185,8 +4186,29 @@ function renderStory() {
   if (!el('story-review').contains(document.activeElement)) renderStoryReview();
 }
 
+function storyCut(i) {
+  return story.parts[i] ? story.parts[i].cut || '' : (i && story.cutOn && story.cut) || '';
+}
 function storyPrev(i) {
+  const cut = storyCut(i);
+  if (cut) return (mediaVault || []).find(v => v.id === cut) || null;
   return i === 0 ? storyMedia(story.still) : storyMedia(story.parts[i - 1]);
+}
+function storySceneField(i) {
+  if (!i || story.from === 'swap') return '';
+  const row = story.cut && (mediaVault || []).find(v => v.id === story.cut);
+  return `<div class="gen-f"><span>Next part</span>
+    <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="story-scene" ${story.cutOn ? '' : 'checked'} onchange="setStoryCut(false)"> Continue this scene from the last frame</label>
+    <label style="display:flex;gap:6px;align-items:center"><input type="radio" name="story-scene" ${story.cutOn ? 'checked' : ''} onchange="setStoryCut(true)"> Start a new scene (hard cut) from a photo</label>
+    ${story.cutOn ? `<div style="display:flex;align-items:center;gap:8px">
+      ${row ? `<img src="${row.thumb || row.url}" alt="" style="width:48px;height:48px;object-fit:cover;border-radius:6px">` : ''}
+      <button type="button" class="btn btn-ghost btn-sm" onclick="pickStoryCut()">${row ? 'Change photo' : 'Pick the photo'}</button></div>` : ''}</div>`;
+}
+function setStoryCut(on) { story.cutOn = on; saveStory(); renderStory(); renderStoryReview(); }
+function pickStoryCut() {
+  VaultPicker.open({ persona: story.persona, kind: 'image', max: 1, title: 'Photo the new scene starts on',
+    picked: story.cut ? [story.cut] : [], onUpload: syncVault,
+    onDone: ids => { syncVault(); story.cut = ids[0] || ''; saveStory(); renderStoryReview(); } });
 }
 function storyFigure(m, caption) {
   if (!m) return '';
@@ -4351,7 +4373,7 @@ function renderStoryReview() {
   }
   if (key === 'next') {
     const i = story.parts.length;
-    box.innerHTML = `<div class="story-pair">${storyFigure(storyPrev(i), i ? `Part ${i} — part ${i + 1} starts on its last frame` : 'Part 1 starts on this')}</div>
+    box.innerHTML = `${storySceneField(i)}<div class="story-pair">${storyFigure(storyPrev(i), storyCut(i) ? `The new scene starts on this` : i ? `Part ${i} — part ${i + 1} starts on its last frame` : 'Part 1 starts on this')}</div>
       ${storyFields(i === 0 && story.from === 'text' ? story.opening : '', '', story.seconds)}
       <div class="story-acts"><button type="button" class="btn btn-primary" id="story-go" onclick="makeStoryPart(${i})"></button></div>`;
     renderStoryButtons();
@@ -4456,7 +4478,7 @@ function storyPartBody(i) {
   }
   const secs = Number((el('story-secs') || {}).value) || story.seconds;
   const prompt = ((el('story-prompt') || {}).value || '').trim();
-  const body = { persona: story.persona, job: 'animate', rating: story.rating, model: story.model,
+  const body = { persona: story.persona, job: 'animate', rating: story.rating, model: (story.parts[i] || {}).model || story.model,
     seconds: secs, resolution: storyRes(), aspect: story.aspect, story: story.id, identity: 'vault', lock: false,
     motion: ((el('story-motion') || {}).value || '').trim(), video_prompt: prompt,
     her_lora: genHerLora, loras: Object.entries(storyTicks).map(([id, scale]) => ({ id, scale })) };
@@ -4465,6 +4487,10 @@ function storyPartBody(i) {
     if (story.anchor) body.reference_media = story.anchor;
   }
   else if (i === 0) body.reference_media = storyMedia(story.still).id;
+  else if (storyCut(i)) {
+    body.prev_scene = storyMedia(story.parts[i - 1]).id;
+    body.reference_media = storyCut(i);
+  }
   else body.continue_from = storyMedia(story.parts[i - 1]).id;
   return body;
 }
@@ -4476,9 +4502,11 @@ async function makeStoryPart(i) {
   try {
     const body = storyPartBody(i);
     if (!animSwap() && !body.motion && !body.video_prompt) throw new Error('Say what she does in this part');
+    if (i && story.cutOn && !story.parts[i] && !story.cut) throw new Error('Pick the photo the new scene starts on');
     const d = await storyPost('/api/generate/job', body);
     story.parts[i] = { job: d.job, motion: body.motion, prompt: body.video_prompt, seconds: body.seconds,
-      loras: Object.assign({}, storyTicks) };
+      loras: Object.assign({}, storyTicks), model: body.model, cut: body.prev_scene ? body.reference_media : '' };
+    if (body.prev_scene) { story.cutOn = false; story.cut = ''; }
     story.parts = story.parts.slice(0, i + 1);
     story.seconds = body.seconds;
     story.sel = i;

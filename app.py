@@ -36101,6 +36101,17 @@ def _gen_spec(slug, body, user):
                 'Pick at least one scene or outfit photo to place her in.')
         spec['scene_media'] = kept
         _gen_identity_source(slug, body, spec)
+    elif job == 'animate' and spec.get('story_id') and body.get('prev_scene'):
+        # A new scene is a hard cut onto a photo of its own, with its own seed;
+        # it hangs off the scene before only so the stitch walks on through it.
+        prev_id = str(body['prev_scene']).strip()
+        if (not _story_spec(_workspace_id(user), slug, spec['story_id'], prev_id)
+                or (_media_row(slug, prev_id) or {}).get('kind') != 'video'):
+            raise imagegen.GenerationError(
+                'That part is no longer in this storyboard. Open it again.')
+        if not spec['reference_media']:
+            raise imagegen.GenerationError('Pick an approved photo to start the new scene on.')
+        spec.update({'prev_scene': prev_id, 'parent_media': prev_id})
     elif job == 'animate' and spec.get('story_id') and body.get('continue_from'):
         parent_id = str(body['continue_from']).strip()
         before = _story_spec(_workspace_id(user), slug, spec['story_id'], parent_id)
@@ -39665,13 +39676,13 @@ def _story_parts(workspace, slug, story, last):
     """[(path, spec)] from part 1 to `last`, walked back through each part's
     parent; None when a part on the way is gone or not this storyboard's."""
     parts, mid = [], last
-    while mid and len(parts) < 64:
+    while mid and len(parts) < 500:
         spec = _story_spec(workspace, slug, story, mid)
         row = _media_row(slug, mid)
         if not spec or not row or row['kind'] != 'video' or not row['gcs_path']:
             return None
         parts.append((row['gcs_path'], spec))
-        mid = spec.get('continue_from') or ''
+        mid = spec.get('continue_from') or spec.get('prev_scene') or ''
     if not parts or mid:
         return None
     return parts[::-1]
@@ -39739,7 +39750,8 @@ def api_generate_stitch():
         return jsonify({'ok': False, 'error': 'Extend it at least once first.'}), 400
     try:
         clips = ([storage.get(upload)] if upload else []) + [storage.get(p) for p, _spec in parts]
-        joined = imagegen.join_clips(clips, imagegen.colour_grades(clips))
+        cuts = {i + bool(upload) for i, (_p, sp) in enumerate(parts) if sp.get('prev_scene')}
+        joined = imagegen.join_clips(clips, imagegen.colour_grades(clips, cuts), cuts)
     except Exception:
         logger.exception('stitch failed story=%s', story)
         joined = b''

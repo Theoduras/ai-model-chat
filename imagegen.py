@@ -407,7 +407,7 @@ PRESERVE_CLAUSE = (
 
 # The engines a storyboard runs on: both take a start frame and a seed, and
 # H3 also takes her still as an identity image.
-STORY_MODELS = ('h3-gv', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0')
+STORY_MODELS = ('mr-wan-2-2-spicy', 'h3-gv', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0')
 
 # A storyboard part carries on from the frame the last one ended on. Every
 # part is a fresh generation, so without this it re-imagines the room.
@@ -2052,13 +2052,17 @@ def _frame_stats(jpeg, grade=None):
     return list(zip(st.mean, st.stddev))
 
 
-def colour_grades(videos):
+def colour_grades(videos, cuts=()):
     """A per-channel (gain, offset) for each part that pulls its opening frame
     onto the graded closing frame of the part before, so a long clip built
     from parts does not shift colour at every seam. Part 1 is the reference;
-    a part whose frames cannot be read is left as it came."""
+    a part whose frames cannot be read is left as it came. A part in `cuts`
+    opens a new scene, whose own light is the point, so it is left alone."""
     grades = [None]
-    for prev, cur in zip(videos, videos[1:]):
+    for i, (prev, cur) in enumerate(zip(videos, videos[1:]), 1):
+        if i in cuts:
+            grades.append(None)
+            continue
         try:
             ref = _frame_stats(last_frame(prev), grades[-1])
             src = _frame_stats(first_frame(cur))
@@ -2082,14 +2086,27 @@ def grade_filter(grade):
     return 'lutrgb=' + ':'.join(f'{c}=val*{g:.4f}{o:+.2f}' for c, (g, o) in zip('rgb', grade)) + ','
 
 
-def join_clips(videos, grades=None):
+def join_clips(videos, grades=None, cuts=()):
     """Parts back to back as one clip. Each later part starts on the frame
-    the one before ended on, so that frame is dropped once to avoid a stutter.
+    the one before ended on, so that frame is dropped once to avoid a stutter;
+    a part in `cuts` opens a new scene on a frame of its own and keeps it.
     `grades`, from colour_grades, are applied part by part in the same pass.
     b'' when the join fails."""
     if not HAS_FFMPEG or not videos:
         return b''
     grades = list(grades or []) + [None] * len(videos)
+    # Scenes may come from different engines, and concat needs one frame size:
+    # every part is fitted onto part one's.
+    fit = 'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1'
+    try:
+        import io
+        from PIL import Image
+        w, h = Image.open(io.BytesIO(first_frame(videos[0]))).size
+        w, h = w // 2 * 2, h // 2 * 2
+        fit = (f'scale={w}:{h}:force_original_aspect_ratio=decrease,'
+               f'pad={w}:{h}:(ow-iw)/2:(oh-ih)/2,setsar=1')
+    except Exception:
+        pass
     with tempfile.TemporaryDirectory(dir='/tmp') as d:
         cmd = [FFMPEG, '-y', '-loglevel', 'error']
         for i, v in enumerate(videos):
@@ -2098,14 +2115,14 @@ def join_clips(videos, grades=None):
                 f.write(v)
             cmd += ['-i', p]
         n = len(videos)
-        chains = [f'[{i}:v]' + ('trim=start_frame=1,setpts=PTS-STARTPTS,' if i else '')
-                  + grade_filter(grades[i])
-                  + f'scale=trunc(iw/2)*2:trunc(ih/2)*2,setsar=1[v{i}]'
+        seam = [bool(i) and i not in cuts for i in range(n)]
+        chains = [f'[{i}:v]' + ('trim=start_frame=1,setpts=PTS-STARTPTS,' if seam[i] else '')
+                  + grade_filter(grades[i]) + f'{fit}[v{i}]'
                   for i in range(n)]
         # Parts with sound (H3) keep it, trimmed by the same dropped frame;
         # silent parts have no audio stream, so that graph fails and the
         # video-only one runs.
-        sound = [f'[{i}:a]' + (f'atrim=start={1 / 24:.4f},asetpts=PTS-STARTPTS,' if i else '')
+        sound = [f'[{i}:a]' + (f'atrim=start={1 / 24:.4f},asetpts=PTS-STARTPTS,' if seam[i] else '')
                  + f'aresample=48000[a{i}]' for i in range(n)]
         tries = (
             (';'.join(chains + sound) + ';' + ''.join(f'[v{i}][a{i}]' for i in range(n))
