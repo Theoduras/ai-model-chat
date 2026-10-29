@@ -3911,8 +3911,8 @@ function renderGenStaging() {
 // Each step is its own job, so a finished job is the review gate. The server
 // holds what matters (seed, anchor, which clip a part carries on from); this
 // only remembers which jobs belong to the board and which were accepted.
-const STORY_MODELS = ['h3-gv', 'mr-wan-2-2-spicy', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
-const STORY_SECONDS = { 'mr-wan-2-2-spicy': [5, 8], 'h3-gv': [5, 10, 15], 'mr-wan-2-7-spicy': [5, 10, 15], 'mr-wan-3-0-pro': [5, 10, 15], 'mr-wan-3-0': [5, 10, 15] };
+const STORY_MODELS = ['minimax-h3', 'h3-gv', 'mr-wan-2-2-spicy', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0'];
+const STORY_SECONDS = { 'minimax-h3': [5, 10, 15], 'mr-wan-2-2-spicy': [5, 8], 'h3-gv': [5, 10, 15], 'mr-wan-2-7-spicy': [5, 10, 15], 'mr-wan-3-0-pro': [5, 10, 15], 'mr-wan-3-0': [5, 10, 15] };
 let story = null;
 
 function storyKey() { return 'story_' + slug(); }

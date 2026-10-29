@@ -373,7 +373,9 @@ VIDEO_MODEL_RATINGS = {
     # Mainstream moderated providers, never probed explicit.
     'seedance-2-0': ('sfw',),
     'seedance-2-0-fast': ('sfw',),
-    'minimax-h3': ('sfw',),
+    # On trial for explicit storyboards over Runware's API: MiniMax may refuse,
+    # and a refused part is refunded like any failed job.
+    'minimax-h3': ('sfw', 'nsfw'),
     'minimax-h3-fast': ('sfw',),
     'wan-3-0': ('sfw',),
     'mr-wan-3-0-pro': ('sfw', 'nsfw'),

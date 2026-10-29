@@ -318,7 +318,7 @@ VIDEO_JOBS = {
              'label': 'Swap',
              'note': 'Her into a clip you upload. Everything else untouched.'},
     # Wan 2.7 stays as the explicit still-to-clip model until RunPod's key is set.
-    'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0')
+    'animate': {'models': ('seedance-2-0-fast', 'minimax-h3-fast', 'wan-3-0', 'minimax-h3')
                           + (tuple(m for m in RUNPOD_MODELS
                                    if m not in (CHAR_LORA_IMAGE_MODEL, CHAR_LORA_VIDEO_MODEL,
                                                 HIDDEN_VIDEO_MODEL) + ANIMATE_SWAP_MODELS)
@@ -407,7 +407,7 @@ PRESERVE_CLAUSE = (
 
 # The engines a storyboard runs on: both take a start frame and a seed, and
 # H3 also takes her still as an identity image.
-STORY_MODELS = ('h3-gv', 'mr-wan-2-2-spicy', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0')
+STORY_MODELS = ('minimax-h3', 'h3-gv', 'mr-wan-2-2-spicy', 'mr-wan-2-7-spicy', 'mr-wan-3-0-pro', 'mr-wan-3-0')
 
 # A storyboard part carries on from the frame the last one ended on. Every
 # part is a fresh generation, so without this it re-imagines the room.
