@@ -424,7 +424,7 @@
       (PAIRS[k] ? '' : `<label class="btn btn-ghost btn-sm up">Upload photo<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upPhoto(${attr(k)},this)"></label>`) +
       `<label class="btn btn-ghost btn-sm up">+ Your image<input type="file" accept="image/jpeg,image/png,image/webp" onchange="CC.upRef(${attr(k)},this)"></label>`;
   }
-  const optsOf = k => { const c = canon(k), list = cands(k).slice(-8); return c ? [c, ...list.filter(x => x.id !== c.id)] : list; };
+  const optsOf = k => { const c = canon(k), list = cands(k); return c ? [c, ...list.filter(x => x.id !== c.id)] : list; };
   function strip(k, side, skip) {
     const all = optsOf(k).filter(m => m.id !== skip);
     if (!all.length) return '';
