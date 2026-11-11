@@ -831,7 +831,9 @@ def init_gemini_client():
             auth_mode = 'service-account'
             print(f'Gemini: service account (project={PROJECT_ID})')
         elif api_key:
-            client = genai.Client(api_key=api_key)
+            # JSON mode and thinking config are beta-only; SDK 3 defaults to v1.
+            client = genai.Client(api_key=api_key,
+                                  http_options=types.HttpOptions(api_version='v1beta'))
             auth_mode = 'api-key'
             print('Gemini: API key')
         else:
@@ -37821,7 +37823,7 @@ def _char_vision_check(img, row, view_key):
     'adult' blocks approval -- a check that cannot decide must not pass."""
     result = {'age': 'uncertain', 'age_note': '', 'features': {}}
     if img.rating != 'sfw' or not client:
-        result['age_note'] = 'The automatic check is unavailable right now.'
+        result.update(age_note='The automatic check is unavailable right now.', unavailable=True)
         return result
     feats = CH.features(row.body_type)
     sheet = _char_json_sheet(row)
@@ -37852,7 +37854,7 @@ def _char_vision_check(img, row, view_key):
         parsed = json.loads(_gemini_text(resp) or '{}')
     except Exception as e:
         logger.warning('character check failed img=%s: %s', img.id, str(e)[:200])
-        result['age_note'] = 'The automatic check failed. Try again.'
+        result.update(age_note='The automatic check failed. Try again.', unavailable=True)
         return result
     age = str(parsed.get('age') or '').lower()
     result['age'] = age if age in ('adult', 'minor', 'uncertain') else 'uncertain'
@@ -39040,8 +39042,12 @@ def api_character_approve(char_id, img_id):
                 img.checks_json = json.dumps(checks)
                 logger.info('adult check reviewed: image %s by %s', img.id, checks['reviewed_by'])
             if checks.get('age') != 'adult':
-                return jsonify({'ok': False, 'error': 'The adult-appearance check did '
-                                'not pass for this photo. Regenerate it.',
+                # A check that could not run says so: telling the creator to
+                # regenerate would only spend tokens on the same outage.
+                return jsonify({'ok': False, 'error': 'The adult check could not run just now. '
+                                'Try again in a minute.' if checks.get('unavailable') else
+                                'The adult-appearance check did not pass for this photo. '
+                                'Regenerate it.',
                                 'age': checks.get('age') or 'uncertain'}), 409
         if img.view == 'face_front' and img.source != 'import':
             ticked = set(body.get('confirmed') or ())

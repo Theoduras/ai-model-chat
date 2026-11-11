@@ -7,7 +7,7 @@
 # browser, which needs an always-on host anyway), telethon (the Telegram user
 # client, same), gunicorn (Vercel serves the app itself).
 flask
-google-genai
+google-genai<3
 python-dotenv
 google-auth
 sqlalchemy
