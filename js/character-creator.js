@@ -238,7 +238,7 @@
   // ── Navigation ──────────────────────────────────────────────────────────────
   function go(s) { if (s !== S.step) S.hist.push(S.step); S.step = s; if (s === 'done' && C) loadLora(); say(''); render(); el('cc-card').scrollIntoView({block: 'start'}); }
   function back() { const s = S.hist.pop() || 'start'; if (s === 'start') { S.mode = ''; loadList(); } S.step = s; say(''); render(); }
-  const FLOW = {fast: ['basics', 'look', 'faces', 'body', 'photos'], adv: ['basics', 'look', 'body', 'adv'], own: ['own', 'photos']};
+  const FLOW = {fast: ['basics', 'look', 'faces', 'body', 'photos'], adv: ['basics', 'look', 'faces', 'body', 'adv'], own: ['own', 'photos']};
 
   function render() {
     el('cc-mode').textContent = {fast: 'Fast mode', adv: 'Advanced mode', own: 'Your own character'}[S.mode] || '';
@@ -252,7 +252,7 @@
   const NAV = {basics: ['face', 'Basics'], look: ['face', 'Her look'], faces: ['face', 'Pick her face'], own: ['face', 'Your photos'],
                body: ['body', 'Body type'], photos: ['photos', 'Required photos'], adv: ['photos', 'All photos'], done: ['ready', 'Accept & link']};
   const railSteps = () => [...(FLOW[S.mode] || []), 'done'].map(key => ({key, stage: NAV[key][0], nav: NAV[key][1]}));
-  const reqViews = () => ['face_front', ...(S.mode === 'adv' ? advViews().filter(k => (catView(k) || {}).required).flatMap(k => PAIRS[k] || [k]) : fastViews())];
+  const reqViews = () => [...new Set(['face_front', ...(S.mode === 'adv' ? advViews().filter(k => (catView(k) || {}).required).flatMap(k => PAIRS[k] || [k]) : fastViews())])];
   const reqDone = () => !!C && reqViews().every(k => canon(k));
   const RAIL_ICON = {approved: '✓', review: '●', generating: '●', outdated: '!', locked: '🔒'};
   function renderSide() {
@@ -474,9 +474,7 @@
     look: () => `<h2>Her look</h2><p>A few quick picks. Everything else gets a sensible default you can change in the original builder.</p>
       ${optRow('ethnicity', 'Ethnicity')}${optRow('apparent_age', 'Looks')}${optRow('skin_tone', 'Skin tone')}${optRow('hair_colour', 'Hair colour')}${highlightsRow()}${optRow('hair_texture', 'Hair style and length')}
       ${S.mode === 'adv' ? optRow('eye_colour', 'Eye colour') + makeupRow() : ''}
-      <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button>${S.mode === 'fast'
-        ? `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 2 faces</button>`
-        : `<button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.lookNext()">Next</button>`}</div>`,
+      <div class="nav"><button type="button" class="btn btn-ghost" onclick="CC.back()">Back</button><button type="button" class="btn btn-primary" ${lookDone() ? '' : 'disabled'} onclick="CC.genFaces()">Generate 2 faces</button></div>`,
 
     faces: () => {
       const all = RUN.face;
@@ -658,10 +656,6 @@
       say('Checking her face…', true);
       try { await approveImage(S.faces[S.face]); } catch (e) { return fail(e); }
       say('');
-      go('body');
-    },
-    async lookNext() {
-      try { await CC.ensureChar(); } catch (e) { return fail(e); }
       go('body');
     },
     async preset(k) {
