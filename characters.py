@@ -163,13 +163,16 @@ GROUP_LEVEL = {'face': 'sfw', 'body': 'sfw', 'breasts': 'moderate',
                'anus': 'explicit'}
 
 # Options that are fine alone but, stacked, describe someone who reads young.
-# Counted rather than banned, so a petite adult is still possible.
+# Counted rather than banned, so a petite adult is still possible. Only build
+# and development count: shaving is grooming, and an early-twenties look is
+# plainly adult, so neither is here. The nude views get no vision check, which
+# makes this the one guard on them.
 YOUTH_LEANING = {
     ('height', 'Under 155 cm'), ('build', 'Slim'), ('shoulders', 'Narrow'),
     ('hips', 'Narrow'), ('bust', 'Small'), ('cup', 'A'),
-    ('pubic_style', 'Shaved'), ('pubic_density', 'Sparse'),
+    ('pubic_density', 'Sparse'),
     ('face_shape', 'Round'), ('nose', 'Button'), ('perkiness', 'Perky'),
-    ('apparent_age', '18–21'), ('apparent_age', 'Early 20s'),
+    ('apparent_age', '18–21'),
 }
 YOUTH_WEIGHT = {('apparent_age', '18–21'): 2}
 # Options renamed after sheets were saved with them: the old label still

@@ -157,7 +157,13 @@ def test_validation():
     check('unknown option refused', refused({'age': 25, 'sheet': {'cup': 'AA'}}))
     check('youth term in notes refused', refused({'age': 25, 'notes': 'looks like a teen'}))
     check('youth combo blocked', refused({'age': 25, 'sheet': {
-        'height': 'Under 155 cm', 'cup': 'A', 'pubic_style': 'Shaved'}}))
+        'height': 'Under 155 cm', 'cup': 'A', 'build': 'Slim'}}))
+    clean, warn = CH.validate({'age': 23, 'nsfw_level': 'explicit', 'sheet': {
+        'apparent_age': 'Early 20s', 'cup': 'A', 'pubic_style': 'Shaved'}})
+    check('A cup and shaved in her early twenties is allowed', not warn and clean['sheet']['cup'] == 'A')
+    check('youngest look with A cup is still refused', refused({'age': 21, 'sheet': {'apparent_age': '18–21', 'cup': 'A'}}))
+    clean, warn = CH.validate({'age': 21, 'nsfw_level': 'explicit', 'sheet': {'apparent_age': '18–21', 'pubic_style': 'Shaved'}})
+    check('youngest look, shaved, warns but saves', bool(warn))
     clean, warn = CH.validate({'age': 25, 'sheet': {'height': 'Under 155 cm', 'cup': 'A'}})
     check('two leaning choices warn', bool(warn))
     clean, _ = CH.validate({'age': 25, 'sheet': {'face_shape': 'Long', 'glutes': 'Very full'}})
